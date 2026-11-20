@@ -1,0 +1,68 @@
+# CI (PLAN.md §7): GitHub-hosted arm64 runners only, on the oldest supported macOS
+# (15, the minimum — D2) and the newest hosted image. Each job runs the package tests,
+# builds the sandboxed app with ad-hoc signing ("Sign to Run Locally", no secrets), and
+# runs the app's own smoke test on that macOS.
+#
+# When GitHub announces the retirement of the macos-15 image, raise the minimum (D2)
+# rather than adding a self-hosted machine.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: macOS ${{ matrix.macos }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - macos: "15"
+            runner: macos-15
+          - macos: "26"
+            runner: macos-26
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Lint (swift-format)
+        # Only on the newest image, so formatting rules come from one swift-format version.
+        if: matrix.macos == '26'
+        run: swift format lint --strict --recursive Package.swift Sources Tests App/Filer
+
+      - name: Package tests
+        run: swift test --parallel
+
+      - name: Build app (sandboxed, ad-hoc signed)
+        run: |
+          xcodebuild -project App/Filer.xcodeproj -scheme Filer -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData \
+            CODE_SIGN_IDENTITY=- build
+
+      - name: Check entitlements
+        run: |
+          codesign -d --entitlements :- build/DerivedData/Build/Products/Debug/Filer.app \
+            > entitlements.plist
+          for key in app-sandbox files.user-selected.read-write files.bookmarks.app-scope; do
+            grep -q "com.apple.security.$key" entitlements.plist || { echo "missing $key"; exit 1; }
+          done
+
+      - name: Smoke test
+        run: |
+          build/DerivedData/Build/Products/Debug/Filer.app/Contents/MacOS/Filer --smoke-test \
+            | tee smoke.log
+          grep -q "SMOKE OK" smoke.log
