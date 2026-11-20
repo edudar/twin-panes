@@ -600,3 +600,200 @@ one undo step. The hex text column follows the rules in §4.4.
   and highlight-all. Regex is limited to files under the text-mode threshold;
   large-text viewer uses `Searcher` (plain text, no regex).
 - Replace All is one undo step, and respects the piece-count bound (§4.2).
+
+### 4.11 Commands & key bindings (D21)
+
+The registry is a **catalog**: every user action is a command with a stable ID
+(`editor.find.next`, `browser.copyToOtherPanel`, `workspace.zoom`…), a title, a
+default binding, and the AppKit action selector it sends. Bindings, the F-key bar and
+the item switcher refer to command IDs.
+
+**Routing stays AppKit's.**
+- Menu items send their selector through the **responder chain**, so the focused
+  item (or its slot, window, app delegate) handles it. Enablement uses AppKit menu
+  validation (`NSMenuItemValidation` / `NSUserInterfaceValidations`); the F-key bar
+  validates the same way.
+- Standard actions keep their standard selectors: `copy:`, `paste:`, `selectAll:`,
+  `performFindPanelAction:`, `undo:` / `redo:`. **Edit → Undo/Redo** reach the
+  focused editor's session history: the editor item answers `undoManager` with an
+  `NSUndoManager` facade over the session's `UndoStack` (shared by all views of that
+  session), so menu titles ("Undo Typing") and validation come for free.
+- Key resolution for context-dependent keys goes focused item → its slot → main
+  frame → app, so the same key (F3, Ctrl+O) can mean different things in a browser
+  and in an editor.
+
+**Getting keys before `NSMenu` does.** A menu item has one static key equivalent,
+and menu key equivalents fire before the responder chain, so context-dependent keys
+can't be plain menu shortcuts.
+- The main window intercepts key-down events (`performKeyEquivalent` /
+  `sendEvent`) and asks the registry to resolve them against the focus chain
+  *before* the main menu sees them.
+- Menu items show the binding that applies to the current focus; their key
+  equivalents are refreshed on focus change and in `menuNeedsUpdate(_:)`.
+- Keys the registry doesn't bind fall through to normal AppKit handling (text
+  editing, system shortcuts).
+- **Coexists with keyboard navigation.** Tab switches panels only when a file list
+  has focus; in text fields and editors Tab keeps its normal meaning, and Full
+  Keyboard Access (Tab/⇧Tab through controls, key-view loop) keeps working. While a
+  sheet is up, the registry intercepts nothing.
+- **Prototype this in M0**, since it shapes the registry's API. Check focus in four
+  places: a browser (placeholder list), a search field, an editor (placeholder text
+  view) and a sheet.
+
+Built in M0 with hard-coded default bindings; user-editable bindings arrive in M10.
+
+## 5. Sandbox & distribution
+
+- **Sandbox on in every build from the start**, entitlement
+  `com.apple.security.files.user-selected.read-write`. Developing sandboxed avoids
+  building features that later can't ship on the App Store.
+- **Recent files / favorites:** stored as security-scoped bookmarks.
+- **Bookmarks:** app-scoped security-scoped bookmarks need the
+  `com.apple.security.files.bookmarks.app-scope` entitlement; add it in M0.
+  - On resolve, a bookmark that reports itself **stale but still resolves** is
+    recreated immediately (while access is active) and stored again.
+  - When resolution or `startAccessing…` fails, the user is asked to grant access
+    again (open panel preset to the old location), never silently dropped.
+- **Security-scope lifetime.** `startAccessingSecurityScopedResource` /
+  `stopAccessing…` are wrapped in a reference-counted `SecurityScope` token
+  (FilerCore). Whoever needs access holds a token **until its work finishes**, not
+  until its UI goes away: an `EditorSession` for its file, a browser tab for its
+  location, a quick view or preview while it reads, a queued file operation until it
+  completes or is cancelled. Closing the tab that started a copy doesn't revoke the
+  copy's access. Bookmarks for recents and state restoration are created while access
+  is active. A file opened inside an already granted folder uses that folder's scope
+  instead of its own.
+- **Volumes disappearing.** An unmounted or unplugged volume mid-read, mid-save or
+  mid-copy must surface as an error on that session/operation (with the journal left
+  for recovery), never a crash or hang. Behaviour per volume type is part of the
+  spike.
+- **File manager:** sandboxed, it can only browse folders the user granted. Plan for a
+  one-time grant flow (e.g. home folder, external volumes) persisted as bookmarks.
+- **Sandbox spike (M0, signed build, ~3–4 days)** — covers browsing *and* the
+  editor's write path, because its result decides which save and recovery guarantees
+  Filer can make before the editor is built around them.
+  - **Browsing:** grant the home folder and an external volume, then list, preview,
+    copy into and trash in Desktop/Documents/Downloads, ~/Library, iCloud Drive, a USB
+    volume and an SMB share; record which prompts appear and what fails.
+  - **Write path:** for a *file-only* grant (open panel on one file) and a *folder*
+    grant: create a clone (`clonefile`), create a staging file next to the original
+    and in `itemReplacementDirectory`, `replaceItemAt`, in-place write, move to
+    Trash. Check metadata after replace (xattrs, tags, ACLs, creation date) and
+    hard-link behaviour.
+  - **Bookmarks:** app-scoped bookmark entitlement; resolve after relaunch; stale
+    bookmark refresh; behaviour after the file is moved or renamed.
+  - **Volumes:** boot APFS, external APFS, HFS+, exFAT, SMB; unplug/unmount
+    mid-operation.
+  - **Output: a capability matrix** by volume type × grant type (clone? staging?
+    replace? in place? Trash? bookmark survives relaunch?). It drives the save
+    strategy table (§4.3), the recovery guarantee per volume (§4.1) and the App Store
+    decision (D3).
+- **Direct-only features:** some ForkLift-style features likely can't ship sandboxed
+  (privileged/admin file ops, some system locations, certain mounting approaches,
+  the terminal). They go behind a build flag in a Direct (Developer ID, notarized)
+  flavor; the App Store flavor omits them.
+- **Signing before distribution:** sandboxed builds (and UI tests) need a signature.
+  Until distribution matters, local builds are development-signed and CI uses ad-hoc
+  "Sign to Run Locally" (no certificates or secrets needed).
+- Two build configurations, `Direct` and `AppStore`, must exist by M12 (first
+  Direct-only feature) at the latest.
+- Direct distribution later needs notarization in CI and an update mechanism
+  (e.g. Sparkle).
+
+## 6. Milestones
+
+Order (D10): hex editor to first usable version → file-manager core → hex polish →
+the rest.
+
+| # | Milestone | Scope | Done when |
+|---|---|---|---|
+| M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.filer`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15 and the newest macOS (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5): browsing, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15 and the newest macOS; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix written up and the save/recovery policy per volume decided from it |
+| M1 | Read-only hex viewer | Virtual scroller first, then thread-safe ByteSource + cache with async prefetch and placeholders, HexView, selection, copy as hex/text (capped), Go to offset, view options (offset base, grouping, ASCII/Latin-1 text column), non-regular files refused, `SecurityScope` tokens, open via File › Open / drag-drop / Finder "Open With" (document types per §4, no NSDocument) — each opens a **tab in the main frame**, Open Recent via bookmarks | 4 GB file opens in < 100 ms, scrolls at 120 Hz (also from a USB/SMB volume, with placeholders instead of stalls), memory < 100 MB; all measured on real hardware, also while a search runs |
+| M2 | Inspect & search | Inspector panel, `Searcher` over a byte-reading protocol with the uncached `F_NOCACHE` read path, find next/previous/all (hex + text, capped results), status bar (offset, selection length, file size) | Full search of a 4 GB file with progress + cancel, without evicting the view's pages |
+| M3a | Overwrite editing | Persistent PieceTable (snapshots), undo as a stack of roots with coalescing, overwrite in hex and text columns (encoding rules per §4.4), dirty-byte highlight, Searcher over snapshots | Fuzz tests pass; edits don't stall concurrent search |
+| M3b | Saving & sessions → **first usable hex version** | `EditorSession` + `SessionRegistry`, dirty state, read-only mode, add buffer as a file, save strategies A (clone-stage-replace) and B (in place + journal + commit record) chosen per the M0 capability matrix, backing generations, recovery guarantee per volume (+ private copy or narrowed mode), external-change policy with own-write suppression, operation journal + crash restore, save race handling, unsaved-changes sheets, Undo/Redo menu wired to the session | Edit + save on 4 GB is near-instant; undo after save restores original bytes; killing the app mid-edit or mid-save loses nothing, and power loss loses at most the last ~1 s of edits; typing during a save keeps the new edits and their journal; saving never triggers the external-change sheet; external modification never corrupts unsaved edits; **the fault-injection suite (§7) passes** |
+| M4 | Browser foundation | Single panel: async listing, navigation, back/forward, sorting, hidden-files toggle, folder-grant flow + bookmarks (informed by the M0 spike), per-tab `SecurityScope`, live updates | Browse a 100k-file folder without UI stalls |
+| M5 | Dual panels + tabs | Second panel, active-panel focus, per-panel tab bar, tab restore on relaunch via AppKit restoration (D23), collapsible sidebar (Favorites, Locations) | Daily navigation possible without Finder |
+| M6 | NC keys + file operations | Function-key bar, F2–F8 actions with ⌘ equivalents, operations queue (copy/move/trash/new folder/rename) with progress and conflict handling, cross-volume move with per-item failure reporting | Copy/move large trees reliably with cancel and conflicts |
+| M7 | Preview pane + hex integration | Collapsible right pane with Quick Look + metadata, viewer factory injected by FilerApp, QuickView item (F3 quick view in opposite panel, read-only `ByteSource`, unsaved-edits marker), F4 editor tab (hex), hex view in preview for unsupported types | Hex editor reachable entirely from the file manager; moving the cursor through 1,000 files in quick view creates no sessions |
+| M8 | Insert/delete | PieceTable insert/delete exposed, insert-mode toggle in hex, paste/delete ranges, strategy A with a streamed rewrite (inode re-keying, new backing generation, metadata preservation), free-space check, refusal or copy-based path on strategy-B-only volumes | Random edit sequences round-trip byte-exact through save; xattrs/tags survive |
+| M9a | Text mode + find/replace | Mode switcher, encoding detection, lossless invalid-byte mapping, TextKit sync layer, TextKit 2 text mode (after the spike in §4.10 passes; 16 MB threshold profiled separately), unencodable-input handling + Convert to UTF-8, line endings, inline find/replace in hex (any length) and text modes | Switch modes mid-edit with no data loss; replace-all on a 15 MB text file is one undo step; text-mode memory stays within its budget at the threshold |
+| M9b | Large-text viewer | Virtualized read-only text view over snapshots, sparse background line index scanning in code units (UTF-8/Latin-1/UTF-16), `Searcher`-based find | Open and scroll a 4 GB log file (and a UTF-16 file) smoothly; line index stays within tens of MB |
+| M9c | Markdown mode | Source highlighting, preview (renderer per §4.10), split/toggle, find/replace | Edit a few-MB README with live preview, no stalls |
+| M10 | Polish | Preferences (font, bytes/row, colors, text-size threshold), **user-editable key bindings** (incl. the deferred conflicts in §9), more text-column encodings (UTF-8, UTF-16, EBCDIC), bookmarks within a file, light/dark, selection checksums | Daily-driver quality for editor + browser |
+| M11 | Multiple windows | ⌘N, drag tabs between windows, Move Tab to New Window, Merge All Windows, multi-window restoration, several text-mode views of one session (shared `NSTextContentStorage`, §4.9) | Merge of 3 windows keeps every tab on its original side |
+| M12 | Terminal (Direct only) | `Direct`/`AppStore` build configurations, SwiftTerm in bottom drawer and as panel tab, follows active directory, Ctrl+O full-frame toggle, item switcher | Daily shell use without leaving Filer |
+| M13+ | More file-manager features | Remote connections, compare/sync, batch rename, archives, NC-style marking + drive switching, notarized Direct releases + updates… | Planned as requirements arrive |
+
+Later hex candidates: structure templates (Mach-O/ELF/PNG…), two-file diff, entropy /
+byte histogram.
+
+## 7. Testing
+- **Frameworks (D22):** swift-testing for logic tests; XCTest for `measure`-based
+  performance tests and XCUITest UI tests.
+- `FilerCore` unit tests: PieceTable fuzzing (including snapshots and undo across
+  saves), Saver round-trips for both strategies (commit-record rollback, metadata preservation, inode
+  re-keying), crash-recovery journal replay (kill at random points, replay, compare
+  with the reference), clone-generation lifetimes (no clone deleted while history
+  references it), Searcher across chunk boundaries, Inspector decoding against known
+  vectors, lossless decode/encode of invalid bytes, sparse line index (UTF-8 and
+  UTF-16, checkpoints across chunk boundaries).
+- **Fault injection (M3b gate):** a test harness that wraps Saver/journal file
+  calls and can fail or kill the process at every write, `F_FULLFSYNC`, rename and
+  `replaceItemAt` point; simulated power loss (discard unsynced writes in a fake
+  file layer). Cases: crash at each step of strategies A and B; external rewrite of
+  the original during edit and during save; typing during a save (revision A saved,
+  B kept); volume disappearing mid-save; relaunch replay after each. Every case ends
+  with either the old or the new file contents intact and recoverable edits matching
+  the reference model.
+- Concurrency: ByteSource hammered from several threads under Thread Sanitizer.
+- Large files: sparse 4 GB files via `truncate -s 4G` for open/scroll/memory tests;
+  **real-data** patterned files for search and save throughput (sparse files read
+  zero pages too fast to be representative). Tagged slow, run nightly; mind runner
+  disk space.
+- Performance tests: open time, scroll frame time (including a throttled/slow-volume
+  read source), search throughput, save time.
+- CI matrix:
+  - **GitHub-hosted arm64 runners only:** macOS 15 (the minimum, D2) and the newest
+    macOS, newest Xcode, macOS 15 deployment target. Build, `swift test`, and the
+    signed app's smoke tests run on both: launch, bookmarks resolving after relaunch,
+    sandboxed file access, AppKit/TextKit behaviour.
+  - Background: GitHub retired hosted macOS 14 runners on 2026-11-02
+    (actions/runner-images#13518), which is why the minimum moved to macOS 15. Watch
+    for the macOS 15 image's retirement notice; when it comes, raise the minimum
+    again rather than adding a self-hosted machine.
+  - Sandboxed UI tests run with ad-hoc signing (§5).
+- Instruments pass (Time Profiler, Allocations) before closing each milestone.
+
+## 8. Reference
+- Hex Fiend (open source, BSD) handles huge files with a B-tree byte array; worth
+  reading for design. Alternative: embed HexFiend.framework (faster to ship, less
+  control; BSD licence is App Store–compatible).
+
+## 9. Open & deferred questions
+
+**Open**
+1. **App Store:** keep as a goal for the whole app, editor-only, or drop — revisit
+   after the M0 sandbox spike.
+2. **Packages in the browser** (`.app`, `.bundle`): show as files like Finder, with
+   "Show Package Contents", or browse into them? Decide in M4. (The editor never
+   opens them — D14.)
+3. **Recovery on volumes without clones (§4.1):** make a private copy below a size
+   limit (proposed 1 GB) and narrow the guarantee above it, or always narrow?
+   **Decide from the M0 capability matrix**, once it shows which volumes actually
+   lack clones.
+
+**Deferred** (decided to revisit later)
+- **Shortcut conflicts:** settle by M10 at the latest; the command registry (§4.11)
+  keeps them cheap to change.
+  - editor mode switcher vs. Finder's ⌘1–4 view modes in the browser;
+  - ⌃O (terminal toggle) vs. the Cocoa "open line" text binding;
+  - F3 in an editor: view or find next;
+  - ⌘L (Go to offset) vs. Finder's "Make Alias";
+  - ⌘F: find files in the browser vs. find in the editor; likewise ⌥⌘F;
+  - Tab: switch panels in the browser vs. insert a tab in the editor (resolved by
+    focus, but confirm it feels right).
+- **NC-style marking and drive switching** — not needed day one; candidates for M13+.
+- **Accessibility and localization** — out of scope for now (D19), including the
+  proposed baseline VoiceOver support for the hex viewport in M1.
+- **Block devices, privileged save** — not planned (D14).
