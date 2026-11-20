@@ -173,3 +173,212 @@ FilerApp (app target, thin)   — app lifecycle, menus, the single main frame,
 - **Scope of openable things (D14):** regular files only. Anything else (devices,
   directories, packages) is refused with a message; files that can't be written open
   read-only, with the reason shown in the status bar.
+
+### 4.2 Edit model: `PieceTable`
+- Pieces reference the original file (or its clone) by (offset, length), or a range
+  of the add-buffer file, stored in a balanced tree keyed by cumulative length →
+  O(log n) lookup, insert, delete, overwrite.
+- **Persistent (immutable, structurally shared) tree.** Each edit produces a new root;
+  taking a snapshot is O(1). Search, save and the large-text line indexer read a
+  `Sendable` snapshot while the user keeps editing. Decide and prototype before M3a.
+- **Add buffer is always a file** (from M3b), in the session's directory, read
+  through the same page cache as the original. Pasting or inserting a 1 GB blob never
+  lives in RAM, and the same file is what crash recovery replays against. No
+  in-memory phase, no spill threshold.
+- **Piece-count bound.** Replace All with millions of matches would create millions of
+  pieces and break the memory target. Coalesce adjacent pieces, and above a
+  threshold apply bulk replaces as a streaming rewrite into a new add-buffer region
+  instead of per-match pieces.
+- v1 exposes overwrite only (D4); insert/delete use the same structure later.
+- **Undo = earlier roots.** With a persistent tree, the undo stack is a stack of
+  previous roots (plus cursor/selection), not inverse operations. Undo swaps the
+  current root for the previous one; redo the reverse. Coalescing a typing burst
+  replaces the top entry instead of pushing a new one. Undo history survives saves
+  (see §4.3 for what that requires).
+- Randomized model-based tests against a plain `[UInt8]` reference.
+- **Crash recovery (D15):** each session's directory holds the add-buffer file, the
+  clone (if any) and an append-only **operation journal**: one record per edit
+  (offset, length, add-buffer range, kind), not tree nodes, so replay is
+  deterministic and independent of the tree's in-memory format.
+  - **Durability.** Each record is `write()`n immediately — that alone survives the
+    app being killed or crashing, since the data is in the kernel. For power loss,
+    `fcntl(F_FULLFSYNC)` (plain `fsync` doesn't flush the drive cache on macOS) runs
+    on a ~1 s debounce and on every save/close; add-buffer bytes are written before
+    the record that references them.
+  - **Replay.** On relaunch, journals of sessions that didn't close cleanly are
+    replayed against their backing generation (clone or private copy). On narrowed
+    volumes (§4.1) replay runs against the original only if its size, mtime and a
+    hash of sampled pages still match what the journal recorded; otherwise the user
+    is told the edits can't be reapplied and is offered "Save edits as patch…".
+    The tab comes back dirty with its edits, a banner "Recovered unsaved changes",
+    and **no undo history**.
+  - **Save race.** Saving takes a snapshot of revision A; the user may keep typing
+    revision B while the save runs. When the save commits, A becomes the saved
+    revision: the session's "saved" marker moves to A, the session stays dirty, and
+    the journal is truncated only up to A. B's edits and journal records stay
+    intact, re-based onto the new backing generation.
+  - Journals, add-buffer files and generations are released on save+close, revert or
+    discard (and deleted once nothing else holds them).
+  - **Fault-injection tests are an M3b gate** (§7): kill and simulated power loss at
+    every write/fsync/rename point of save and journal, external rewrites during
+    edit and save, typing during save, volume disappearing mid-save.
+
+### 4.3 Saving: `Saver`
+`NSFileCoordinator` only coordinates with cooperating clients; atomicity and recovery
+come from the save strategy itself (D17). The strategy is picked per save from the
+volume/grant capability matrix (M0 spike, §5).
+
+- **Strategy A — clone, patch, replace (preferred).** Works for overwrite-only v1 and
+  for insert/delete later.
+  1. `clonefile(2)` the original into a staging file on the same volume (instant on
+     APFS; the original stays untouched while staging).
+  2. Patch the staging file: dirty ranges only for overwrite edits; a streamed
+     rewrite for insert/delete. `F_FULLFSYNC` it.
+  3. Coordinated write: `replaceItemAt(_:withItemAt:…)` swaps it in atomically.
+  - Keeps the speed of small overwrites on 4 GB files, and a crash at any point
+    leaves either the old or the new file intact.
+  - The swap gives the file a **new inode**: re-key the session in `SessionRegistry`,
+    reopen `ByteSource` (the old descriptor still points at the unlinked original),
+    and register the new file as a backing generation (§4.1).
+  - Hard links break, and metadata must be checked: xattrs, Finder tags, ACLs,
+    creation date. All tested in the M0 spike and the Saver round-trip suite.
+  - Needs a staging location on the same volume. With a folder grant that's the
+    parent directory or `itemReplacementDirectory`; whether a **file-only grant**
+    allows either is a question the M0 spike answers.
+  - Without a clone-capable volume, step 1 becomes a full copy: needs free space ≈
+    file size (check first) and takes time proportional to file size, so it's
+    offered only below a size limit; otherwise strategy B.
+- **Strategy B — in place with a durable journal (fallback).** For file-only grants
+  where staging isn't possible, non-clone volumes with large files, and when the user
+  wants inode identity kept (hard links, other apps holding the file open). Overwrite
+  edits only; insert/delete on such volumes needs a full rewrite (strategy A with a
+  copy) or is refused.
+  1. Write the dirty ranges' old bytes plus the target file's identity
+     (volume, file ID, size, mtime) to a save journal; `F_FULLFSYNC`.
+  2. Write the ranges into the file; `F_FULLFSYNC` the file.
+  3. Append an explicit **commit record** to the journal; `F_FULLFSYNC`; then delete
+     the journal.
+  - On launch: a journal without a commit record → roll the file back from the old
+    bytes (after checking identity); with a commit record → just delete it.
+  - **Undo after save:** without a clone, before overwriting a range, copy its old
+    bytes into the add buffer and remap the pieces — in the current root *and* every
+    root in the undo history — that referenced that original range. Otherwise
+    undo/revert after a save would restore the new bytes. With a clone, the undo
+    history keeps referencing the old generation and nothing needs remapping.
+- Optional "keep backup" preference later (both strategies).
+- **Insert/delete (M8)** reuses strategy A with a streamed rewrite of the staging
+  file instead of a range patch; no separate save path.
+- Files without write permission, locked (`uchg`) or root-owned files open read-only
+  (D14); "Save As…" is still available.
+
+### 4.4 View: `HexView` (AppKit)
+- Custom `NSView` drawing only visible rows with Core Text, using pre-shaped glyphs for
+  hex digits and printable ASCII.
+- **Virtual scrolling:** window-sized view; a custom scroller maps position to a top
+  row index (UInt64). No gigantic document view, no float-precision drift. This is
+  the riskiest part of M1 — build it first. Reuse native scrolling behaviour where it
+  fits the virtual viewport (an `NSScrollView` with a small proxy document for
+  momentum, elastic edges and overlay scrollers, mapped onto the row index), and fall
+  back to a fully custom scroller only where that breaks.
+- **Measured on real hardware while a search runs:** first paint, scroll hitches
+  (frame time, not just average fps) and memory.
+- Rows come from the asynchronous prefetch in §4.1; missing pages draw as
+  placeholders.
+- Columns: offset gutter | hex | text. Bytes per row 8/16/32/auto-fit.
+- Shared cursor/selection between columns; keyboard-first navigation (arrows, Page
+  Up/Down, Home/End, ⌘↑/⌘↓, Go to offset ⌘L).
+- **Typing in the text column (M3a, overwrite mode):** in a single-byte encoding
+  (ASCII, Latin-1, EBCDIC) a character overwrites one byte. In UTF-8/UTF-16 a
+  character overwrites as many bytes as its encoding needs, starting at the cursor
+  (file length unchanged). A character the column's encoding can't represent beeps,
+  with a status-bar message.
+- Changed (dirty) bytes are highlighted.
+- Copy as hex/text of a huge selection is capped (e.g. 64 MB of output) with a
+  prompt offering "Save selection to file…" instead.
+- **View options (D18)**, in the View menu and the editor toolbar, per editor item,
+  with defaults in Preferences:
+  - offset base: hex / decimal / both;
+  - byte grouping: 1 / 2 / 4 / 8 (with LE/BE display order for groups);
+  - text-column encoding: ASCII, Latin-1, UTF-8 (multi-byte sequences drawn across
+    their bytes), UTF-16LE/BE, EBCDIC; more can be added later.
+- Accessibility is out of scope for now (D19); keep drawing and hit-testing
+  separable so `NSAccessibility` can be added later (a baseline VoiceOver proposal
+  for M1 was considered and declined on 2026-11-20).
+
+### 4.5 Search: `Searcher`
+- Hex bytes (`??` wildcards later), ASCII/UTF-8, UTF-16LE/BE, case-insensitive text.
+- Chunked streaming with (pattern length − 1) overlap; memchr on first byte + verify,
+  or Boyer–Moore–Horspool. Cancellable `Task` with progress.
+- Reads through the uncached sequential path (§4.1), so a full scan doesn't evict
+  the view's pages.
+- Written against a byte-reading protocol from day one: `ByteSource` in M2, a
+  `PieceTable` snapshot from M3a, so the switch is a data-source swap.
+- "Find all" stores at most N results (e.g. 100k) and reports "more than N".
+- Target: disk-bound speed on 4 GB (a few seconds on internal SSD).
+
+### 4.6 Data inspector
+At the cursor: Int/UInt 8/16/32/64 (LE/BE), Float16/32/64, binary, UTF-8/UTF-16
+character, Unix time / Mac absolute time / Windows FILETIME. Editable later.
+
+### 4.7 File manager (BrowserKit)
+
+Window layout — one `NSSplitViewController` with three collapsible regions:
+
+```
+┌──────────┬──────────────────────┬──────────────────────┬──────────┐
+│ Sidebar  │ [tab][tab][+]        │ [tab][+]             │ Preview  │
+│ Favorites│ /Users/me/Code       │ /Volumes/Data        │ Quick    │
+│ Locations│ name   size  date    │ name   size  date    │ Look +   │
+│ Volumes  │ …                    │ …                    │ info     │
+├──────────┴──────────────────────┴──────────────────────┴──────────┤
+│ F3 View  F4 Edit  F5 Copy  F6 Move  F7 MkDir  F8 Delete  …        │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+- **Sidebar (left, collapsible):** Finder-like source list — Favorites (user-editable),
+  Locations/volumes (mounted, ejectable), later Tags. Clicking navigates the active
+  panel. Toggle ⌃⌘S as in Finder.
+- **Two panels:** active panel has focus ring/highlight; Tab switches panels (only
+  when a browser has focus — inside an editor Tab inserts a tab). Each panel owns its
+  own **tab bar** (custom control — the system window tabbing is per-window, not
+  per-panel). Each tab: location, back/forward history, sort order, selection. Tabs
+  restore on relaunch (D23).
+- **File list:** view-based `NSTableView` with columns (name, size, date, kind),
+  async directory enumeration so 100k-entry folders don't block, live updates via
+  FSEvents, type-to-select, sorting.
+- **Selection:** standard macOS multi-select (⇧/⌘-click, ⇧-arrows) is the target of
+  F5–F8. No Norton Commander muscle memory beyond the F-keys is required day one;
+  NC-style marking (Insert/Space, +/−/`*`) and drive switching are later candidates.
+- **Hidden files:** toggle ⌘⇧. (Finder's shortcut) per panel, with a global default
+  in Preferences.
+- **Preview pane (right, collapsible):** `QLPreviewView` for the selected file plus
+  metadata (size, dates, permissions, xattrs). For files Quick Look can't show, offer
+  a hex view. BrowserKit doesn't import HexViewKit: it asks a viewer factory
+  (protocol in WorkspaceKit, implementation injected by FilerApp). The hex view here
+  follows the quick-view rules in §4.8 (read-only `ByteSource`, no session).
+- **Norton Commander-style keys + bottom function bar:**
+  F3 View (quick view, §4.8), F4 Edit (editor tab; hex only until M9a, then mode by
+  file type per §4.10), F5 Copy to other panel, F6 Move/Rename, F7 New folder, F8
+  Delete (to Trash; ⇧F8 permanent, with confirmation), F2 Rename, F10/⌘Q quit. Bar
+  is clickable and can be hidden.
+  - Caveat: by default macOS maps F-keys to media/system functions (brightness,
+    Mission Control…), so users need fn+F-key or the system setting "Use F1, F2, etc.
+    keys as standard function keys". Every F-key action also gets a ⌘ shortcut and a
+    menu item. Check for conflicts with system shortcuts (e.g. F11 Show Desktop).
+  - F-keys are routed by focus (§4.8): inside an editor item, F3 may mean "find next"
+    rather than "view" — resolved per item via the command registry (§4.11); the
+    actual binding is deferred (§9).
+- **File operations queue:** copy/move/delete run in a background queue with progress,
+  pause/cancel, and conflict resolution (replace / skip / keep both / apply to all).
+  Copy via `copyfile(3)` with `COPYFILE_CLONE` (instant APFS clones on same volume)
+  and progress callbacks; delete via `FileManager.trashItem`. Cross-volume move is
+  copy + delete: delete the source only after the copy is verified complete, and
+  report partial failures per item.
+- **Sandbox fit:** browsing needs user-granted folders (one-time grant of home folder
+  and volumes, stored as bookmarks); copy/move need write access to the destination.
+  Quick Look preview and Trash work sandboxed. Known limits even with a home-folder
+  grant: TCC still gates Desktop/Documents/Downloads/iCloud Drive, ~/Library and
+  other apps' containers need Full Disk Access, each external volume needs its own
+  grant, stale bookmarks must be re-requested. These are what the M0 sandbox spike
+  measures (§5). Each browser tab holds a `SecurityScope` token for its location
+  (§5).
