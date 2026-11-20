@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# SwiftPM
+/.build/
+/.swiftpm/
+/Packages/
+
+# Xcode
+DerivedData/
+xcuserdata/
+*.xcuserstate
+/build/
+
+# Local spike output
+/spike-reports/
