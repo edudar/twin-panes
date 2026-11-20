@@ -382,3 +382,221 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   grant, stale bookmarks must be re-requested. These are what the M0 sandbox spike
   measures (§5). Each browser tab holds a `SecurityScope` token for its location
   (§5).
+
+### 4.8 Single main frame: workspace model (D7)
+
+**Prior art.**
+- Far Manager / Midnight Commander: viewer, editor and command output are full-frame
+  "screens" inside the one console window; Ctrl+O hides/shows the panels over the
+  shell, Ctrl+Q turns the inactive panel into a quick view of the file under the
+  cursor, F12/Ctrl+Tab switches between open screens.
+- Nimble Commander (macOS, open source): internal viewer on F3; an *overlapped*
+  terminal shown under the panels that follows the current directory, which can also
+  go full-window like a tab.
+- ForkLift 4: per-pane tabs; a right Preview Pane that switches between preview/info,
+  activities and log; its users asked for a terminal docked at the bottom.
+- VS Code / Path Finder: editors as tabs; terminal in a collapsible bottom drawer.
+
+**Model.** Everything that isn't a dialog is a `WorkspaceItem` — Browser, Editor,
+QuickView, Terminal, later Compare/Search results. An item can be hosted in any
+*slot* of the main frame:
+
+```
+┌─────────┬───────────────────┬───────────────────┬─────────┐
+│         │ Left panel tabs   │ Right panel tabs  │ Preview │
+│ Sidebar │ [Browser][Hex*]   │ [Browser][Term]   │ (follows│
+│         │                   │                   │ select.)│
+│         ├───────────────────┴───────────────────┤         │
+│         │ Bottom drawer: Terminal (follows dir) │         │
+├─────────┴───────────────────────────────────────┴─────────┤
+│ F-key bar                                                  │
+└────────────────────────────────────────────────────────────┘
+        + Zoom: any item temporarily fills the whole frame
+```
+
+| Slot | What goes there | Notes |
+|---|---|---|
+| Panel tabs (left/right) | Any item; Browser is the default | Tab bar shows item type icon and dirty dot. Tabs drag between panels. |
+| Preview pane (right) | Read-only, follows the selection | Quick Look, metadata, hex view for unknown types. Can be "pinned" to stop following. |
+| Bottom drawer | Terminal (later: operations queue, log, search results) | Toggle ⌃\`. Follows the active panel's directory unless detached. |
+| Zoom | Any item, full frame | Like Far's Ctrl+O / hiding panels. Toggle and Esc return to the previous layout. |
+
+**Proposed default behaviours** (all configurable later):
+- **F3 View** → quick view in the *opposite* panel as a new tab (Far Ctrl+Q style):
+  the file list stays visible, moving the cursor updates the view. ⇧F3 opens it in
+  the same panel.
+- **F4 Edit** → editor tab in the active panel; zoom (⌘⇧↩) for full frame.
+- **Terminal** → bottom drawer, plus Ctrl+O full-frame toggle for the
+  Far/mc/Nimble muscle memory; can also be opened as a panel tab. Note ⌃O is the
+  Cocoa "open line" text binding — when a text editor has focus, Ctrl+O must either
+  yield to the text view or the binding is overridden deliberately (deferred, §9).
+- **Item switcher** → one shortcut lists every open item across slots (like Far's
+  F12 screens list) for jumping between editors/terminals.
+- Closing a dirty item, or quitting with dirty items, follows the single close
+  workflow (§4): one sheet per dirty session, when its last view closes.
+- The full layout (slots, tabs, items, zoom state) is restored on relaunch, each
+  location backed by a security-scoped bookmark. Unsaved edits survive a crash via
+  the session journal (D15, §4.2).
+
+**QuickView is not an editor.** The F3 quick view (and the preview pane's hex view)
+retargets on every cursor move, so it reads through a lightweight read-only
+`ByteSource` and never creates an `EditorSession`. If `SessionRegistry` already has a
+dirty session for that file, the quick view shows the session's bytes (via a
+snapshot) with a marker that the view includes unsaved edits. "Edit" from a quick
+view (F4) opens or focuses the real editor item.
+
+**State restoration (D23).** AppKit's restoration APIs:
+- Each main window has a `restorationClass` and identifier; its controller encodes
+  the `MainFrameLayout` in `encodeRestorableState(with:)`: slots → items (type,
+  per-item state, security-scoped bookmark data), active panel, zoom state. Each
+  `WorkspaceItem` contributes its own state through the protocol's restoration
+  hook. Changes call `invalidateRestorableState()` so AppKit re-encodes them.
+- Encoded item state carries a small version number so an item can ignore state
+  written by an older build rather than misreading it.
+- Merging windows and moving tabs between windows (M11) only change which window
+  encodes an item; nothing else is stored separately.
+- AppKit restoration follows the system's "Close windows when quitting an app"
+  setting and is skipped after the user chooses not to reopen windows. That's
+  accepted: a fresh launch opens one window with a Browser tab per panel.
+- **Crash recovery is independent (§4.2).** It doesn't rely on restoration: on
+  launch, after AppKit has restored (or not restored) windows, any session with an
+  unclean journal is reopened as a tab, in its restored tab if one exists, otherwise
+  in a new tab of the frontmost window.
+
+**Engineering consequences.**
+- `WorkspaceKit`: `WorkspaceItem` protocol (view controller, title, icon, dirty state,
+  can-close, state restoration, preferred slot) and a `MainFrameLayout` that owns
+  slots and moves items between them. It defines the protocols and factories that let
+  kits create each other's items without importing each other (§4).
+- Items must tolerate being re-parented (moved between slots) without reloading:
+  views are detached/attached, sessions live outside the view hierarchy.
+- Keyboard routing: focus belongs to one item at a time; F-keys and panel keys act
+  on the focused item's context, resolved through the command registry (§4.11).
+- **Terminal and the sandbox:** SwiftTerm (MIT) is a mature embeddable VT100/xterm
+  emulator for Swift on macOS. But a shell started from a sandboxed app inherits
+  the sandbox, while users expect an unrestricted shell like Terminal.app. So
+  the terminal is a **Direct-only** feature; the App Store build omits it or
+  offers "Open in Terminal" instead.
+
+### 4.9 Multiple main windows & merging (D8)
+
+- Each main window is a self-contained main frame (§4.8). ⌘N opens a new one with a
+  single Browser tab per panel.
+- **Merge All Windows** (Window menu): into the frontmost window,
+  - left-panel tabs of every other window → appended to the left panel, in window
+    order; right-panel tabs → right panel;
+  - bottom-drawer items (terminals) → appended to the drawer (drawer supports tabs);
+  - preview pane: target window's stays; others are discarded (it's derived state);
+  - zoom is cleared; the merged windows close.
+- Also: drag a tab between windows; "Move Tab to New Window" as the inverse.
+- Not the system `NSWindow` tabbing (`mergeAllWindows:`) — that merges whole
+  windows as tabs, not per-panel tabs. Disable automatic window tabbing.
+- **One session per file, app-wide.** A `SessionRegistry` owns `EditorSession`s
+  keyed by file identity (volume + file ID, so renames/moves don't break it).
+  File IDs aren't stable on every file system (SMB, FAT, exFAT) — fall back to the
+  resolved path there. The key is updated when a save replaces the inode (§4.3).
+  Opening a file that's already open focuses its tab, or offers a second view of
+  the *same* session (shared undo, edits, dirty state). This keeps merges and
+  cross-window drags conflict-free — two windows can never hold diverging unsaved
+  edits to one file.
+- **Several text-mode views of one session** share one `NSTextContentStorage`, each
+  with its own `NSTextLayoutManager` (TextKit 2 supports this), so the TextKit sync
+  layer (§4.10) still has exactly one text copy per session. If that proves fragile,
+  fall back to allowing one text-mode view per session (other views stay in hex).
+  Hex views of the same session are independent and cheap.
+- State restoration saves all windows and their slots (D23); merge is just moving
+  items between `MainFrameLayout`s, so it reuses the same re-parenting path as moving
+  a tab between panels.
+- Guard rail: an M0 smoke test opens two main windows, so the "no single-window
+  assumption" rule is exercised long before M11.
+
+### 4.10 Editor modes & in-file search (D12)
+
+One editor item per file (one `EditorSession`), with a mode switcher in its tab
+toolbar: **Hex · Text · Markdown** (shortcuts deferred — ⌘1/2/3 collide with
+Finder's ⌘1–4 view modes in the browser; §9). F4 opens the mode matching the file's
+type (`UTType`): Markdown → Markdown, other text types → Text, everything else → Hex.
+Switching modes keeps edits, undo history, cursor/selection (mapped between byte and
+character offsets) and dirty state.
+
+**Single source of truth.** The `PieceTable` holds the file's bytes in every mode.
+Text edits arrive from the text view as "replace character range with string",
+are encoded (UTF-8/UTF-16/Latin-1…, detected on open, switchable) and applied to the
+piece table as byte-range replacements. One undo stack, one save path, so hex and
+text edits interleave safely.
+
+**Syncing with TextKit.** `NSTextView` keeps its own `NSTextStorage`, so in text
+modes there are really two copies kept in lockstep:
+- The text view's own undo manager is disabled; its edits are intercepted
+  (`shouldChangeText…`) and recorded in `UndoStack`. Undo/redo swaps piece-table
+  roots and applies the corresponding change to the text storage.
+- Marked (uncommitted IME) text is not forwarded to the piece table until it is
+  committed.
+- Hex-mode edits made while a text view exists are pushed into the text storage
+  (or the text view is rebuilt on mode switch — pick whichever profiles better).
+- One text storage per session, shared by all its text-mode views (§4.9).
+
+**Unencodable input.** Typing or pasting a character the file's encoding can't
+represent (an emoji into a Latin-1 file) leaves no bytes to write. The edit is
+rejected with a beep and a status-bar message offering **"Convert to UTF-8…"**: a
+whole-file re-encode, available because insert/delete (M8) lands first, applied as
+one undo step. The hex text column follows the rules in §4.4.
+
+**Plain text mode**
+- Files up to a size threshold (start at **16 MB**, tune by profiling): TextKit 2
+  `NSTextView` — native editing, IME, spell check off by default, line numbers,
+  soft wrap toggle, monospaced font, line endings (LF/CRLF/CR) shown and convertible.
+  Text mode has its own memory budget (§3), measured at the threshold.
+  - TextKit 2 has known rough edges (line numbers via `NSRulerView`,
+    large-document performance, scroll jumping). Spike before M9a, keeping
+    `NSTextView`; TextKit 1 is the fallback. The spike must prove:
+    - IME: marked text commit *and* cancel reach the piece table correctly (only on
+      commit);
+    - byte-preserving edits: untouched bytes, including invalid ones, survive an
+      edit + save byte-for-byte;
+    - undo across mode switches (text edit → hex edit → undo both);
+    - the line-number implementation doesn't touch `layoutManager` or anything else
+      that silently switches the view into TextKit 1 compatibility mode.
+  - The text size limit is profiled on its own (memory and typing latency at the
+    threshold), separately from the spike's correctness checks.
+  - Line-ending conversion rewrites the whole file → needs insert/delete (M8).
+- Above the threshold: **large-text viewer** — custom virtualized view over the
+  piece table, built on a snapshot (§4.2), same scrolling approach as HexView.
+  Read-only at first; editing large text is a later item.
+  - **Sparse line index.** A 4 GB log at ~80 bytes/line has ~50M lines; a full
+    `UInt64` offset index would be ~400 MB. Instead, store a checkpoint (byte offset,
+    line number) every 64 KB or every N lines, built in the background; to reach a
+    line, scan forward from the nearest checkpoint.
+  - **Scan in code units, not bytes.** The indexer looks for the newline in the
+    file's encoding: one byte for UTF-8/Latin-1, a two-byte unit aligned to the
+    encoding for UTF-16LE/BE (a byte-level `0x0A` scan would split characters).
+- **Invalid bytes, lossless:** undecodable bytes are shown as placeholders, and the
+  decoder keeps a map from each placeholder back to its original bytes. Saving never
+  rewrites bytes you didn't touch (no silent re-encoding). This mapping is a real
+  piece of work, not a rendering detail.
+- Encoding detection: BOM first, then UTF-8 validity, then
+  `NSString.stringEncoding(for:…)` heuristics, Latin-1 as the last resort.
+
+**Markdown mode**
+- Source editing (same TextKit 2 view) with syntax highlighting, plus a rendered
+  preview: split side-by-side or toggle (⌘⇧P). Parsed with Apple's `swift-markdown`;
+  preview rendered in the same item, never a separate window (D7).
+- **To decide:** preview renderer (`WKWebView` with generated HTML vs.
+  `AttributedString` in a text view) and source highlighter (from the
+  `swift-markdown` AST vs. a dedicated highlighter). Relative image links need
+  sandbox access to sibling files (ask for the parent folder); remote images need the
+  `com.apple.security.network.client` entitlement or are blocked by default.
+- Size limit lower than plain text (a few MB) since preview re-renders on edits
+  (debounced, incremental where possible).
+
+**Find & replace inside the edited file (all modes)**
+- ⌘F opens an inline find bar at the top of the editor item (not a window/panel);
+  ⌘G / ⇧⌘G next/previous, ⌥⌘F replace, "Replace All".
+- Hex mode: hex-byte or text patterns (§4.5), searching the whole file via
+  `Searcher` with progress. Replace arrives with M9a, after insert/delete (M8), so
+  replacement can be any length from the start. The first usable hex version (M3b)
+  has find only.
+- Text & Markdown modes: text, case-sensitive / whole word / regex, with match count
+  and highlight-all. Regex is limited to files under the text-mode threshold;
+  large-text viewer uses `Searcher` (plain text, no regex).
+- Replace All is one undo step, and respects the piece-count bound (§4.2).
