@@ -6,7 +6,8 @@
 //    │             └─ TextEditKit ┤
 //    └─────────────────────────── WorkspaceKit ── FilerCore
 //
-// BrowserKit joins in M4.
+// BrowserKit joins in M4. SandboxProbe is the M0 sandbox spike (§5); only the app's
+// Debug menu uses it.
 
 import PackageDescription
 
@@ -19,6 +20,7 @@ let package = Package(
         .library(name: "HexViewKit", targets: ["HexViewKit"]),
         .library(name: "TextEditKit", targets: ["TextEditKit"]),
         .library(name: "EditorKit", targets: ["EditorKit"]),
+        .library(name: "SandboxProbe", targets: ["SandboxProbe"]),
     ],
     targets: [
         // No UI imports allowed here.
@@ -29,6 +31,7 @@ let package = Package(
         .target(
             name: "EditorKit",
             dependencies: ["HexViewKit", "TextEditKit", "WorkspaceKit", "FilerCore"]),
+        .target(name: "SandboxProbe"),
 
         .testTarget(name: "FilerCoreTests", dependencies: ["FilerCore"]),
         .testTarget(name: "WorkspaceKitTests", dependencies: ["WorkspaceKit"]),
