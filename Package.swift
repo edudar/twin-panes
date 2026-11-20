@@ -31,5 +31,6 @@ let package = Package(
             dependencies: ["HexViewKit", "TextEditKit", "WorkspaceKit", "FilerCore"]),
 
         .testTarget(name: "FilerCoreTests", dependencies: ["FilerCore"]),
+        .testTarget(name: "WorkspaceKitTests", dependencies: ["WorkspaceKit"]),
     ]
 )
