@@ -35,5 +35,6 @@ let package = Package(
 
         .testTarget(name: "FilerCoreTests", dependencies: ["FilerCore"]),
         .testTarget(name: "WorkspaceKitTests", dependencies: ["WorkspaceKit"]),
+        .testTarget(name: "SandboxProbeTests", dependencies: ["SandboxProbe"]),
     ]
 )
