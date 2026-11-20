@@ -1,0 +1,35 @@
+// swift-tools-version: 6.0
+// Filer's library targets (D20). Dependencies point strictly down (PLAN.md §4):
+//
+//   FilerApp (Xcode app target, App/)
+//    ├─ EditorKit ─┬─ HexViewKit ─┐
+//    │             └─ TextEditKit ┤
+//    └─────────────────────────── WorkspaceKit ── FilerCore
+//
+// BrowserKit joins in M4.
+
+import PackageDescription
+
+let package = Package(
+    name: "Filer",
+    platforms: [.macOS(.v15)],
+    products: [
+        .library(name: "FilerCore", targets: ["FilerCore"]),
+        .library(name: "WorkspaceKit", targets: ["WorkspaceKit"]),
+        .library(name: "HexViewKit", targets: ["HexViewKit"]),
+        .library(name: "TextEditKit", targets: ["TextEditKit"]),
+        .library(name: "EditorKit", targets: ["EditorKit"]),
+    ],
+    targets: [
+        // No UI imports allowed here.
+        .target(name: "FilerCore"),
+        .target(name: "WorkspaceKit", dependencies: ["FilerCore"]),
+        .target(name: "HexViewKit", dependencies: ["WorkspaceKit", "FilerCore"]),
+        .target(name: "TextEditKit", dependencies: ["WorkspaceKit", "FilerCore"]),
+        .target(
+            name: "EditorKit",
+            dependencies: ["HexViewKit", "TextEditKit", "WorkspaceKit", "FilerCore"]),
+
+        .testTarget(name: "FilerCoreTests", dependencies: ["FilerCore"]),
+    ]
+)
