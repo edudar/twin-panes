@@ -37,6 +37,7 @@ let package = Package(
 
         .testTarget(name: "TwinPanesCoreTests", dependencies: ["TwinPanesCore"]),
         .testTarget(name: "WorkspaceKitTests", dependencies: ["WorkspaceKit"]),
+        .testTarget(name: "HexViewKitTests", dependencies: ["HexViewKit"]),
         .testTarget(name: "SandboxProbeTests", dependencies: ["SandboxProbe"]),
     ]
 )
