@@ -1,4 +1,5 @@
 import AppKit
+import EditorKit
 import WorkspaceKit
 
 /// `Twin Panes --smoke-test`: drives the real app (signed, sandboxed) through the M0 checks
@@ -124,6 +125,9 @@ struct SmokeTest {
             check(false, "View menu exists")
         }
 
+        await hexEditor(check, window: window)
+        await hexPerformance(check)
+
         first.closeWithoutAsking()
         second.closeWithoutAsking()
         await settle()
@@ -151,7 +155,95 @@ struct SmokeTest {
             .first { $0.accessibilityIdentifier() == "statusLine" }?.stringValue ?? ""
     }
 
-    private func settle() async {
-        try? await Task.sleep(for: .milliseconds(100))
+    /// M1: open a real file, draw it, move and copy, and refuse a folder.
+    private func hexEditor(_ check: (Bool, String) -> Void, window: NSWindow) async {
+        let dir = FileManager.default.temporaryDirectory
+        let url = dir.appendingPathComponent("smoke-\(UUID().uuidString).bin")
+        let bytes = Data((0..<200_000).map { UInt8(truncatingIfNeeded: $0) })
+        do { try bytes.write(to: url) } catch {
+            check(false, "write sample file: \(error)")
+            return
+        }
+        defer { try? FileManager.default.removeItem(at: url) }
+        guard let hex = app.openFile(url) else {
+            check(false, "hex editor opens a regular file")
+            return
+        }
+        check(app.controller(containing: hex.id) != nil, "hex editor opens as a tab")
+        check(hex.length == 200_000, "file length is read")
+        hex.hexView.frame = NSRect(x: 0, y: 0, width: 700, height: 400)
+        hex.hexView.display()  // drawing asks for the visible bytes in the background
+        for _ in 0..<50 where hex.source.cachedBytes(0..<256) == nil { await settle() }
+        check(hex.source.cachedBytes(0..<256) != nil, "visible rows were prefetched")
+
+        hex.hexView.go(to: 0x1041)
+        check(hex.hexView.selection.cursor == 0x1041, "go to offset moves the cursor")
+        check(hex.statusText.hasPrefix("Offset 0x1041"), "status shows the offset")
+        NSPasteboard.general.clearContents()
+        hex.hexView.copySelection(as: .hex)
+        check(NSPasteboard.general.string(forType: .string) == "41", "copy as hex")
+
+        window.makeFirstResponder(hex.hexView)
+        let chain = FocusChain.scopes(in: window)
+        check(
+            resolve(KeyChord("l", .command), chain) == .goToOffset, "⌘L in hex view → go to offset")
+        check(app.openFile(dir) == nil, "a folder is refused")
+        window.attachedSheet.map { window.endSheet($0) }
+    }
+
+    /// M1 targets on a sparse 4 GiB file: open < 100 ms, drawing a frame well under
+    /// 8.3 ms (120 Hz) while scrolling through the file, memory < 100 MB. Frame and
+    /// memory numbers are printed; only the open time fails the run, since CI machines
+    /// vary.
+    private func hexPerformance(_ check: (Bool, String) -> Void) async {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("smoke-4g-\(UUID().uuidString).bin")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        defer { try? FileManager.default.removeItem(at: url) }
+        do { try FileHandle(forWritingTo: url).truncate(atOffset: 4 << 30) } catch {
+            check(false, "create 4 GiB sparse file: \(error)")
+            return
+        }
+        let before = Self.residentMegabytes()
+        let clock = ContinuousClock()
+        var item: HexEditorItem?
+        let open = clock.measure { item = app.openFile(url) }
+        guard let item else {
+            check(false, "4 GiB file opens")
+            return
+        }
+        check(open < .milliseconds(100), "4 GiB file opens in \(open) (< 100 ms)")
+        let view = item.hexView
+        view.frame = NSRect(x: 0, y: 0, width: 900, height: 1000)
+        var frames: [Duration] = []
+        for step in 0..<240 {
+            // Jump through the whole file, then let prefetches land and redraw.
+            view.go(to: UInt64(step) * ((4 << 30) / 240))
+            view.display()
+            await settle(milliseconds: 5)
+            frames.append(clock.measure { view.display() })
+        }
+        let sorted = frames.sorted()
+        print(
+            "  info frame time p50 \(sorted[sorted.count / 2]), p95 \(sorted[sorted.count * 95 / 100]), max \(sorted.last!)"
+        )
+        let after = Self.residentMegabytes()
+        print("  info resident memory \(after) MB, \(after - before) MB more than before opening")
+    }
+
+    private static func residentMegabytes() -> Int {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? Int(info.resident_size / 1_048_576) : -1
+    }
+
+    private func settle(milliseconds: Int = 100) async {
+        try? await Task.sleep(for: .milliseconds(milliseconds))
     }
 }
