@@ -7,9 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		CEC3D5889379938D34F718F1 /* WorkspaceKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5C7AFC0EAF72331C93A28512 /* WorkspaceKit */; };
-		C4CBF0BD81ECE447DBF3FFCC /* EditorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1EEC312AF49ADC4F44BA62AC /* EditorKit */; };
 		652F13CB9B001DF5A980924B /* SandboxProbe in Frameworks */ = {isa = PBXBuildFile; productRef = 17D08F03DE63A666EC4BB22F /* SandboxProbe */; };
+		C4CBF0BD81ECE447DBF3FFCC /* EditorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1EEC312AF49ADC4F44BA62AC /* EditorKit */; };
+		CEC3D5889379938D34F718F1 /* WorkspaceKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5C7AFC0EAF72331C93A28512 /* WorkspaceKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,15 +40,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		E45799A9D1AA2A448CBABBF9 = {
-			isa = PBXGroup;
-			children = (
-				2FEBFB39333134633871B298 /* Config */,
-				06C6F87FE66342734C227C41 /* TwinPanes */,
-				EE8F24E3848AC5B936FD0F43 /* Products */,
-			);
-			sourceTree = "<group>";
-		};
 		2FEBFB39333134633871B298 /* Config */ = {
 			isa = PBXGroup;
 			children = (
@@ -56,6 +47,15 @@
 				96455A16744249EB773D3616 /* TwinPanes.xcconfig */,
 			);
 			path = Config;
+			sourceTree = "<group>";
+		};
+		E45799A9D1AA2A448CBABBF9 = {
+			isa = PBXGroup;
+			children = (
+				2FEBFB39333134633871B298 /* Config */,
+				06C6F87FE66342734C227C41 /* TwinPanes */,
+				EE8F24E3848AC5B936FD0F43 /* Products */,
+			);
 			sourceTree = "<group>";
 		};
 		EE8F24E3848AC5B936FD0F43 /* Products */ = {
@@ -147,6 +147,29 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		1BDA0172F081AB7359D4DDAD /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 96455A16744249EB773D3616 /* TwinPanes.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
+		3778D0B6B94F3AEC5C813A57 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 96455A16744249EB773D3616 /* TwinPanes.xcconfig */;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		90DB54171C2A5A52B3D2C343 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B1D2FF5398F521FD990B4D1D /* Project.xcconfig */;
+			buildSettings = {
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
 		EB51ED5A9C8DFB36938F0469 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = B1D2FF5398F521FD990B4D1D /* Project.xcconfig */;
@@ -160,48 +183,23 @@
 			};
 			name = Debug;
 		};
-		90DB54171C2A5A52B3D2C343 /* Release */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = B1D2FF5398F521FD990B4D1D /* Project.xcconfig */;
-			buildSettings = {
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				SWIFT_COMPILATION_MODE = wholemodule;
-			};
-			name = Release;
-		};
-		3778D0B6B94F3AEC5C813A57 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = 96455A16744249EB773D3616 /* TwinPanes.xcconfig */;
-			buildSettings = {
-
-			};
-			name = Debug;
-		};
-		1BDA0172F081AB7359D4DDAD /* Release */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = 96455A16744249EB773D3616 /* TwinPanes.xcconfig */;
-			buildSettings = {
-
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		F68459E3A7D43F7891A7DD06 /* Build configuration list for PBXProject "TwinPanes" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				EB51ED5A9C8DFB36938F0469 /* Debug */,
-				90DB54171C2A5A52B3D2C343 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		EDC8D5E451816476363958E1 /* Build configuration list for PBXNativeTarget "TwinPanes" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3778D0B6B94F3AEC5C813A57 /* Debug */,
 				1BDA0172F081AB7359D4DDAD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F68459E3A7D43F7891A7DD06 /* Build configuration list for PBXProject "TwinPanes" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EB51ED5A9C8DFB36938F0469 /* Debug */,
+				90DB54171C2A5A52B3D2C343 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -216,20 +214,20 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		5C7AFC0EAF72331C93A28512 /* WorkspaceKit */ = {
+		17D08F03DE63A666EC4BB22F /* SandboxProbe */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference "TwinPanesKit" */;
-			productName = WorkspaceKit;
+			productName = SandboxProbe;
 		};
 		1EEC312AF49ADC4F44BA62AC /* EditorKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference "TwinPanesKit" */;
 			productName = EditorKit;
 		};
-		17D08F03DE63A666EC4BB22F /* SandboxProbe */ = {
+		5C7AFC0EAF72331C93A28512 /* WorkspaceKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference "TwinPanesKit" */;
-			productName = SandboxProbe;
+			productName = WorkspaceKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
