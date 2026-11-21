@@ -1,6 +1,6 @@
-# Filer — Plan
+# Twin Panes — Plan
 
-Status: draft v0.14 (2026-11-20). Living document; requirements will keep growing.
+Status: draft v0.16 (2026-11-20). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -14,7 +14,7 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 
 | # | Decision | Implication |
 |---|---|---|
-| D1 | Filer is a file manager; the hex editor is its first module | Engine and viewer are separate frameworks the file-manager shell embeds. The hex editor ships first, as a tab in the main frame (D7). |
+| D1 | Twin Panes is a file manager; the hex editor is its first module | Engine and viewer are separate frameworks the file-manager shell embeds. The hex editor ships first, as a tab in the main frame (D7). |
 | D2 | Support current macOS + 2 previous → **macOS 15 Sequoia minimum** (macOS 27 is current; supported: 15, 26, 27). Raised from macOS 14 on 2026-11-20 because GitHub retired its hosted macOS 14 runners on 2026-11-02 | `@Observable`, modern Swift concurrency, SwiftUI 6 and `Synchronization.Mutex` are available. CI runs on GitHub-hosted runners for the oldest and newest supported releases, no self-hosted machine (§7). Raise the target as new releases ship and as hosted runners retire. |
 | D3 | App Store is a possible future target | Build **sandbox-compatible from day one** (see §5). Anything that can't ship sandboxed is marked "Direct only". The M0 sandbox spike covers both browsing and the editor's write path, and its capability matrix drives the save policy and the App Store decision. |
 | D4 | Overwrite-only editing is enough for the first usable version | Insert/delete stays a later milestone; the piece table still supports it so nothing is redesigned later. |
@@ -24,9 +24,9 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D8 | Multiple main windows are allowed but low priority (tabs cover most needs). Requires **Merge All Windows**: left-panel tabs from all windows merge into the target's left panel, right into right. | See §4.9. Data model must not assume one window. |
 | D9 | Keep §4.8 defaults for now: F3 → quick view in the opposite panel, F4 → editor tab in the active panel (mode picked by file type, §4.10; hex only until M9a), terminal → bottom drawer + Ctrl+O | Revisit once in daily use; all key bindings stay configurable (command registry, §4.11). |
 | D10 | Build order: hex editor to its first usable version (M3b), then the browser, then back to hex polish | See §6. |
-| D11 | Bundle ID `io.github.edudar.filer` | Fixed once on the App Store. "Filer" remains a working display name. |
+| D11 | Bundle ID `io.github.edudar.twinpanes` (was `io.github.edudar.filer` until 2026-11-20) | Fixed once on the App Store. The app's name is Twin Panes (D25). |
 | D12 | The editor has three modes — **Hex, Plain text, Markdown** — with find/replace inside the file being edited in every mode | See §4.10. Text editing needs insert/delete, so insert/delete (M8) must land before the text modes (M9a). |
-| D13 | Public GitHub repo `edudar/filer`, licence **Apache-2.0** | Free GitHub Actions minutes on macOS runners. Apache-2.0 is App Store–compatible. Never commit signing secrets — use GitHub encrypted secrets for CI signing later. |
+| D13 | Public GitHub repo `edudar/twin-panes` (was `edudar/filer` until 2026-11-20), licence **Apache-2.0** | Free GitHub Actions minutes on macOS runners. Apache-2.0 is App Store–compatible. Never commit signing secrets — use GitHub encrypted secrets for CI signing later. |
 | D14 | The editor opens **regular files only** | No block devices, no packages as files. Files without write permission, locked (`uchg`) or root-owned open read-only; no privileged save. |
 | D15 | **Unsaved edits survive a crash**: the add buffer is always a file, and edit operations are journaled and replayed on relaunch | See §4.2. Lands with sessions in M3b. A recovered session has its edits but no undo history. The guarantee holds only where the bytes the edits sit on are durably kept (a clone or private copy); elsewhere it is narrowed and the UI says so (§4.1). |
 | D16 | **APFS clone at open** protects unsaved edits from external modification | See §4.1. Where cloning isn't possible (non-APFS, or a volume the sandbox can't write to), fall back to detect-and-warn. |
@@ -37,6 +37,8 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D21 | **Command registry as a catalog:** every action is a command with a stable ID (used by bindings, the F-key bar and the item switcher) that maps to an AppKit action. Menus send actions through the responder chain and validate with AppKit menu validation; the registry intercepts only context-dependent keys | See §4.11. Built in M0 with default bindings; user-editable in M10. |
 | D22 | **Testing frameworks:** swift-testing for logic tests; XCTest for `measure` performance tests and UI tests | See §7. |
 | D23 | **State restoration** uses AppKit's restoration APIs (`NSWindowRestoration`, `encodeRestorableState(with:)` / `restoreState(with:)`) for windows, slots and tabs; crash recovery stays separate and independently durable | See §4.8. Follows the system's "Close windows when quitting an app" setting. Lands in M5, multi-window in M11. |
+| D24 | **One app icon: Twin Panes, Navy + coral**, as an Icon Composer `.icon` with default, dark, clear and tinted styles. Byte Panes and the Midnight mint palette stay as reference designs; no in-app icon picker | See §4.12. macOS can't switch an app's icon outside a running session, so a picker isn't worth it. Shipped in M0. |
+| D25 | **The app is named Twin Panes** (was Filer until 2026-11-20) | Display and product name "Twin Panes"; project, target and scheme `TwinPanes`; package `TwinPanesKit`; core module `TwinPanesCore`; bundle ID per D11. |
 
 ## 3. Constraints that drive the design
 
@@ -55,7 +57,7 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 Dependencies point strictly **down**; each layer imports only layers below it.
 
 ```
-FilerApp (app target, thin)   — app lifecycle, menus, the single main frame,
+TwinPanes (app target, thin)  — app lifecycle, menus, the single main frame,
  │                              preferences, sandbox/bookmarks; wires the kits
  │                              together (e.g. injects the hex-view factory into
  │                              BrowserKit's preview pane)
@@ -66,7 +68,7 @@ FilerApp (app target, thin)   — app lifecycle, menus, the single main frame,
  │   └─ TextEditKit (AppKit)  — plain-text + Markdown modes (TextKit 2), large-text viewer
  └─ WorkspaceKit              — `WorkspaceItem` protocol, `MainFrameLayout`,
      │                          command registry (§4.11); knows no concrete item types
-     └─ FilerCore             — no UI imports; unit-tested with `swift test`
+     └─ TwinPanesCore             — no UI imports; unit-tested with `swift test`
          ├─ ByteSource          — read-only file access (pread + LRU page cache,
          │                        plus an uncached sequential read path)
          ├─ PieceTable          — edit model: original file + add-buffer file; persistent tree
@@ -79,15 +81,15 @@ FilerApp (app target, thin)   — app lifecycle, menus, the single main frame,
 ```
 
 - `HexViewKit`, `TextEditKit` and `BrowserKit` each depend on `WorkspaceKit` and
-  `FilerCore`; none of them imports a sibling kit. Anything that crosses kits (the
+  `TwinPanesCore`; none of them imports a sibling kit. Anything that crosses kits (the
   preview pane's hex view, F4 opening an editor from the browser) goes through a
-  protocol or factory defined in `WorkspaceKit` and supplied by `FilerApp`.
-- **Project layout (D20):** one local Swift package, `FilerKit/`, with all library
-  targets (FilerCore, WorkspaceKit, EditorKit, HexViewKit, TextEditKit, later BrowserKit)
-  plus a thin Xcode app target, `Filer.xcodeproj` at the repository root. The package
+  protocol or factory defined in `WorkspaceKit` and supplied by the TwinPanes app target.
+- **Project layout (D20):** one local Swift package, `TwinPanesKit/`, with all library
+  targets (TwinPanesCore, WorkspaceKit, EditorKit, HexViewKit, TextEditKit, later BrowserKit)
+  plus a thin Xcode app target, `TwinPanes.xcodeproj` at the repository root. The package
   lives in its own folder so it never encloses the project that uses it (Xcode
-  mishandles a local package that contains its own client project). No XcodeGen; `swift test` covers every target that has
-  logic worth testing. The dependency graph above is what M0's `Package.swift`
+  mishandles a local package that contains its own client project). No XcodeGen;
+  `swift test` covers every target that has logic worth testing. The dependency graph above is what M0's `Package.swift`
   encodes.
 - The `WorkspaceItem` protocol (§4.8) is how the editor, viewers and terminal are
   hosted in panel tabs, the preview pane or the bottom drawer. Defining it now
@@ -97,7 +99,7 @@ FilerApp (app target, thin)   — app lifecycle, menus, the single main frame,
   that its views are window controllers, while ours are tabs embedded in file-manager
   panes that move between slots and windows, and that its save machinery (autosave
   in place, versions, safe-save) can't be steered into the save strategies of §4.3
-  for 4 GB files. Instead an `EditorSession` (FilerCore, Foundation only) owns the
+  for 4 GB files. Instead an `EditorSession` (TwinPanesCore, Foundation only) owns the
   file and the edit history: `ByteSource` + `PieceTable`, undo, dirty state,
   save/revert, and adopts `NSFilePresenter` + `NSFileCoordinator` for
   external-change detection and coordinated writes. **Tabs own presentation**:
@@ -108,7 +110,7 @@ FilerApp (app target, thin)   — app lifecycle, menus, the single main frame,
   `applicationShouldTerminate(_:)` → `.terminateLater`, walks the dirty sessions one
   sheet at a time, then `reply(toApplicationShouldTerminate:)`.
 - **Open With without NSDocument (M1):** declare `CFBundleDocumentTypes` for
-  `public.data` with `LSHandlerRank = Alternate` (so Filer never becomes the default
+  `public.data` with `LSHandlerRank = Alternate` (so Twin Panes never becomes the default
   app for everything) and no `NSDocumentClass`; handle `application(_:open:)`.
   `NSDocumentController.shared.noteNewRecentDocumentURL(_:)` still drives the Open
   Recent menu, with sandbox-safe bookmarks, without using NSDocument.
@@ -356,7 +358,7 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
 - **Preview pane (right, collapsible):** `QLPreviewView` for the selected file plus
   metadata (size, dates, permissions, xattrs). For files Quick Look can't show, offer
   a hex view. BrowserKit doesn't import HexViewKit: it asks a viewer factory
-  (protocol in WorkspaceKit, implementation injected by FilerApp). The hex view here
+  (protocol in WorkspaceKit, implementation injected by the TwinPanes app target). The hex view here
   follows the quick-view rules in §4.8 (read-only `ByteSource`, no session).
 - **Norton Commander-style keys + bottom function bar:**
   F3 View (quick view, §4.8), F4 Edit (editor tab; hex only until M9a, then mode by
@@ -644,6 +646,34 @@ can't be plain menu shortcuts.
 
 Built in M0 with hard-coded default bindings; user-editable bindings arrive in M10.
 
+### 4.12 App icon (D24)
+
+**The icon.** Twin Panes, Navy + coral: two file panes on a navy tile, the active pane
+outlined in coral with a coral highlighted row, and an F-key bar of six separate
+slots (the first lit). Source: `TwinPanes/AppIcon.icon`, an Icon Composer document
+with four layers (panes, rows, cursor, keys) as SVGs in three groups, so macOS can
+light, blur and tint each part.
+
+**Styles.** macOS 26+ renders the icon in the style the user picks under Appearance:
+default, dark, clear (light and dark) and tinted (light and dark). The `.icon` sets a
+darker navy fill for dark; clear and tinted are derived from the layers.
+`docs/assets/app-icon-appearances.png` shows all six, rendered with Icon Composer's
+`ictool`. In clear and tinted the coral turns monochrome; the highlighted row and
+the first F-key still stand out because they sit in their own layer group.
+
+**Older macOS.** On macOS 15 (D2) Xcode's asset compiler emits a flat `AppIcon.icns`
+from the same `.icon`, so there's one source for every supported release.
+
+**Reference designs.** Byte Panes (rows drawn as runs of byte cells) and the Midnight
+mint palette stay on the icon canvas (Twin Panes icon concepts, artboards 6–7) for
+reference: marketing, a future variant, or a document icon. There's no in-app icon
+picker: macOS has no alternate-icon API for apps (`setAlternateIconName` is iOS
+only), rewriting the bundle icon breaks the code signature, and
+`NSApp.applicationIconImage` only lasts while the app runs.
+
+**Still to do:** tune the clear and tinted styles in Icon Composer by eye (per-layer
+opacity and glass), and check the icon at 16 and 32 px in Finder list view.
+
 ## 5. Sandbox & distribution
 
 - **Sandbox on in every build from the start**, entitlement
@@ -658,7 +688,7 @@ Built in M0 with hard-coded default bindings; user-editable bindings arrive in M
     again (open panel preset to the old location), never silently dropped.
 - **Security-scope lifetime.** `startAccessingSecurityScopedResource` /
   `stopAccessing…` are wrapped in a reference-counted `SecurityScope` token
-  (FilerCore). Whoever needs access holds a token **until its work finishes**, not
+  (TwinPanesCore). Whoever needs access holds a token **until its work finishes**, not
   until its UI goes away: an `EditorSession` for its file, a browser tab for its
   location, a quick view or preview while it reads, a queued file operation until it
   completes or is cancelled. Closing the tab that started a copy doesn't revoke the
@@ -673,7 +703,7 @@ Built in M0 with hard-coded default bindings; user-editable bindings arrive in M
   one-time grant flow (e.g. home folder, external volumes) persisted as bookmarks.
 - **Sandbox spike (M0, signed build, ~3–4 days)** — covers browsing *and* the
   editor's write path, because its result decides which save and recovery guarantees
-  Filer can make before the editor is built around them.
+  Twin Panes can make before the editor is built around them.
   - **Browsing:** grant the home folder and an external volume, then list, preview,
     copy into and trash in Desktop/Documents/Downloads, ~/Library, iCloud Drive, a USB
     volume and an SMB share; record which prompts appear and what fails.
@@ -709,7 +739,7 @@ the rest.
 
 | # | Milestone | Scope | Done when |
 |---|---|---|---|
-| M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.filer`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15 and the newest macOS (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5): browsing, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15 and the newest macOS; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix written up and the save/recovery policy per volume decided from it |
+| M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.twinpanes`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15 and the newest macOS (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5): browsing, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15 and the newest macOS; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix written up and the save/recovery policy per volume decided from it |
 | M1 | Read-only hex viewer | Virtual scroller first, then thread-safe ByteSource + cache with async prefetch and placeholders, HexView, selection, copy as hex/text (capped), Go to offset, view options (offset base, grouping, ASCII/Latin-1 text column), non-regular files refused, `SecurityScope` tokens, open via File › Open / drag-drop / Finder "Open With" (document types per §4, no NSDocument) — each opens a **tab in the main frame**, Open Recent via bookmarks | 4 GB file opens in < 100 ms, scrolls at 120 Hz (also from a USB/SMB volume, with placeholders instead of stalls), memory < 100 MB; all measured on real hardware, also while a search runs |
 | M2 | Inspect & search | Inspector panel, `Searcher` over a byte-reading protocol with the uncached `F_NOCACHE` read path, find next/previous/all (hex + text, capped results), status bar (offset, selection length, file size) | Full search of a 4 GB file with progress + cancel, without evicting the view's pages |
 | M3a | Overwrite editing | Persistent PieceTable (snapshots), undo as a stack of roots with coalescing, overwrite in hex and text columns (encoding rules per §4.4), dirty-byte highlight, Searcher over snapshots | Fuzz tests pass; edits don't stall concurrent search |
@@ -717,14 +747,14 @@ the rest.
 | M4 | Browser foundation | Single panel: async listing, navigation, back/forward, sorting, hidden-files toggle, folder-grant flow + bookmarks (informed by the M0 spike), per-tab `SecurityScope`, live updates | Browse a 100k-file folder without UI stalls |
 | M5 | Dual panels + tabs | Second panel, active-panel focus, per-panel tab bar, tab restore on relaunch via AppKit restoration (D23), collapsible sidebar (Favorites, Locations) | Daily navigation possible without Finder |
 | M6 | NC keys + file operations | Function-key bar, F2–F8 actions with ⌘ equivalents, operations queue (copy/move/trash/new folder/rename) with progress and conflict handling, cross-volume move with per-item failure reporting | Copy/move large trees reliably with cancel and conflicts |
-| M7 | Preview pane + hex integration | Collapsible right pane with Quick Look + metadata, viewer factory injected by FilerApp, QuickView item (F3 quick view in opposite panel, read-only `ByteSource`, unsaved-edits marker), F4 editor tab (hex), hex view in preview for unsupported types | Hex editor reachable entirely from the file manager; moving the cursor through 1,000 files in quick view creates no sessions |
+| M7 | Preview pane + hex integration | Collapsible right pane with Quick Look + metadata, viewer factory injected by the TwinPanes app target, QuickView item (F3 quick view in opposite panel, read-only `ByteSource`, unsaved-edits marker), F4 editor tab (hex), hex view in preview for unsupported types | Hex editor reachable entirely from the file manager; moving the cursor through 1,000 files in quick view creates no sessions |
 | M8 | Insert/delete | PieceTable insert/delete exposed, insert-mode toggle in hex, paste/delete ranges, strategy A with a streamed rewrite (inode re-keying, new backing generation, metadata preservation), free-space check, refusal or copy-based path on strategy-B-only volumes | Random edit sequences round-trip byte-exact through save; xattrs/tags survive |
 | M9a | Text mode + find/replace | Mode switcher, encoding detection, lossless invalid-byte mapping, TextKit sync layer, TextKit 2 text mode (after the spike in §4.10 passes; 16 MB threshold profiled separately), unencodable-input handling + Convert to UTF-8, line endings, inline find/replace in hex (any length) and text modes | Switch modes mid-edit with no data loss; replace-all on a 15 MB text file is one undo step; text-mode memory stays within its budget at the threshold |
 | M9b | Large-text viewer | Virtualized read-only text view over snapshots, sparse background line index scanning in code units (UTF-8/Latin-1/UTF-16), `Searcher`-based find | Open and scroll a 4 GB log file (and a UTF-16 file) smoothly; line index stays within tens of MB |
 | M9c | Markdown mode | Source highlighting, preview (renderer per §4.10), split/toggle, find/replace | Edit a few-MB README with live preview, no stalls |
 | M10 | Polish | Preferences (font, bytes/row, colors, text-size threshold), **user-editable key bindings** (incl. the deferred conflicts in §9), more text-column encodings (UTF-8, UTF-16, EBCDIC), bookmarks within a file, light/dark, selection checksums | Daily-driver quality for editor + browser |
 | M11 | Multiple windows | ⌘N, drag tabs between windows, Move Tab to New Window, Merge All Windows, multi-window restoration, several text-mode views of one session (shared `NSTextContentStorage`, §4.9) | Merge of 3 windows keeps every tab on its original side |
-| M12 | Terminal (Direct only) | `Direct`/`AppStore` build configurations, SwiftTerm in bottom drawer and as panel tab, follows active directory, Ctrl+O full-frame toggle, item switcher | Daily shell use without leaving Filer |
+| M12 | Terminal (Direct only) | `Direct`/`AppStore` build configurations, SwiftTerm in bottom drawer and as panel tab, follows active directory, Ctrl+O full-frame toggle, item switcher | Daily shell use without leaving Twin Panes |
 | M13+ | More file-manager features | Remote connections, compare/sync, batch rename, archives, NC-style marking + drive switching, notarized Direct releases + updates… | Planned as requirements arrive |
 
 Later hex candidates: structure templates (Mach-O/ELF/PNG…), two-file diff, entropy /
@@ -733,7 +763,7 @@ byte histogram.
 ## 7. Testing
 - **Frameworks (D22):** swift-testing for logic tests; XCTest for `measure`-based
   performance tests and XCUITest UI tests.
-- `FilerCore` unit tests: PieceTable fuzzing (including snapshots and undo across
+- `TwinPanesCore` unit tests: PieceTable fuzzing (including snapshots and undo across
   saves), Saver round-trips for both strategies (commit-record rollback, metadata preservation, inode
   re-keying), crash-recovery journal replay (kill at random points, replay, compare
   with the reference), clone-generation lifetimes (no clone deleted while history
