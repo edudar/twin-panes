@@ -307,10 +307,13 @@ volume/grant capability matrix (M0 spike, §5).
   hex digits and printable ASCII.
 - **Virtual scrolling:** window-sized view; a custom scroller maps position to a top
   row index (UInt64). No gigantic document view, no float-precision drift. This is
-  the riskiest part of M1 — build it first. Reuse native scrolling behaviour where it
-  fits the virtual viewport (an `NSScrollView` with a small proxy document for
-  momentum, elastic edges and overlay scrollers, mapped onto the row index), and fall
-  back to a fully custom scroller only where that breaks.
+  the riskiest part of M1 — build it first. **As built (M1):** the scroll position is
+  a `Double` pixel offset into the full content (exact for whole pixels up to 2^53,
+  so ~4.3e9 px for 4 GB at 16 bytes per row is fine), driven by an `NSScroller`
+  subview and `scrollWheel(with:)`; trackpad momentum comes with the events. No
+  `NSScrollView` proxy: with a proxy, one proxy pixel spans many rows in a big file,
+  so wheel scrolling jumps. Elastic edges and overlay scrollers are not done; revisit
+  in M10.
 - **Measured on real hardware while a search runs:** first paint, scroll hitches
   (frame time, not just average fps) and memory.
 - Rows come from the asynchronous prefetch in §4.1; missing pages draw as
@@ -329,7 +332,7 @@ volume/grant capability matrix (M0 spike, §5).
 - **View options (D18)**, in the View menu and the editor toolbar, per editor item,
   with defaults in Preferences:
   - offset base: hex / decimal / both;
-  - byte grouping: 1 / 2 / 4 / 8 (with LE/BE display order for groups);
+  - byte grouping: 1 / 2 / 4 / 8 (M1); LE/BE display order for groups comes in M10;
   - text-column encoding: ASCII, Latin-1, UTF-8 (multi-byte sequences drawn across
     their bytes), UTF-16LE/BE, EBCDIC; more can be added later.
 - Accessibility is out of scope for now (D19); keep drawing and hit-testing
