@@ -54,50 +54,56 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 
 ## 4. Architecture
 
-Dependencies point strictly **down**; each layer imports only layers below it. The
-tag after each name is the milestone where it gets real content; `M0` parts exist now.
+The app target sits at the repo root; every library module is a sibling folder under
+`TwinPanesKit/Sources/`. Modules aren't nested in each other; how they depend on
+each other is in the second table. The milestone is where a module gets real
+content; the `M0` rows exist now.
 
-```
-TwinPanes app target  [M0]  TwinPanes/ — entry point, app delegate, main menu, the
- │                          command catalog and default bindings, placeholder items,
- │                          smoke test, app icon. Later: preferences, and wiring the
- │                          kits together (e.g. the hex-view factory for BrowserKit)
- ├─ BrowserKit        [M4]  panes, file listing, operations queue, preview pane
- ├─ EditorKit         [M1]  the editor item: mode switcher, find bar; hosts the
- │   │                      mode views over one EditorSession
- │   ├─ HexViewKit    [M1]  virtualized hex/text view, selection, inspector UI
- │   └─ TextEditKit   [M9]  plain-text and Markdown modes, large-text viewer
- └─ WorkspaceKit      [M0]  the single main frame, independent of item types:
-     │                      WorkspaceItem, MainFrameLayout and its view controller,
-     │                      main window and controller, tab bar, close workflow,
-     │                      workspace registry, command registry and dispatcher,
-     │                      focus chain, menu bindings (§4.8, §4.11)
-     └─ TwinPanesCore [M0]  no UI imports; today only the module boundary
-         ├─ ByteSource     [M1]  read-only file access (pread + LRU page cache,
-         │                       plus an uncached sequential read path)
-         ├─ Searcher       [M2]  streaming hex/text search, cancellable, progress
-         ├─ Inspector      [M2]  decode bytes at cursor (ints, floats, dates, text)
-         ├─ PieceTable     [M3a] edit model: original file + add-buffer file;
-         │                       persistent tree
-         ├─ UndoStack      [M3a] stack of earlier piece-tree roots (+ cursor/selection)
-         ├─ EditorSession, [M3b] per-file session, dirty state, save/revert, file
-         │  SessionRegistry      identity, backing generations, crash journal,
-         │                       security scope
-         └─ Saver          [M3b] strategy A (clone, patch, replace) and B (in place +
-                                 journal), §4.3
+**Modules**
 
-SandboxProbe          [M0]  outside the graph: Foundation-only probes for the M0
-                            sandbox spike (§5); only the app's Debug menu uses it.
-                            Goes away with the Debug menu once the spike is done.
-```
+| Module | Folder | Milestone | Contents |
+|---|---|---|---|
+| app target | `TwinPanes/` | M0 | entry point, app delegate, main menu, command catalog and default bindings, placeholder items, smoke test, app icon. Later: preferences, and wiring the kits together (e.g. the hex-view factory for BrowserKit's preview pane) |
+| TwinPanesCore | `TwinPanesKit/Sources/TwinPanesCore` | M0: module only | the UI-free engine, no AppKit imports (components below) |
+| WorkspaceKit | `TwinPanesKit/Sources/WorkspaceKit` | M0 | the single main frame, independent of item types: `WorkspaceItem`, `MainFrameLayout` and its view controller, main window and controller, tab bar, close workflow, workspace registry, command registry and dispatcher, focus chain, menu bindings (§4.8, §4.11) |
+| HexViewKit | `TwinPanesKit/Sources/HexViewKit` | M1 | virtualized hex/text view, selection, inspector UI |
+| EditorKit | `TwinPanesKit/Sources/EditorKit` | M1 | the editor item: mode switcher, find bar; hosts the mode views over one `EditorSession` |
+| BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M4 | panes, file listing, operations queue, preview pane |
+| TextEditKit | `TwinPanesKit/Sources/TextEditKit` | M9 | plain-text and Markdown modes, large-text viewer |
+| SandboxProbe | `TwinPanesKit/Sources/SandboxProbe` | M0 only | Foundation-only probes for the sandbox spike (§5); only the app's Debug menu uses it; goes away with that menu |
 
-- `HexViewKit`, `TextEditKit` and `BrowserKit` each depend on `WorkspaceKit` and
-  `TwinPanesCore`; none of them imports a sibling kit. `EditorKit` sits above
-  `HexViewKit` and `TextEditKit`. Anything that crosses kits (the preview pane's hex
-  view, F4 opening an editor from the browser) goes through a protocol or factory
-  defined in `WorkspaceKit` and supplied by the app target.
-- `EditorKit`, `HexViewKit` and `TextEditKit` are empty modules in M0: they exist so
-  the dependency graph is enforced from the first commit.
+`EditorKit`, `HexViewKit` and `TextEditKit` are empty modules in M0; they exist so
+the dependency rules below are enforced by `Package.swift` from the first commit.
+`BrowserKit` is added in M4.
+
+**Dependencies** (what each module may import; enforced by `Package.swift`)
+
+| Module | Imports |
+|---|---|
+| TwinPanesCore | Foundation only |
+| WorkspaceKit | TwinPanesCore |
+| HexViewKit, TextEditKit, BrowserKit | WorkspaceKit, TwinPanesCore |
+| EditorKit | HexViewKit, TextEditKit, WorkspaceKit, TwinPanesCore |
+| SandboxProbe | Foundation only |
+| app target | links WorkspaceKit, EditorKit and SandboxProbe today (imports WorkspaceKit and SandboxProbe); BrowserKit from M4 |
+
+No module imports one at its own level: HexViewKit, TextEditKit and BrowserKit never
+import each other. Anything that crosses kits (the preview pane's hex view, F4
+opening an editor from the browser) goes through a protocol or factory defined in
+`WorkspaceKit` and supplied by the app target.
+
+**TwinPanesCore components** (planned; all inside the one module)
+
+| Component | Milestone | Role |
+|---|---|---|
+| `ByteSource` | M1 | read-only file access: pread + LRU page cache, plus an uncached sequential read path (§4.1) |
+| `Searcher` | M2 | streaming hex/text search, cancellable, with progress (§4.5) |
+| `Inspector` | M2 | decode bytes at the cursor: ints, floats, dates, text (§4.6) |
+| `PieceTable` | M3a | edit model over the original file and an add-buffer file; persistent tree (§4.2) |
+| `UndoStack` | M3a | stack of earlier piece-tree roots plus cursor/selection |
+| `EditorSession`, `SessionRegistry` | M3b | per-file session: dirty state, save/revert, file identity, backing generations, crash journal, security scope |
+| `Saver` | M3b | save strategy A (clone, patch, replace) and B (in place + journal) (§4.3) |
+
 - **Project layout (D20):**
 
   | Path | What |
@@ -111,7 +117,7 @@ SandboxProbe          [M0]  outside the graph: Foundation-only probes for the M0
   The package lives in its own folder so it never encloses the project that uses it
   (Xcode mishandles a local package that contains its own client project). No
   XcodeGen. `swift test --package-path TwinPanesKit` covers every target that has
-  logic worth testing; `Package.swift` encodes the graph above.
+  logic worth testing.
 - The `WorkspaceItem` protocol (§4.8) is how the editor, viewers and terminal are
   hosted in panel tabs, the preview pane or the bottom drawer. Defining it now
   costs little and keeps the editor kits from depending on app-level code.
