@@ -114,7 +114,7 @@
 			mainGroup = E45799A9D1AA2A448CBABBF9;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference ".." */,
+				CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference "FilerKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EE8F24E3848AC5B936FD0F43 /* Products */;
@@ -209,26 +209,26 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference ".." */ = {
+		CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference "FilerKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ..;
+			relativePath = FilerKit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		5C7AFC0EAF72331C93A28512 /* WorkspaceKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference ".." */;
+			package = CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference "FilerKit" */;
 			productName = WorkspaceKit;
 		};
 		1EEC312AF49ADC4F44BA62AC /* EditorKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference ".." */;
+			package = CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference "FilerKit" */;
 			productName = EditorKit;
 		};
 		17D08F03DE63A666EC4BB22F /* SandboxProbe */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference ".." */;
+			package = CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference "FilerKit" */;
 			productName = SandboxProbe;
 		};
 /* End XCSwiftPackageProductDependency section */

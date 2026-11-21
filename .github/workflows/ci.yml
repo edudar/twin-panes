@@ -42,14 +42,14 @@ jobs:
       - name: Lint (swift-format)
         # Only on the newest image, so formatting rules come from one swift-format version.
         if: matrix.macos == '26'
-        run: swift format lint --strict --recursive Package.swift Sources Tests App/Filer
+        run: swift format lint --strict --recursive FilerKit Filer
 
       - name: Package tests
-        run: swift test --parallel
+        run: swift test --parallel --package-path FilerKit
 
       - name: Build app (sandboxed, ad-hoc signed)
         run: |
-          xcodebuild -project App/Filer.xcodeproj -scheme Filer -configuration Debug \
+          xcodebuild -project Filer.xcodeproj -scheme Filer -configuration Debug \
             -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData \
             CODE_SIGN_IDENTITY=- build
 

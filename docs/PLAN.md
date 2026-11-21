@@ -82,9 +82,11 @@ FilerApp (app target, thin)   — app lifecycle, menus, the single main frame,
   `FilerCore`; none of them imports a sibling kit. Anything that crosses kits (the
   preview pane's hex view, F4 opening an editor from the browser) goes through a
   protocol or factory defined in `WorkspaceKit` and supplied by `FilerApp`.
-- **Project layout (D20):** one local Swift package with all library targets
-  (FilerCore, WorkspaceKit, EditorKit, HexViewKit, TextEditKit, later BrowserKit) plus
-  a thin Xcode app target. No XcodeGen; `swift test` covers every target that has
+- **Project layout (D20):** one local Swift package, `FilerKit/`, with all library
+  targets (FilerCore, WorkspaceKit, EditorKit, HexViewKit, TextEditKit, later BrowserKit)
+  plus a thin Xcode app target, `Filer.xcodeproj` at the repository root. The package
+  lives in its own folder so it never encloses the project that uses it (Xcode
+  mishandles a local package that contains its own client project). No XcodeGen; `swift test` covers every target that has
   logic worth testing. The dependency graph above is what M0's `Package.swift`
   encodes.
 - The `WorkspaceItem` protocol (§4.8) is how the editor, viewers and terminal are

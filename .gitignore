@@ -2,9 +2,9 @@
 .DS_Store
 
 # SwiftPM
-/.build/
-/.swiftpm/
-/Packages/
+.build/
+.swiftpm/
+Packages/
 
 # Xcode
 DerivedData/

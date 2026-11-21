@@ -4,16 +4,16 @@ Goal (PLAN.md §5): a capability matrix by **volume type × grant type** that de
 save strategy per volume (§4.3), the recovery guarantee per volume (§4.1, open question
 §9.3) and the App Store question (D3, §9.1).
 
-The probes live in `Sources/SandboxProbe` and run from the app's **Debug** menu, in the
-signed, sandboxed build. `swift test` runs them unsandboxed on a temp folder only, to
-prove the probe code itself works.
+The probes live in `FilerKit/Sources/SandboxProbe` and run from the app's **Debug**
+menu, in the signed, sandboxed build. `swift test --package-path FilerKit` runs them
+unsandboxed on a temp folder only, to prove the probe code itself works.
 
 ## How to run
 
 1. Build and launch the app (Debug configuration is sandboxed and ad-hoc signed):
 
    ```bash
-   xcodebuild -project App/Filer.xcodeproj -scheme Filer -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData build
+   xcodebuild -project Filer.xcodeproj -scheme Filer -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData build
    ```
 
    ```bash

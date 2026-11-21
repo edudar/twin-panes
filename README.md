@@ -7,18 +7,20 @@ Requirements: macOS 15 or later, Apple Silicon, Xcode 16 or later.
 
 ## Layout
 
-- `Package.swift`, `Sources/`, `Tests/` — one Swift package with every library target
-  (`FilerCore`, `WorkspaceKit`, `HexViewKit`, `TextEditKit`, `EditorKit`, `SandboxProbe`).
-- `App/` — the thin Xcode app target (`Filer.xcodeproj`), entitlements and app glue.
+- `Filer.xcodeproj` — the thin app target. Open this in Xcode and run the **Filer** scheme.
+- `Filer/` — app sources (entry point, menus, placeholder items, smoke test).
+- `Config/` — build settings (`.xcconfig`) and entitlements.
+- `FilerKit/` — one Swift package with every library target (`FilerCore`, `WorkspaceKit`,
+  `HexViewKit`, `TextEditKit`, `EditorKit`, `SandboxProbe`) and their tests.
 
 ## Build and test
 
 ```bash
-swift test
+swift test --package-path FilerKit
 ```
 
 ```bash
-xcodebuild -project App/Filer.xcodeproj -scheme Filer -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData build
+xcodebuild -project Filer.xcodeproj -scheme Filer -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData build
 ```
 
 ```bash
@@ -26,7 +28,7 @@ build/DerivedData/Build/Products/Debug/Filer.app/Contents/MacOS/Filer --smoke-te
 ```
 
 ```bash
-swift format lint --strict --recursive Package.swift Sources Tests App/Filer
+swift format lint --strict --recursive FilerKit Filer
 ```
 
 ## License

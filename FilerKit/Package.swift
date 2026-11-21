@@ -1,7 +1,9 @@
 // swift-tools-version: 6.0
-// Filer's library targets (D20). Dependencies point strictly down (PLAN.md §4):
+// FilerKit: every library target of Filer (D20). The app target lives in
+// Filer.xcodeproj at the repository root and links these products. Dependencies point
+// strictly down (PLAN.md §4):
 //
-//   FilerApp (Xcode app target, App/)
+//   Filer app (Filer.xcodeproj, Filer/)
 //    ├─ EditorKit ─┬─ HexViewKit ─┐
 //    │             └─ TextEditKit ┤
 //    └─────────────────────────── WorkspaceKit ── FilerCore
@@ -12,7 +14,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "Filer",
+    name: "FilerKit",
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "FilerCore", targets: ["FilerCore"]),
