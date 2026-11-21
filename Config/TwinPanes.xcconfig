@@ -26,3 +26,6 @@ PRODUCT_MODULE_NAME = TwinPanes
 // App icon: AppIcon.icon (Icon Composer) in TwinPanes/; default, dark, clear and
 // tinted appearances (PLAN.md §4.12). Xcode also derives the flat icon for macOS 15.
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+
+// Document types for Finder's Open With; merged with the generated Info.plist.
+INFOPLIST_FILE = Config/Info.plist

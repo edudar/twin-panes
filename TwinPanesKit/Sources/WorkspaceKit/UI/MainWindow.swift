@@ -17,6 +17,31 @@ public final class MainWindow: NSWindow {
         }
         super.sendEvent(event)
     }
+
+    // MARK: Dropping files
+
+    /// Called with file URLs dropped anywhere on the window (that no view took first).
+    public var onDropFiles: (([URL]) -> Void)? {
+        didSet {
+            if onDropFiles != nil { registerForDraggedTypes([.fileURL]) }
+        }
+    }
+
+    private func fileURLs(_ info: NSDraggingInfo) -> [URL] {
+        info.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    }
+
+    public func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        onDropFiles != nil && !fileURLs(sender).isEmpty ? .copy : []
+    }
+
+    public func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = fileURLs(sender)
+        guard let onDropFiles, !urls.isEmpty else { return false }
+        onDropFiles(urls)
+        return true
+    }
 }
 
 /// Owns one main window and its layout; runs the close workflow before the window
