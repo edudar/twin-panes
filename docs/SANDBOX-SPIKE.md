@@ -4,8 +4,8 @@ Goal (PLAN.md §5): a capability matrix by **volume type × grant type** that de
 save strategy per volume (§4.3), the recovery guarantee per volume (§4.1, open question
 §9.3) and the App Store question (D3, §9.1).
 
-The probes live in `FilerKit/Sources/SandboxProbe` and run from the app's **Debug**
-menu, in the signed, sandboxed build. `swift test --package-path FilerKit` runs them
+The probes live in `TwinPanesKit/Sources/SandboxProbe` and run from the app's **Debug**
+menu, in the signed, sandboxed build. `swift test --package-path TwinPanesKit` runs them
 unsandboxed on a temp folder only, to prove the probe code itself works.
 
 ## How to run
@@ -13,20 +13,20 @@ unsandboxed on a temp folder only, to prove the probe code itself works.
 1. Build and launch the app (Debug configuration is sandboxed and ad-hoc signed):
 
    ```bash
-   xcodebuild -project Filer.xcodeproj -scheme Filer -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData build
+   xcodebuild -project TwinPanes.xcodeproj -scheme TwinPanes -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData build
    ```
 
    ```bash
-   open build/DerivedData/Build/Products/Debug/Filer.app
+   open build/DerivedData/Build/Products/Debug/Twin\ Panes.app
    ```
 
 2. For each volume below:
    - **Debug › Probe a Folder…** — pick a folder on that volume. The probe works in its
-     own `FilerProbe-…` subfolder and deletes it afterwards.
+     own `TwinPanesProbe-…` subfolder and deletes it afterwards.
    - **Debug › Probe a Test File…** — pick a *disposable* file on that volume. The probe
      rewrites one byte (same value), adds an xattr and a Finder tag, and replaces the
      file through clone/copy → stage → `replaceItemAt` (it gets a new inode).
-3. Quit Filer, relaunch, then **Debug › Resolve Saved Bookmarks** (relaunch check).
+3. Quit Twin Panes, relaunch, then **Debug › Resolve Saved Bookmarks** (relaunch check).
 4. Also try, per volume: unplug/unmount during a folder probe (expect an error row, no
    crash or hang).
 5. **Debug › Export Spike Report…** and commit the Markdown under `docs/` (or paste it

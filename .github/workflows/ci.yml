@@ -30,6 +30,8 @@ jobs:
             runner: macos-26
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    env:
+      APP: build/DerivedData/Build/Products/Debug/Twin Panes.app
     steps:
       - uses: actions/checkout@v4
 
@@ -42,20 +44,20 @@ jobs:
       - name: Lint (swift-format)
         # Only on the newest image, so formatting rules come from one swift-format version.
         if: matrix.macos == '26'
-        run: swift format lint --strict --recursive FilerKit Filer
+        run: swift format lint --strict --recursive TwinPanesKit TwinPanes
 
       - name: Package tests
-        run: swift test --parallel --package-path FilerKit
+        run: swift test --parallel --package-path TwinPanesKit
 
       - name: Build app (sandboxed, ad-hoc signed)
         run: |
-          xcodebuild -project Filer.xcodeproj -scheme Filer -configuration Debug \
+          xcodebuild -project TwinPanes.xcodeproj -scheme TwinPanes -configuration Debug \
             -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData \
             CODE_SIGN_IDENTITY=- build
 
       - name: Check entitlements
         run: |
-          codesign -d --entitlements :- build/DerivedData/Build/Products/Debug/Filer.app \
+          codesign -d --entitlements :- "$APP" \
             > entitlements.plist
           for key in app-sandbox files.user-selected.read-write files.bookmarks.app-scope; do
             grep -q "com.apple.security.$key" entitlements.plist || { echo "missing $key"; exit 1; }
@@ -63,6 +65,6 @@ jobs:
 
       - name: Smoke test
         run: |
-          build/DerivedData/Build/Products/Debug/Filer.app/Contents/MacOS/Filer --smoke-test \
+          "$APP/Contents/MacOS/Twin Panes" --smoke-test \
             | tee smoke.log
           grep -q "SMOKE OK" smoke.log

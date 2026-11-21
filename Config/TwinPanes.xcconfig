@@ -1,0 +1,24 @@
+// Build settings of the Twin Panes app target (D11 bundle ID; §5 sandbox and ad-hoc
+// "Sign to Run Locally" signing until distribution matters).
+
+PRODUCT_NAME = Twin Panes
+PRODUCT_BUNDLE_IDENTIFIER = io.github.edudar.twinpanes
+MARKETING_VERSION = 0.0.1
+CURRENT_PROJECT_VERSION = 1
+
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_KEY_CFBundleDisplayName = Twin Panes
+INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.developer-tools
+INFOPLIST_KEY_NSHumanReadableCopyright = Copyright 2026 Eduard Dudar. Apache-2.0.
+INFOPLIST_KEY_NSPrincipalClass = NSApplication
+
+CODE_SIGN_ENTITLEMENTS = Config/TwinPanes.entitlements
+CODE_SIGN_IDENTITY = -
+CODE_SIGN_STYLE = Manual
+DEVELOPMENT_TEAM =
+ENABLE_HARDENED_RUNTIME = YES
+
+COMBINE_HIDPI_IMAGES = YES
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/../Frameworks
+SWIFT_EMIT_LOC_STRINGS = NO
+PRODUCT_MODULE_NAME = TwinPanes
