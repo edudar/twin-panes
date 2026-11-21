@@ -1,7 +1,7 @@
-# CI (PLAN.md §7): GitHub-hosted arm64 runners only, on the oldest supported macOS
-# (15, the minimum — D2) and the newest hosted image. Each job runs the package tests,
-# builds the sandboxed app with ad-hoc signing ("Sign to Run Locally", no secrets), and
-# runs the app's own smoke test on that macOS.
+# CI (PLAN.md §7): GitHub-hosted arm64 runners only, one job per supported macOS
+# (D2: 15, 26, 27); GitHub serves macOS 27 as the `xcode-27` image. Each job runs the
+# package tests, builds the sandboxed app with ad-hoc signing ("Sign to Run Locally",
+# no secrets), and runs the app's own smoke test on that macOS.
 #
 # When GitHub announces the retirement of the macos-15 image, raise the minimum (D2)
 # rather than adding a self-hosted machine.
@@ -28,6 +28,8 @@ jobs:
             runner: macos-15
           - macos: "26"
             runner: macos-26
+          - macos: "27"
+            runner: xcode-27
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
@@ -43,7 +45,7 @@ jobs:
 
       - name: Lint (swift-format)
         # Only on the newest image, so formatting rules come from one swift-format version.
-        if: matrix.macos == '26'
+        if: matrix.macos == '27'
         run: swift format lint --strict --recursive TwinPanesKit TwinPanes
 
       - name: Package tests

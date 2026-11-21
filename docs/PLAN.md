@@ -739,7 +739,7 @@ the rest.
 
 | # | Milestone | Scope | Done when |
 |---|---|---|---|
-| M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.twinpanes`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15 and the newest macOS (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5): browsing, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15 and the newest macOS; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix written up and the save/recovery policy per volume decided from it |
+| M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.twinpanes`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15, 26 and 27 (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5): browsing, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15, 26 and 27; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix written up and the save/recovery policy per volume decided from it |
 | M1 | Read-only hex viewer | Virtual scroller first, then thread-safe ByteSource + cache with async prefetch and placeholders, HexView, selection, copy as hex/text (capped), Go to offset, view options (offset base, grouping, ASCII/Latin-1 text column), non-regular files refused, `SecurityScope` tokens, open via File › Open / drag-drop / Finder "Open With" (document types per §4, no NSDocument) — each opens a **tab in the main frame**, Open Recent via bookmarks | 4 GB file opens in < 100 ms, scrolls at 120 Hz (also from a USB/SMB volume, with placeholders instead of stalls), memory < 100 MB; all measured on real hardware, also while a search runs |
 | M2 | Inspect & search | Inspector panel, `Searcher` over a byte-reading protocol with the uncached `F_NOCACHE` read path, find next/previous/all (hex + text, capped results), status bar (offset, selection length, file size) | Full search of a 4 GB file with progress + cancel, without evicting the view's pages |
 | M3a | Overwrite editing | Persistent PieceTable (snapshots), undo as a stack of roots with coalescing, overwrite in hex and text columns (encoding rules per §4.4), dirty-byte highlight, Searcher over snapshots | Fuzz tests pass; edits don't stall concurrent search |
@@ -786,10 +786,13 @@ byte histogram.
 - Performance tests: open time, scroll frame time (including a throttled/slow-volume
   read source), search throughput, save time.
 - CI matrix:
-  - **GitHub-hosted arm64 runners only:** macOS 15 (the minimum, D2) and the newest
-    macOS, newest Xcode, macOS 15 deployment target. Build, `swift test`, and the
-    signed app's smoke tests run on both: launch, bookmarks resolving after relaunch,
-    sandboxed file access, AppKit/TextKit behaviour.
+  - **GitHub-hosted arm64 runners only, one job per supported macOS (D2):**
+    `macos-15`, `macos-26`, and `xcode-27` (GitHub's macOS 27 image, which comes with
+    Xcode 27; there is no `macos-27` label). Each job uses its image's default Xcode
+    and the macOS 15 deployment target. Build, `swift test`, and the signed app's
+    smoke tests run on all three: launch, bookmarks resolving after relaunch,
+    sandboxed file access, AppKit/TextKit behaviour. Lint runs only on the newest
+    image, so its rules match the current swift-format.
   - Background: GitHub retired hosted macOS 14 runners on 2026-11-02
     (actions/runner-images#13518), which is why the minimum moved to macOS 15. Watch
     for the macOS 15 image's retirement notice; when it comes, raise the minimum
