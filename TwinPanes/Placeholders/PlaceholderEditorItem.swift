@@ -1,4 +1,5 @@
 import AppKit
+import EditorKit
 import WorkspaceKit
 
 /// M0 stand-in for an editor session: shared text and a dirty flag. Several tabs can

@@ -1,4 +1,6 @@
 import AppKit
+import EditorKit
+import TwinPanesCore
 import WorkspaceKit
 
 @MainActor
@@ -11,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         openItems: { [workspace] in workspace.allItems },
         prompt: { [weak self] session in await self?.askToSave(session) ?? .cancel })
     lazy var spike = SandboxSpike(app: self)
+    let recentFiles = RecentFiles()
 
     private(set) var windowControllers: [MainWindowController] = []
     private var editorCount = 0
@@ -19,13 +22,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.mainMenu = MainMenu.build(updater: menuUpdater)
+        NSApp.mainMenu = MainMenu.build(updater: menuUpdater, recentFiles: recentFiles)
         if CommandLine.arguments.contains("--smoke-test") {
             SmokeTest(app: self).run()
             return
         }
-        openMainWindow()
+        // Files from Finder's Open With may already have opened a window.
+        if windowControllers.isEmpty { openMainWindow() }
         NSApp.activate()
+    }
+
+    /// Finder "Open With", dropping files on the Dock icon, `open -a`.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { openFile(url) }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -65,6 +74,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self?.windowControllers.removeAll { $0 === closed }
         }
         windowControllers.append(controller)
+        (controller.window as? MainWindow)?.onDropFiles = { [weak self] urls in
+            for url in urls { self?.openFile(url) }
+        }
         layout.insert(makeBrowser())
         if let frame = NSApp.keyWindow?.frame {
             controller.window?.setFrameTopLeftPoint(
@@ -106,6 +118,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: Commands
 
     @objc func newMainWindow(_ sender: Any?) { openMainWindow() }
+
+    // MARK: Opening files
+
+    /// Opens `url` as a hex editor tab in the active window. `scope` keeps sandbox
+    /// access when the URL came from a bookmark; panel, drop and Finder URLs carry
+    /// their own access for this run.
+    @discardableResult
+    func openFile(_ url: URL, scope: SecurityScope? = nil) -> HexEditorItem? {
+        do {
+            let item = try HexEditorItem(url: url, scope: scope)
+            show(item)
+            recentFiles.note(url)
+            return item
+        } catch {
+            presentOpenError(error, url: url)
+            return nil
+        }
+    }
+
+    @objc func openDocument(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.treatsFilePackagesAsDirectories = true
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls { openFile(url) }
+    }
+
+    @objc func openRecentFile(_ sender: Any?) {
+        guard let data = (sender as? NSMenuItem)?.representedObject as? Data else { return }
+        if let (url, scope) = recentFiles.open(data) {
+            openFile(url, scope: scope)
+        } else {
+            NSSound.beep()
+        }
+    }
+
+    @objc func clearRecentFiles(_ sender: Any?) {
+        recentFiles.clear()
+        NSDocumentController.shared.clearRecentDocuments(nil)
+    }
+
+    private func presentOpenError(_ error: Error, url: URL) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "“\(url.lastPathComponent)” can’t be opened"
+        alert.informativeText =
+            (error as? ByteSourceError)?.description
+            ?? error.localizedDescription
+        if let window = activeController?.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
 
     @objc func newBrowserTab(_ sender: Any?) { show(makeBrowser()) }
 

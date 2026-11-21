@@ -1,4 +1,5 @@
 import AppKit
+import EditorKit
 import WorkspaceKit
 
 /// Action selectors for app-level and placeholder commands. Declared once so
@@ -6,6 +7,8 @@ import WorkspaceKit
 /// without conforming (they're found through the responder chain).
 @objc protocol AppActions {
     @objc optional func newMainWindow(_ sender: Any?)
+    @objc optional func openRecentFile(_ sender: Any?)
+    @objc optional func clearRecentFiles(_ sender: Any?)
     @objc optional func newBrowserTab(_ sender: Any?)
     @objc optional func newEditorTab(_ sender: Any?)
     @objc optional func newEditorView(_ sender: Any?)
@@ -23,6 +26,11 @@ import WorkspaceKit
 extension CommandID {
     static let quit: CommandID = "app.quit"
     static let newWindow: CommandID = "app.newWindow"
+    static let openFile: CommandID = "file.open"
+    static let goToOffset: CommandID = "editor.goToOffset"
+    static let copyAsHex: CommandID = "editor.copyAsHex"
+    static let copyAsText: CommandID = "editor.copyAsText"
+    static let saveSelection: CommandID = "editor.saveSelection"
     static let newBrowserTab: CommandID = "workspace.newBrowserTab"
     static let newEditorTab: CommandID = "workspace.newEditorTab"
     static let newEditorView: CommandID = "editor.newView"
@@ -45,12 +53,11 @@ extension CommandID {
 
 extension ItemKind {
     static let browser: ItemKind = "browser"
-    static let editor: ItemKind = "editor"
     static let report: ItemKind = "report"
 }
 
-/// The M0 catalog and default bindings (D21). F3 is the context-dependent example:
-/// View in a browser, Find Next in an editor.
+/// The command catalog and default bindings (D21). F3 is the context-dependent
+/// example: View in a browser, Find Next in an editor.
 @MainActor
 enum DefaultCommands {
     static func makeRegistry() -> CommandRegistry {
@@ -60,6 +67,11 @@ enum DefaultCommands {
         }
         add(.quit, "Quit Twin Panes", #selector(NSApplication.terminate(_:)))
         add(.newWindow, "New Window", #selector(AppActions.newMainWindow(_:)))
+        add(.openFile, "Open…", #selector(NSDocumentController.openDocument(_:)))
+        add(.goToOffset, "Go to Offset…", #selector(HexEditorActions.goToOffset(_:)))
+        add(.copyAsHex, "Copy as Hex", #selector(HexEditorActions.copyAsHex(_:)))
+        add(.copyAsText, "Copy as Text", #selector(HexEditorActions.copyAsText(_:)))
+        add(.saveSelection, "Save Selection…", #selector(HexEditorActions.saveSelection(_:)))
         add(.newBrowserTab, "New Browser Tab", #selector(AppActions.newBrowserTab(_:)))
         add(.newEditorTab, "New Editor Tab", #selector(AppActions.newEditorTab(_:)))
         add(.newEditorView, "New View of This Editor", #selector(AppActions.newEditorView(_:)))
@@ -91,6 +103,9 @@ enum DefaultCommands {
 
         registry.bind(KeyChord("q", .command), to: .quit)
         registry.bind(KeyChord("n", .command), to: .newWindow)
+        registry.bind(KeyChord("o", .command), to: .openFile)
+        // ⌘L is Finder's "Make Alias"; the conflict is deferred to M10 (§9).
+        registry.bind(KeyChord("l", .command), to: .goToOffset, in: editor)
         registry.bind(KeyChord("t", .command), to: .newBrowserTab)
         registry.bind(KeyChord("t", [.command, .option]), to: .newEditorTab)
         registry.bind(KeyChord("w", .command), to: .closeTab)
