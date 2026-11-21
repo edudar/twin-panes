@@ -8,7 +8,8 @@ Requirements: macOS 15 or later, Apple Silicon, Xcode 16 or later.
 ## Layout
 
 - `TwinPanes.xcodeproj` — the thin app target. Open this in Xcode and run the **TwinPanes** scheme.
-- `TwinPanes/` — app sources (entry point, menus, placeholder items, smoke test).
+- `TwinPanes/` — app sources (entry point, menus, placeholder items, smoke test) and
+  `AppIcon.icon`, the Icon Composer app icon (preview: `docs/assets/app-icon-appearances.png`).
 - `Config/` — build settings (`.xcconfig`) and entitlements.
 - `TwinPanesKit/` — one Swift package with every library target (`TwinPanesCore`, `WorkspaceKit`,
   `HexViewKit`, `TextEditKit`, `EditorKit`, `SandboxProbe`) and their tests.
