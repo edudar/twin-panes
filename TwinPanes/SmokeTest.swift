@@ -564,7 +564,7 @@ struct SmokeTest {
         }
     }
 
-    private static func view(in root: NSView, id: String) -> NSView? {
+    static func view(in root: NSView, id: String) -> NSView? {
         if root.accessibilityIdentifier() == id { return root }
         for child in root.subviews {
             if let found = view(in: child, id: id) { return found }

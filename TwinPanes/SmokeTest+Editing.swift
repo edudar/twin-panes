@@ -62,9 +62,23 @@ extension SmokeTest {
         check(hex.modifiedRanges(in: 0..<0x100) == [0x10..<0x13], "the changed bytes are marked")
         hex.hexView.display()
 
-        let match = try? Searcher(source: hex.snapshot).next(
-            SearchPattern.hex("AB"), from: 0, direction: .forward)
-        check(match?.range == 0x10..<0x11, "search sees the edit")
+        // Drive the real Find bar to locate the text we just typed.
+        let root = hex.viewController.view
+        if let field = Self.view(in: root, id: "findField") as? NSSearchField {
+            check(dispatch(KeyChord("f", .command), in: window), "⌘F opens find after edit")
+            field.stringValue = "Hi"
+            hex.hexView.go(to: 0)
+            window.makeFirstResponder(field)
+            _ = dispatch(KeyChord("g", .command), in: window)
+            for _ in 0..<50 where hex.hexView.selection.range != 0x11..<0x13 {
+                await settle(milliseconds: 20)
+            }
+            check(hex.hexView.selection.range == 0x11..<0x13, "Find bar locates typed bytes")
+            _ = dispatch(.escape, in: window)
+            window.makeFirstResponder(hex.hexView)
+        } else {
+            check(false, "editor has a find field")
+        }
 
         check(menu("Undo", in: window), "Edit › Undo (⌘Z) reaches the editor")
         check(bytes(0x11..<0x13) == [0x11, 0x12], "Undo reverts the text-column typing")
@@ -73,10 +87,26 @@ extension SmokeTest {
         check(menu("Redo", in: window), "Edit › Redo (⇧⌘Z) reaches the editor")
         check(bytes(0x10..<0x11) == [0xAB], "Redo brings the hex typing back")
 
-        check(!hex.canSave, "the editor can't save yet")
-        check(
-            app.closeCoordinator.dirtySessions(closing: [hex]).count == 1,
-            "closing the edited tab asks first")
+        let dirty = app.closeCoordinator.dirtySessions(closing: [hex])
+        check(dirty.count == 1, "closing the edited tab asks first")
+        if let session = dirty.first {
+            let alert = app.makeCloseAlert(for: session)
+            let titles = alert.buttons.map(\.title)
+            check(
+                titles == ["Discard Changes", "Cancel"],
+                "close prompt offers Discard/Cancel: \(titles)")
+            check(
+                alert.buttons[0].hasDestructiveAction
+                    && alert.buttons[0].keyEquivalent == "d"
+                    && alert.buttons[0].keyEquivalentModifierMask == .command,
+                "Discard button is destructive with ⌘D")
+            check(alert.buttons[1].keyEquivalent == "\u{1b}", "Cancel button binds Escape")
+            check(
+                AppDelegate.closeDecision(for: .alertFirstButtonReturn, canSave: false) == .discard
+                    && AppDelegate.closeDecision(for: .alertSecondButtonReturn, canSave: false)
+                        == .cancel,
+                "Discard alert responses map to discard/cancel")
+        }
         hex.discardChanges()
         check(!hex.isDirty && bytes(0x10..<0x11) == [0x10], "Discard drops the edits")
         type("\t", in: window)  // back to the hex column
@@ -89,35 +119,37 @@ extension SmokeTest {
         }
         window.makeFirstResponder(item.hexView)
         let last = item.length - 1
+        // Typing a hex digit on an uncached offset falls back to a 1-byte read cleanly.
         item.hexView.go(to: last)
-        item.hexView.display()
-        for _ in 0..<50 where item.cachedBytes(last..<item.length) == nil {
-            await settle(milliseconds: 20)
-        }
         type("7F", in: window)
         check((try? item.read(last..<item.length)) == Data([0x7F]), "edit at the end of 4 GiB")
 
-        let searcher = Searcher(source: item.snapshot)
-        let progress = SearchProgress()
-        let search = Task {
-            defer { progress.finish() }
-            return try await Searcher.run { token in
-                try searcher.all(try SearchPattern.hex("7F"), cancellation: token)
-            }
-        }
-        await settle(milliseconds: 50)
+        // Move to 1 GiB and warm its page before starting the scan so typing overlaps it.
         item.hexView.go(to: 1 << 30)
         item.hexView.display()
         for _ in 0..<50 where item.cachedBytes((1 << 30)..<((1 << 30) + 1)) == nil {
             await settle(milliseconds: 20)
         }
+
+        let searcher = Searcher(source: item.snapshot)
+        let state = SearchState()
+        let search = Task {
+            defer { state.finish() }
+            return try await Searcher.run { token in
+                try searcher.all(try SearchPattern.hex("7F"), cancellation: token) { _, _ in
+                    state.noteStarted()
+                }
+            }
+        }
+        await state.waitUntilStarted()
         let clock = ContinuousClock()
         let typing = clock.measure { type("7F", in: window) }
-        let overlapped = !progress.isFinished
+        let frame = clock.measure { item.hexView.display() }
+        let overlapped = !state.isFinished
         let result = try? await search.value
         print(
-            "  info typing during a 4 GiB Find All took \(typing)"
-                + (overlapped ? "" : " (the search had already finished)"))
+            "  info typing during 4 GiB Find All took \(typing), frame \(frame)"
+                + (overlapped ? " (overlapped)" : " (search finished first)"))
         check(typing < .milliseconds(100), "an edit doesn't wait for a running search (\(typing))")
         check(
             result?.ranges == [last..<item.length],
@@ -126,9 +158,47 @@ extension SmokeTest {
     }
 }
 
-/// Whether a background search has returned, shared with its task.
-private final class SearchProgress: Sendable {
-    private let finished = Mutex(false)
-    func finish() { finished.withLock { $0 = true } }
-    var isFinished: Bool { finished.withLock { $0 } }
+/// Tracks start and completion of a background search across threads.
+private final class SearchState: Sendable {
+    private struct Flags {
+        var started = false
+        var finished = false
+        var waiters: [CheckedContinuation<Void, Never>] = []
+    }
+    private let state = Mutex(Flags())
+
+    func noteStarted() {
+        let waiters = state.withLock { s -> [CheckedContinuation<Void, Never>] in
+            guard !s.started else { return [] }
+            s.started = true
+            let list = s.waiters
+            s.waiters.removeAll()
+            return list
+        }
+        for waiter in waiters { waiter.resume() }
+    }
+
+    func finish() {
+        let waiters = state.withLock { s -> [CheckedContinuation<Void, Never>] in
+            s.finished = true
+            s.started = true
+            let list = s.waiters
+            s.waiters.removeAll()
+            return list
+        }
+        for waiter in waiters { waiter.resume() }
+    }
+
+    var isFinished: Bool { state.withLock { $0.finished } }
+
+    func waitUntilStarted() async {
+        await withCheckedContinuation { continuation in
+            let ready = state.withLock { s -> Bool in
+                if s.started { return true }
+                s.waiters.append(continuation)
+                return false
+            }
+            if ready { continuation.resume() }
+        }
+    }
 }

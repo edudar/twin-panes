@@ -373,14 +373,15 @@ volume/grant capability matrix (M0 spike, §5).
   and asks `HexViewDelegate.hexView(_:overwrite:at:column:cursorAfter:)` to write it
   (default: refuse, so views are read-only unless the delegate edits). In the hex
   column the first digit sets the high nibble and keeps the cursor (the cursor box
-  shrinks to the low digit), the second sets the low nibble and moves on; any move or
-  Tab drops a half-typed byte. The text column writes one byte per character in
-  ASCII or Latin-1; other characters beep and the status line says why. Typing with a
-  selection starts at its first byte; at the last byte the cursor stays put;
-  Backspace/Delete beep until M8. `HexViewDataSource.modifiedRanges(in:)` drives an
-  accent-tinted fill under the find highlights and the selection. A search running
-  during an edit keeps its snapshot and the status line notes that the results are
-  from before the edit; every edit clears Find All highlights.
+  shrinks to the low digit), the second sets the low nibble and moves on; uncached
+  bytes fall back to a 1-byte read; any move or Tab drops a half-typed byte and breaks
+  undo coalescing. The text column writes one printable byte per character in ASCII or
+  Latin-1; other characters beep and the status line says why. Typing with a selection
+  starts at its first byte; at the last byte the cursor stays put; Backspace/Delete
+  beep until M8. `HexViewDataSource.modifiedRanges(in:)` drives an accent-tinted fill
+  under the find highlights and the selection. A search running during an edit keeps
+  its snapshot and reports the pre-edit count/offset without overwriting the cursor or
+  caching stale `Find All` results; every edit clears Find All highlights.
 - Copy as hex/text of a huge selection is capped (e.g. 64 MB of output) with a
   prompt offering "Save selection to file…" instead.
 - **View options (D18)**, in the View menu and the editor toolbar, per editor item,
@@ -956,3 +957,11 @@ byte histogram.
     recent file just drops out of the menu. Belongs to the M4 per-volume access flow.
   - *`SF_DATALESS` at open* (§4.1): not testable in CI (needs an iCloud-evicted file);
     lands with the M3b recovery clone, which must wait for the download anyway.
+- **From the M3a review (2026-11-22):**
+  - *Lazy `AddBuffer` creation*: open the backing file on first edit instead of at tab
+    open; lands in M3b when `AddBuffer` moves into the `EditorSession` directory.
+  - *`UndoStack`, multi-view observation, and `EditBuffer` actor isolation*: move
+    `UndoStack` from `HexEditorItem` onto `EditorSession` (with observer fan-out for
+    sibling views and enforced isolation on `EditBuffer`) in M3b.
+  - *Chunked `readSequential` for fragmented piece trees*: coalesce dense `.original`
+    spans into chunked reads instead of one `F_NOCACHE` `pread` per piece in M3b / M8.
