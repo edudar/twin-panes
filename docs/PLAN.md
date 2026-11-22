@@ -154,6 +154,11 @@ opening an editor from the browser) goes through a protocol or factory defined i
   "pending") is published to the main actor, and `draw(_:)` only reads that model.
   Rows whose pages haven't arrived are drawn as placeholders and redrawn when the
   pages land.
+- **Evicted iCloud files.** A file evicted to the cloud (`SF_DATALESS` in `st_flags`)
+  downloads on its first read, which can take minutes for a large file. Check the flag
+  at open, show "Downloading from iCloud…" with progress instead of placeholders that
+  never fill, and start the recovery clone (below) only once the file is local. Seen in
+  the M0 spike: such a file reads and saves fine with a file grant alone.
 - **Uncached sequential path.** Searcher and Saver don't go through the LRU (a 4 GB
   scan would evict everything the view needs). They use large sequential `pread`s on
   a descriptor with `F_NOCACHE` set and no caching on our side.
@@ -182,7 +187,8 @@ opening an editor from the browser) goes through a protocol or factory defined i
       isn't possible (non-APFS, or a sandboxed app with only file-level access can't
       create anything there), fall back to detect-and-warn and journal without a
       clone.
-    - The M3b spike checks each case: boot volume, APFS external, HFS+/exFAT, SMB.
+    - The boot volume was checked in the M0 spike. The M3b spike checks external
+      APFS, HFS+ and exFAT; SMB and other network volumes wait for M13+.
   - **Backing generations.** An immutable piece tree only freezes *references*; the
     bytes stay stable only if the files they point into stay stable. Every file a
     piece can point at — a clone, a private copy, an add-buffer file — is a
@@ -270,12 +276,17 @@ volume/grant capability matrix (M0 spike, §5).
     leaves either the old or the new file intact.
   - The swap gives the file a **new inode**: re-key the session in `SessionRegistry`,
     reopen `ByteSource` (the old descriptor still points at the unlinked original),
-    and register the new file as a backing generation (§4.1).
-  - Hard links break, and metadata must be checked: xattrs, Finder tags, ACLs,
-    creation date. All tested in the M0 spike and the Saver round-trip suite.
-  - Needs a staging location on the same volume. With a folder grant that's the
-    parent directory or `itemReplacementDirectory`; whether a **file-only grant**
-    allows either is a question the M0 spike answers.
+    and register the new file as a backing generation (§4.1). Bookmarks to the file
+    (recents, restoration) go stale after the swap and resolve by path: recreate them
+    after each save (seen in the M0 spike).
+  - Metadata must be checked: xattrs, Finder tags, ACLs, creation date. The M0 spike
+    found mode, xattrs, tags and creation date kept on the boot volume; the Saver
+    round-trip suite keeps checking them.
+  - **Not for hard-linked files** (`st_nlink` > 1): the swap would break the link, and
+    the M0 spike found the sandbox refuses the replace anyway. Those use strategy B.
+  - Needs a staging location on the same volume: `itemReplacementDirectory`, which the
+    M0 spike found works with a file-only grant as well as a folder grant. A file-only
+    grant can't create files in the parent directory.
   - Without a clone-capable volume, step 1 becomes a full copy: needs free space ≈
     file size (check first) and takes time proportional to file size, so it's
     offered only below a size limit; otherwise strategy B.
@@ -736,8 +747,9 @@ opacity and glass), and check the icon at 16 and 32 px in Finder list view.
   editor's write path, because its result decides which save and recovery guarantees
   Twin Panes can make before the editor is built around them.
   - **Browsing:** grant the home folder and an external volume, then list, preview,
-    copy into and trash in Desktop/Documents/Downloads, ~/Library, iCloud Drive, a USB
-    volume and an SMB share; record which prompts appear and what fails.
+    copy into and trash in Desktop/Documents/Downloads, ~/Library and iCloud Drive;
+    record which prompts appear and what fails. USB volumes come with the M3b spike,
+    SMB shares with M13+.
   - **Write path:** for a *file-only* grant (open panel on one file) and a *folder*
     grant: create a clone (`clonefile`), create a staging file next to the original
     and in `itemReplacementDirectory`, `replaceItemAt`, in-place write, move to
@@ -745,8 +757,9 @@ opacity and glass), and check the icon at 16 and 32 px in Finder list view.
     hard-link behaviour.
   - **Bookmarks:** app-scoped bookmark entitlement; resolve after relaunch; stale
     bookmark refresh; behaviour after the file is moved or renamed.
-  - **Volumes:** boot APFS, external APFS, HFS+, exFAT, SMB; unplug/unmount
-    mid-operation.
+  - **Volumes:** boot APFS in M0. External APFS, HFS+ and exFAT, and unplug/unmount
+    mid-operation, are deferred to the M3b spike; SMB and other network protocols
+    (AFP, NFS, WebDAV, SFTP mounts) to M13+, with remote connections.
   - **Output: a capability matrix** by volume type × grant type (clone? staging?
     replace? in place? Trash? bookmark survives relaunch?). It drives the save
     strategy table (§4.3), the recovery guarantee per volume (§4.1) and the App Store
@@ -770,8 +783,8 @@ version → file-manager core → hex polish → the rest.
 
 | # | Milestone | Scope | Done when |
 |---|---|---|---|
-| M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.twinpanes`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15, 26 and 27 (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5, by hand): what a sandboxed browser may do, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15, 26 and 27; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix written up and the save/recovery policy per volume decided from it |
-| M1 | Read-only hex viewer | Virtual scroller first, then thread-safe ByteSource + cache with async prefetch and placeholders, HexView, selection, copy as hex/text (capped), Go to offset, view options (offset base, grouping, ASCII/Latin-1 text column), non-regular files refused, `SecurityScope` tokens, open via File › Open / drag-drop / Finder "Open With" (document types per §4, no NSDocument) — each opens a **tab in the main frame**, Open Recent via bookmarks | 4 GB file opens in < 100 ms, scrolls at 120 Hz (also from a USB/SMB volume, with placeholders instead of stalls), memory < 100 MB; all measured on real hardware, also while a search runs |
+| M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.twinpanes`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15, 26 and 27 (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5, by hand): what a sandboxed browser may do, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15, 26 and 27; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix for the boot volume written up and its save/recovery policy decided from it (other volumes: M3b and M13+) |
+| M1 | Read-only hex viewer | Virtual scroller first, then thread-safe ByteSource + cache with async prefetch and placeholders, HexView, selection, copy as hex/text (capped), Go to offset, view options (offset base, grouping, ASCII/Latin-1 text column), non-regular files refused, `SecurityScope` tokens, open via File › Open / drag-drop / Finder "Open With" (document types per §4, no NSDocument) — each opens a **tab in the main frame**, Open Recent via bookmarks | 4 GB file opens in < 100 ms, scrolls at 120 Hz (also from a USB volume, with placeholders instead of stalls; USB in M3b, SMB in M13+), memory < 100 MB; all measured on real hardware, also while a search runs |
 | M1b | Basic browser | `BrowserKit`: one panel listing a real folder (name, size, date, kind; folders first; hidden files off), Enter/double-click/⌘↓ into folders, ⌘↑/Backspace to the parent, F3/F4/Enter on a file opens it in the hex editor, path field for Go to Folder (⇧⌘G), type-to-select. Folder access: starts at the real home folder, asks once for access when the sandbox refuses a folder, keeps that as an app-scoped bookmark, and the browser tab holds the folder's `SecurityScope`. Replaces the M0 placeholder browser | Navigate from home to any granted folder and open a file in the hex editor without File › Open; access survives a relaunch |
 | M2 | Inspect & search | Inspector panel, `Searcher` over a byte-reading protocol with the uncached `F_NOCACHE` read path, find next/previous/all (hex + text, capped results), status bar (offset, selection length, file size) | Full search of a 4 GB file with progress + cancel, without evicting the view's pages |
 | M3a | Overwrite editing | Persistent PieceTable (snapshots), undo as a stack of roots with coalescing, overwrite in hex and text columns (encoding rules per §4.4), dirty-byte highlight, Searcher over snapshots | Fuzz tests pass; edits don't stall concurrent search |
@@ -787,7 +800,7 @@ version → file-manager core → hex polish → the rest.
 | M10 | Polish | Preferences (font, bytes/row, colors, text-size threshold), **user-editable key bindings** (incl. the deferred conflicts in §9), more text-column encodings (UTF-8, UTF-16, EBCDIC), bookmarks within a file, light/dark, selection checksums | Daily-driver quality for editor + browser |
 | M11 | Multiple windows | ⌘N, drag tabs between windows, Move Tab to New Window, Merge All Windows, multi-window restoration, several text-mode views of one session (shared `NSTextContentStorage`, §4.9) | Merge of 3 windows keeps every tab on its original side |
 | M12 | Terminal (Direct only) | `Direct`/`AppStore` build configurations, SwiftTerm in bottom drawer and as panel tab, follows active directory, Ctrl+O full-frame toggle, item switcher | Daily shell use without leaving Twin Panes |
-| M13+ | More file-manager features | Remote connections, compare/sync, batch rename, archives, NC-style marking + drive switching, notarized Direct releases + updates… | Planned as requirements arrive |
+| M13+ | More file-manager features | Remote connections (with the sandbox spike on SMB and other network volumes), compare/sync, batch rename, archives, NC-style marking + drive switching, notarized Direct releases + updates… | Planned as requirements arrive |
 
 Later hex candidates: structure templates (Mach-O/ELF/PNG…), two-file diff, entropy /
 byte histogram.
