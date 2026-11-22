@@ -1,27 +1,33 @@
 import AppKit
 
-/// Minimal per-panel tab bar for M0: one button per tab with a dirty dot, a close
-/// button, and selection highlight. The real tab bar (drag between panels, overflow)
-/// is M5.
+/// Per-panel tab bar in the style of Safari's: capsule tabs that share the bar's width,
+/// each with a close button on the left (shown on hover and on the selected tab), the
+/// item's icon and its title. Dragging tabs and overflow menus come in M5.
 @MainActor
 final class TabBarView: NSView {
     var onSelect: ((ItemID) -> Void)?
     var onClose: ((ItemID) -> Void)?
 
     private let stack = NSStackView()
+    static let height: CGFloat = 34
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         stack.orientation = .horizontal
-        stack.spacing = 2
+        stack.spacing = 4
+        stack.distribution = .fillEqually
         stack.alignment = .centerY
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
+        // Tabs grow to share the bar, but no wider than Safari's maximum.
+        let trailing = stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6)
+        trailing.priority = .defaultLow
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
+            trailing,
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            heightAnchor.constraint(equalToConstant: 28),
+            heightAnchor.constraint(equalToConstant: Self.height),
         ])
         setAccessibilityRole(.tabGroup)
     }
@@ -29,50 +35,151 @@ final class TabBarView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.separatorColor.setFill()
+        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
+    }
+
     func update(items: [any WorkspaceItem], selected: ItemID?, isActivePanel: Bool) {
         for view in stack.arrangedSubviews { view.removeFromSuperview() }
         for item in items {
-            stack.addArrangedSubview(
-                tabView(for: item, isSelected: item.id == selected, isActive: isActivePanel))
+            let tab = TabItemView(
+                id: item.id, title: item.title, icon: item.icon, isDirty: item.isDirty,
+                isSelected: item.id == selected, isActivePanel: isActivePanel)
+            tab.onSelect = { [weak self] id in self?.onSelect?(id) }
+            tab.onClose = { [weak self] id in self?.onClose?(id) }
+            stack.addArrangedSubview(tab)
+            tab.widthAnchor.constraint(lessThanOrEqualToConstant: 240).isActive = true
+            tab.widthAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
         }
-    }
-
-    private func tabView(
-        for item: any WorkspaceItem, isSelected: Bool, isActive: Bool
-    )
-        -> NSView
-    {
-        let title = (item.isDirty ? "• " : "") + item.title
-        let select = TabButton(title: title, target: self, action: #selector(tabClicked(_:)))
-        select.itemID = item.id
-        select.bezelStyle = .accessoryBarAction
-        select.showsBorderOnlyWhileMouseInside = !isSelected
-        select.state = isSelected ? .on : .off
-        select.setButtonType(.pushOnPushOff)
-        select.font = isSelected && isActive ? .boldSystemFont(ofSize: 12) : .systemFont(ofSize: 12)
-        select.setAccessibilityRole(.radioButton)
-
-        let close = TabButton(
-            title: "×", target: self, action: #selector(closeClicked(_:)))
-        close.itemID = item.id
-        close.bezelStyle = .accessoryBarAction
-        close.showsBorderOnlyWhileMouseInside = true
-        close.setAccessibilityLabel("Close \(item.title)")
-
-        let tab = NSStackView(views: [select, close])
-        tab.spacing = 0
-        return tab
-    }
-
-    @objc private func tabClicked(_ sender: TabButton) {
-        if let id = sender.itemID { onSelect?(id) }
-    }
-
-    @objc private func closeClicked(_ sender: TabButton) {
-        if let id = sender.itemID { onClose?(id) }
     }
 }
 
-private final class TabButton: NSButton {
-    var itemID: ItemID?
+/// One tab: a capsule that highlights when selected or hovered.
+@MainActor
+final class TabItemView: NSView {
+    let id: ItemID
+    let isSelected: Bool
+    private let isActivePanel: Bool
+    private let isDirty: Bool
+    var onSelect: ((ItemID) -> Void)?
+    var onClose: ((ItemID) -> Void)?
+
+    private let closeButton = NSButton()
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private var isHovered = false {
+        didSet { updateAppearance() }
+    }
+
+    init(
+        id: ItemID, title: String, icon: NSImage?, isDirty: Bool, isSelected: Bool,
+        isActivePanel: Bool
+    ) {
+        self.id = id
+        self.isSelected = isSelected
+        self.isActivePanel = isActivePanel
+        self.isDirty = isDirty
+        super.init(frame: .zero)
+
+        closeButton.image = NSImage(
+            systemSymbolName: "xmark", accessibilityDescription: "Close \(title)")
+        closeButton.symbolConfiguration = .init(pointSize: 9, weight: .semibold)
+        closeButton.isBordered = false
+        closeButton.target = self
+        closeButton.action = #selector(closeClicked)
+        closeButton.toolTip = "Close Tab"
+        closeButton.refusesFirstResponder = true
+
+        iconView.image = icon
+        iconView.imageScaling = .scaleProportionallyDown
+        iconView.isHidden = icon == nil
+
+        titleLabel.stringValue = title
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.font = .systemFont(ofSize: 12, weight: isSelected ? .medium : .regular)
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: [closeButton, iconView, titleLabel])
+        row.spacing = 6
+        row.alignment = .centerY
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            closeButton.widthAnchor.constraint(equalToConstant: 16),
+            closeButton.heightAnchor.constraint(equalToConstant: 16),
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: 26),
+        ])
+
+        toolTip = title
+        setAccessibilityElement(true)
+        setAccessibilityRole(.radioButton)
+        setAccessibilityLabel(isDirty ? "\(title), edited" : title)
+        setAccessibilityValue(isSelected)
+        updateAppearance()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    private func updateAppearance() {
+        // Edited tabs show a dot where the close button sits until you hover.
+        let showClose = isHovered || (isSelected && !isDirty)
+        closeButton.image = NSImage(
+            systemSymbolName: showClose ? "xmark" : (isDirty ? "circle.fill" : "xmark"),
+            accessibilityDescription: "Close tab")
+        closeButton.symbolConfiguration = .init(pointSize: showClose ? 9 : 6, weight: .semibold)
+        closeButton.alphaValue = showClose || isDirty ? 1 : 0
+        closeButton.contentTintColor = .secondaryLabelColor
+        titleLabel.textColor =
+            isSelected && isActivePanel ? .labelColor : .secondaryLabelColor
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let fill: NSColor?
+        if isSelected {
+            fill = isActivePanel ? .tertiarySystemFill : .quaternarySystemFill
+        } else if isHovered {
+            fill = .quaternarySystemFill
+        } else {
+            fill = nil
+        }
+        guard let fill else { return }
+        fill.setFill()
+        let radius = bounds.height / 2
+        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    override func mouseDown(with event: NSEvent) { onSelect?(id) }
+
+    /// Middle-click closes, as in Safari.
+    override func otherMouseDown(with event: NSEvent) {
+        if event.buttonNumber == 2 { onClose?(id) } else { super.otherMouseDown(with: event) }
+    }
+
+    @objc private func closeClicked() { onClose?(id) }
+
+    override func accessibilityPerformPress() -> Bool {
+        onSelect?(id)
+        return true
+    }
 }

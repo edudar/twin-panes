@@ -32,6 +32,7 @@ public final class HexEditorItem: WorkspaceItem {
     }
 
     public var title: String { url.lastPathComponent }
+    public var icon: NSImage? { NSWorkspace.shared.icon(forFile: url.path) }
     public var viewController: NSViewController { controller }
     public var preferredFirstResponder: NSView? { controller.hexView }
     public var hexView: HexView { controller.hexView }

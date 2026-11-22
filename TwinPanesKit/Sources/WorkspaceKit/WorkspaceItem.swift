@@ -40,6 +40,8 @@ public protocol WorkspaceItem: AnyObject {
     var id: ItemID { get }
     var kind: ItemKind { get }
     var title: String { get }
+    /// Small image for the tab (16 pt); nil shows no icon.
+    var icon: NSImage? { get }
     var isDirty: Bool { get }
 
     /// Views of the same session (e.g. two tabs on one file) share a key, so the close
@@ -70,6 +72,7 @@ public protocol WorkspaceItem: AnyObject {
 extension WorkspaceItem {
     public var sessionKey: AnyHashable? { nil }
     public var isDirty: Bool { false }
+    public var icon: NSImage? { nil }
     public var preferredFirstResponder: NSView? { nil }
     public func save() async throws {}
     public func discardChanges() {}
