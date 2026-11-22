@@ -1,6 +1,7 @@
 # M3b plan: sessions and saving
 
-_Status: draft 2026-11-22. Split from the original M3b on review: this part is sessions
+_Status: approved 2026-11-22; in progress, commit 1 of 11 done (`FileIdentity`,
+`AccessMode`). Split from the original M3b on review: this part is sessions
 and saving; the clone, external changes, crash recovery and the fault-injection suite
 are M3c (docs/plans/M3c.md)._
 

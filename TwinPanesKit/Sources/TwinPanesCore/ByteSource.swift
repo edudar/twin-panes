@@ -54,8 +54,9 @@ public final class ByteSource: ByteReading {
 
     public let url: URL
     public let length: UInt64
-    /// Device and inode at open time, for identity checks (§4.9).
-    public let fileID: (device: Int32, inode: UInt64)
+    /// The file as it was when opened (from the open descriptor, so no race with a
+    /// rename): which file, its size and modification time.
+    public let identity: FileIdentity
 
     private let fd: Int32
     private let sequentialFD: Int32
@@ -85,7 +86,7 @@ public final class ByteSource: ByteReading {
         self.fd = fd
         self.sequentialFD = sequentialFD >= 0 ? sequentialFD : fd
         self.length = UInt64(info.st_size)
-        self.fileID = (info.st_dev, info.st_ino)
+        self.identity = FileIdentity(info)
         self.cache = Mutex(PageCache(capacity: max(1, pageCapacity)))
     }
 
