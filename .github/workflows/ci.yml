@@ -54,6 +54,11 @@ jobs:
       - name: Package tests
         run: swift test --parallel --package-path TwinPanesKit
 
+      - name: Package tests (Thread Sanitizer)
+        # PLAN.md 7: ByteSource and the search run on several threads; one image is enough.
+        if: matrix.macos == '27'
+        run: swift test --sanitize=thread --package-path TwinPanesKit
+
       - name: Build app (sandboxed, ad-hoc signed)
         run: |
           xcodebuild -project TwinPanes.xcodeproj -scheme TwinPanes -configuration Debug \

@@ -136,4 +136,40 @@ import Testing
         #expect(source.cachedBytes(ranges[1]) == nil)
         #expect(source.cachedBytes(ranges[2]) != nil)
     }
+
+    /// PLAN.md §7: several threads read, look up the cache, scan and prefetch at once,
+    /// with a cache small enough to keep evicting. Run under
+    /// Thread Sanitizer in CI (`swift test --sanitize=thread`).
+    @Test func concurrentReadersShareOneCache() async throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let page = Int(ByteSource.pageSize)
+        let (url, data) = try makeFile(page * 32 + 999)
+        let source = try ByteSource(url: url, pageCapacity: 8)
+        let length = UInt64(data.count)
+        let mismatches = try await withThrowingTaskGroup(of: Int.self) { group in
+            for worker in 0..<8 {
+                group.addTask {
+                    var seed = UInt64(worker) &* 0x9E37_79B9_7F4A_7C15 | 1
+                    var wrong = 0
+                    for step in 0..<400 {
+                        seed ^= seed << 13
+                        seed ^= seed >> 7
+                        seed ^= seed << 17
+                        let start = seed % length
+                        let range = start..<min(length, start + 1 + seed % 20_000)
+                        let expected = data[Int(range.lowerBound)..<Int(range.upperBound)]
+                        if try source.read(range) != expected { wrong += 1 }
+                        if let cached = source.cachedBytes(range), cached != expected { wrong += 1 }
+                        if step % 50 == 0, try source.readSequential(range) != expected {
+                            wrong += 1
+                        }
+                        if step % 40 == 0 { source.prefetch(range) { _ in } }
+                    }
+                    return wrong
+                }
+            }
+            return try await group.reduce(0, +)
+        }
+        #expect(mismatches == 0)
+    }
 }
