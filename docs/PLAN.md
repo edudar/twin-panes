@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.16 (2026-11-20). Living document; requirements will keep growing.
+Status: draft v0.17 (2026-11-22). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -39,6 +39,10 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D23 | **State restoration** uses AppKit's restoration APIs (`NSWindowRestoration`, `encodeRestorableState(with:)` / `restoreState(with:)`) for windows, slots and tabs; crash recovery stays separate and independently durable | See §4.8. Follows the system's "Close windows when quitting an app" setting. Lands in M5, multi-window in M11. |
 | D24 | **One app icon: Twin Panes, Navy + coral**, as an Icon Composer `.icon` with default, dark, clear and tinted styles. Byte Panes and the Midnight mint palette stay as reference designs; no in-app icon picker | See §4.12. macOS can't switch an app's icon outside a running session, so a picker isn't worth it. Shipped in M0. |
 | D25 | **The app is named Twin Panes** (was Filer until 2026-11-20) | Display and product name "Twin Panes"; project, target and scheme `TwinPanes`; package `TwinPanesKit`; core module `TwinPanesCore`; bundle ID per D11. |
+| D26 | **Piece tree = persistent AVL with join/split** (M3a, 2026-11-22) | Immutable `final class` nodes caching height, length and piece count; every edit is split + join, copying O(log n) nodes, so a snapshot or undo entry is an old root. Adjacent pieces that continue each other in one source merge. Chosen over a treap (random shape, harder to replay) and a B-tree (more code). See §4.2. |
+| D27 | **The add buffer is a file from M3a on** | An append-only temp file with the open partial page and an LRU of full pages in memory; bytes never change once written, so snapshots read it from any thread. M3b moves it into the session folder. See §4.2. |
+| D28 | **Edit model in TwinPanesCore, undo held by the tab** | `EditBuffer` (original + add buffer + current tree) hands out `Sendable` `EditSnapshot`s that are `ByteReading`; the `UndoStack` sits on the editor item because entries carry its selection. Undo/Redo are ordinary `undo:`/`redo:` actions on the editor's view controller, not `NSUndoManager`. M3b's `EditorSession` wraps these. |
+| D29 | **Closing an edited tab before saving exists** | `WorkspaceItem.canSave` (default true); when false the close sheet offers only Discard Changes and Cancel. The hex editor returns false until M3b. |
 
 ## 3. Constraints that drive the design
 
@@ -99,8 +103,10 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `ByteSource` | M1 | read-only file access: pread + LRU page cache, plus an uncached sequential read path (§4.1) |
 | `Searcher` | M2 | streaming hex/text search, cancellable, with progress (§4.5) |
 | `Inspector` | M2 | decode bytes at the cursor: ints, floats, dates, text (§4.6) |
-| `PieceTable` | M3a | edit model over the original file and an add-buffer file; persistent tree (§4.2) |
-| `UndoStack` | M3a | stack of earlier piece-tree roots plus cursor/selection |
+| `PieceTree` | M3a | the edit model's pieces over the original file and the add-buffer file; persistent AVL tree (§4.2, D26) |
+| `AddBuffer` | M3a | append-only file of typed and pasted bytes, with in-memory recent pages (D27) |
+| `EditBuffer`, `EditSnapshot` | M3a | one file's original + add buffer + current tree; immutable `Sendable` snapshots that implement `ByteReading` (D28) |
+| `UndoStack` | M3a | stack of earlier piece-tree roots plus selection, with coalescing |
 | `EditorSession`, `SessionRegistry` | M3b | per-file session: dirty state, save/revert, file identity, backing generations, crash journal, security scope |
 | `Saver` | M3b | save strategy A (clone, patch, replace) and B (in place + journal) (§4.3) |
 
@@ -240,6 +246,19 @@ opening an editor from the browser) goes through a protocol or factory defined i
   replaces the top entry instead of pushing a new one. Undo history survives saves
   (see §4.3 for what that requires).
 - Randomized model-based tests against a plain `[UInt8]` reference.
+- **As built (M3a):** `PieceTree` is a join-based AVL tree (D26); `replacing(_:with:)`
+  is split, split, join, and overwrite/insert/delete are one line each on top of it.
+  A piece that continues its left or right neighbour in the same source merges into
+  it, so sequential typing stays one piece and deleting an insert rejoins the
+  original. `AddBuffer` (D27) is an append-only file in its own temp folder, deleted
+  with the buffer; the partial last page and a 64-page LRU stay in memory.
+  `EditBuffer` holds the original `ByteSource`, the add buffer and the current tree;
+  `EditSnapshot` maps every read (cached, blocking, uncached sequential, prefetch,
+  `modifiedRanges`) through the pieces. Undo entries hold the tree and selection from
+  before and after an edit; the editor coalesces typing that continues at the cursor
+  in the same column within 2 s, and a tab is clean again when undo reaches the tree
+  it opened with. Fuzz tests: random splits/joins, random edits with snapshots, random
+  overwrites through every read path, random undo/redo against the full history.
 - **Crash recovery (D15):** each session's directory holds the add-buffer file, the
   clone (if any) and an append-only **operation journal**: one record per edit
   (offset, length, add-buffer range, kind), not tree nodes, so replay is
@@ -350,6 +369,18 @@ volume/grant capability matrix (M0 spike, §5).
   (file length unchanged). A character the column's encoding can't represent beeps,
   with a status-bar message.
 - Changed (dirty) bytes are highlighted.
+- **As built (M3a):** `HexView.insertText` handles typing; the view works out the byte
+  and asks `HexViewDelegate.hexView(_:overwrite:at:column:cursorAfter:)` to write it
+  (default: refuse, so views are read-only unless the delegate edits). In the hex
+  column the first digit sets the high nibble and keeps the cursor (the cursor box
+  shrinks to the low digit), the second sets the low nibble and moves on; any move or
+  Tab drops a half-typed byte. The text column writes one byte per character in
+  ASCII or Latin-1; other characters beep and the status line says why. Typing with a
+  selection starts at its first byte; at the last byte the cursor stays put;
+  Backspace/Delete beep until M8. `HexViewDataSource.modifiedRanges(in:)` drives an
+  accent-tinted fill under the find highlights and the selection. A search running
+  during an edit keeps its snapshot and the status line notes that the results are
+  from before the edit; every edit clears Find All highlights.
 - Copy as hex/text of a huge selection is capped (e.g. 64 MB of output) with a
   prompt offering "Save selection to file…" instead.
 - **View options (D18)**, in the View menu and the editor toolbar, per editor item,

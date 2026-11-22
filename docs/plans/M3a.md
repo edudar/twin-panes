@@ -1,6 +1,6 @@
 # M3a plan: overwrite editing
 
-_Status: approved 2026-11-22; in progress._
+_Status: approved 2026-11-22; built 2026-11-22. How it was actually done is in PLAN.md (D26–D29, the M3a "As built" notes in §4.2 and §4.4)._
 
 ## Context
 
