@@ -59,9 +59,30 @@ import Testing
             .appendingPathComponent("partial-\(UUID().uuidString).bin")
         defer { try? FileManager.default.removeItem(at: out) }
         try FileHandle(forWritingTo: url).truncate(atOffset: 100)
-        let error = HexEditorViewController.write(item.source, range: 0..<2000, to: out)
+        let error = HexEditorViewController.write(item.snapshot, range: 0..<2000, to: out)
         #expect(error != nil)
         #expect(!FileManager.default.fileExists(atPath: out.path))
+    }
+
+    /// Everything the tab reads (view, copy, Save Selection, search) sees the edits.
+    @Test func readsGoThroughTheCurrentSnapshot() async throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        let item = try item(bytes: 4096)
+        try item.buffer.overwrite(at: 100, with: Data([0xDE, 0xAD]))
+        #expect(try item.read(99..<103) == Data([99, 0xDE, 0xAD, 102]))
+        #expect(item.modifiedRanges(in: 0..<4096) == [100..<102])
+        var copied: Data?
+        item.readForCopy(100..<102) { copied = try? $0.get() }
+        #expect(copied == Data([0xDE, 0xAD]))
+        let match = try Searcher(source: item.controller.searchSource!).next(
+            SearchPattern.hex("DE AD"), from: 0, direction: .forward)
+        #expect(match?.range == 100..<102)
+
+        let out = url.deletingLastPathComponent()
+            .appendingPathComponent("selection-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: out) }
+        #expect(HexEditorViewController.write(item.snapshot, range: 98..<104, to: out) == nil)
+        #expect(try Data(contentsOf: out) == Data([98, 99, 0xDE, 0xAD, 102, 103]))
     }
 
     @Test func viewControllerSurvivesAfterItemDeallocates() throws {

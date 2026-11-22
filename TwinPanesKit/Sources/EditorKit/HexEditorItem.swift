@@ -8,8 +8,9 @@ extension ItemKind {
     public static let editor: ItemKind = "editor"
 }
 
-/// A read-only hex editor tab over one file (M1). Editing, sessions and saving come
-/// with the piece table in M3; until then the item owns its `ByteSource` directly.
+/// A hex editor tab over one file. Edits go into an `EditBuffer` (M3a); every read the
+/// view, search, inspector and Save Selection make goes through its current snapshot.
+/// Sessions and saving come in M3b.
 @MainActor
 public final class HexEditorItem: WorkspaceItem {
     public let id = ItemID()
@@ -17,6 +18,8 @@ public final class HexEditorItem: WorkspaceItem {
     public let preferredSlot: SlotID = .leftPanel
     public let url: URL
     public let source: ByteSource
+    /// The edit model over `source`.
+    public let buffer: EditBuffer
     public weak var host: WorkspaceHost?
     public var onChange: (() -> Void)?
 
@@ -28,8 +31,13 @@ public final class HexEditorItem: WorkspaceItem {
     public init(url: URL, scope: SecurityScope? = nil) throws {
         self.url = url
         self.scope = scope
-        self.source = try ByteSource(url: url)
+        let source = try ByteSource(url: url)
+        self.source = source
+        self.buffer = try EditBuffer(original: source)
     }
+
+    /// The current version, for reading on any thread.
+    public var snapshot: EditSnapshot { buffer.snapshot() }
 
     public var title: String { url.lastPathComponent }
     public var icon: NSImage? { NSWorkspace.shared.icon(forFile: url.path) }
@@ -39,7 +47,7 @@ public final class HexEditorItem: WorkspaceItem {
 
     /// Status line text for the current cursor and selection.
     public var statusText: String {
-        guard source.length > 0 else { return "\(title) · empty file · Read-only" }
+        guard length > 0 else { return "\(title) · empty file · Read-only" }
         let cursor = hexView.selection.cursor
         let range = hexView.selection.range
         var parts = ["Offset \(Self.hex(cursor)) (\(cursor))"]
@@ -47,7 +55,7 @@ public final class HexEditorItem: WorkspaceItem {
             let last = Self.hex(range.upperBound - 1)
             parts.append("Selected \(range.count) bytes (\(Self.hex(range.lowerBound))…\(last))")
         }
-        parts.append("Size \(Self.byteCount(source.length))")
+        parts.append("Size \(Self.byteCount(length))")
         parts.append("Read-only")
         return parts.joined(separator: " · ")
     }
@@ -78,24 +86,28 @@ public final class HexEditorItem: WorkspaceItem {
 }
 
 extension HexEditorItem: HexViewDataSource {
-    public var length: UInt64 { source.length }
+    public var length: UInt64 { buffer.length }
 
-    public func cachedBytes(_ range: Range<UInt64>) -> Data? { source.cachedBytes(range) }
+    public func cachedBytes(_ range: Range<UInt64>) -> Data? { snapshot.cachedBytes(range) }
 
     public func prefetch(
         _ range: Range<UInt64>, completion: @escaping @MainActor (Error?) -> Void
     ) {
-        source.prefetch(range) { error in completion(error) }
+        snapshot.prefetch(range) { error in completion(error) }
     }
 
-    public func read(_ range: Range<UInt64>) throws -> Data { try source.read(range) }
+    public func read(_ range: Range<UInt64>) throws -> Data { try snapshot.read(range) }
+
+    public func modifiedRanges(in range: Range<UInt64>) -> [Range<UInt64>] {
+        snapshot.modifiedRanges(in: range)
+    }
 
     /// Copies through `readSequential` so copying up to 16 MiB never evicts the view's
     /// LRU page cache; large selections read off the main thread while keeping `scope`.
     public func readForCopy(
         _ range: Range<UInt64>, completion: @escaping @MainActor (Result<Data, Error>) -> Void
     ) {
-        let readExact: @Sendable (ByteSource) -> Result<Data, Error> = { source in
+        let readExact: @Sendable (EditSnapshot) -> Result<Data, Error> = { source in
             Result {
                 let data = try source.readSequential(range)
                 guard UInt64(data.count) == range.count else {
@@ -106,11 +118,11 @@ extension HexEditorItem: HexViewDataSource {
                 return data
             }
         }
+        let source = snapshot
         if range.count <= 256 * 1024 {
             completion(readExact(source))
             return
         }
-        let source = self.source
         let scope = self.scope
         Task.detached(priority: .userInitiated) {
             let result = withExtendedLifetime(scope) { readExact(source) }

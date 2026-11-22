@@ -39,7 +39,7 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     // Find state (HexEditorViewController+Find.swift).
     /// Internal test seam so search tests can inject a deterministic `ByteReading`.
     var searchSourceOverride: (any ByteReading)?
-    var searchSource: (any ByteReading)? { searchSourceOverride ?? item?.source }
+    var searchSource: (any ByteReading)? { searchSourceOverride ?? item?.snapshot }
     var searchTask: Task<Void, Never>?
     var searchGeneration = 0
     /// The match the last find selected; "next" starts after it.
@@ -134,7 +134,7 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         let cursor = hexView.selection.cursor
         let range = cursor..<min(item.length, cursor + UInt64(Inspector.byteCount))
         if let bytes = item.cachedBytes(range) { return inspector.show(bytes) }
-        item.source.prefetch(range, supersede: false) { [weak self] _ in
+        item.snapshot.prefetch(range, supersede: false) { [weak self] _ in
             guard let self, let item = self.item, self.hexView.selection.cursor == cursor else {
                 return
             }
@@ -213,7 +213,7 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
             guard let self, let item = self.item, response == .OK, let destination = panel.url
             else { return }
             item.host?.showStatus("Saving \(range.count.formatted()) bytes…")
-            let source = item.source
+            let source = item.snapshot
             let scope = item.scope
             Task.detached(priority: .userInitiated) {
                 let error = withExtendedLifetime(scope) {
@@ -234,7 +234,7 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     /// Saves `range` of `source` to `destination`; removes any partial output on failure
     /// and returns the error, if any.
     nonisolated static func write(
-        _ source: ByteSource, range: Range<UInt64>, to destination: URL
+        _ source: some ByteReading, range: Range<UInt64>, to destination: URL
     )
         -> Error?
     {
