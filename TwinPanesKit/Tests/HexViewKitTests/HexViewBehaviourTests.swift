@@ -6,7 +6,9 @@ import Testing
 /// A data source whose cache, prefetch results and short reads the test controls.
 @MainActor
 final class FakeHexSource: HexViewDataSource {
-    let data: Data
+    var data: Data
+    /// Returned by `modifiedRanges`, clamped to the asked range.
+    var modified: [Range<UInt64>] = []
     /// Whether `cachedBytes` answers; prefetch success turns it on.
     var cached = false
     /// Returned by every prefetch; nil means success (which also fills the cache).
@@ -46,6 +48,10 @@ final class FakeHexSource: HexViewDataSource {
     func read(_ range: Range<UInt64>) throws -> Data {
         data[Int(range.lowerBound)..<Int(range.upperBound)]
     }
+
+    func modifiedRanges(in range: Range<UInt64>) -> [Range<UInt64>] {
+        modified.map { $0.clamped(to: range) }.filter { !$0.isEmpty }
+    }
 }
 
 @MainActor
@@ -59,6 +65,24 @@ final class DelegateSpy: HexViewDelegate {
     }
     func hexView(_ view: HexView, didFailToRead error: Error) { errors += 1 }
     func hexViewDidLoadBytes(_ view: HexView) { loadedCount += 1 }
+
+    /// Applies writes to `source` unless `readOnly`.
+    weak var source: FakeHexSource?
+    var readOnly = false
+    var writes: [(offset: UInt64, bytes: Data, column: HexLayout.Column, cursorAfter: UInt64)] = []
+    var unencodable: [Character] = []
+    func hexView(
+        _ view: HexView, overwrite bytes: Data, at offset: UInt64, column: HexLayout.Column,
+        cursorAfter: UInt64
+    ) -> Bool {
+        guard !readOnly, let source else { return false }
+        writes.append((offset, bytes, column, cursorAfter))
+        source.data.replaceSubrange(Int(offset)..<(Int(offset) + bytes.count), with: bytes)
+        return true
+    }
+    func hexView(_ view: HexView, cannotEncode character: Character) {
+        unencodable.append(character)
+    }
 }
 
 struct ReadFailed: Error {}

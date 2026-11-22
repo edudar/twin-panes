@@ -26,6 +26,7 @@ extension HexView {
             }
             : Data()
         if visible == nil { requestPrefetch(rows) }
+        let modified = first < end ? dataSource?.modifiedRanges(in: first..<end) ?? [] : []
 
         let isFocused = window?.firstResponder === self && window?.isKeyWindow == true
         // Pre-sized buffers shared across all visible rows for Core Text drawing.
@@ -54,7 +55,7 @@ extension HexView {
                         $0.count == Int(rowEnd - start) ? $0 : nil
                     } : Data()
             }
-            drawSelection(row: row, y: y, focused: isFocused)
+            drawSelection(row: row, y: y, focused: isFocused, modified: modified)
             drawRow(
                 row: row, bytes: bytes, count: Int(rowEnd - start), y: y, in: context,
                 offsetGlyphs: &offsetGlyphs, offsetPositions: &offsetPositions,
@@ -64,9 +65,18 @@ extension HexView {
 
     private func x(cell: Int) -> Double { inset.left + Double(cell) * charWidth - horizontalOffset }
 
-    private func drawSelection(row: UInt64, y: Double, focused: Bool) {
+    private func drawSelection(
+        row: UInt64, y: Double, focused: Bool, modified: [Range<UInt64>]
+    ) {
         guard layout.length > 0 else { return }
         let rowRange = layout.rowStart(row)..<(layout.rowStart(row) + UInt64(layout.bytesPerRow))
+        // Changed bytes, under the find highlights and the selection.
+        NSColor.controlAccentColor.withAlphaComponent(0.2).setFill()
+        var change = modified.partitioningIndex { $0.upperBound > rowRange.lowerBound }
+        while change < modified.count, modified[change].lowerBound < rowRange.upperBound {
+            fill(modified[change].clamped(to: rowRange), in: rowRange, y: y)
+            change += 1
+        }
         NSColor.findHighlightColor.withAlphaComponent(0.6).setFill()
         var match = highlights.partitioningIndex { $0.upperBound > rowRange.lowerBound }
         while match < highlights.count, highlights[match].lowerBound < rowRange.upperBound {
@@ -82,9 +92,11 @@ extension HexView {
         // Cursor: an outline in the active column, a lighter one in the other.
         guard rowRange.contains(selection.cursor) else { return }
         let index = Int(selection.cursor - rowRange.lowerBound)
+        // Half-way through typing a byte, the box shrinks to the low digit still to come.
+        let halfTyped = pendingNibble == selection.cursor
         let hexBox = NSRect(
-            x: x(cell: layout.hexCell(index)) - 2, y: y, width: 2 * charWidth + 4,
-            height: rowHeight)
+            x: x(cell: layout.hexCell(index) + (halfTyped ? 1 : 0)) - (halfTyped ? 1 : 2), y: y,
+            width: (halfTyped ? 1 : 2) * charWidth + (halfTyped ? 2 : 4), height: rowHeight)
         let textBox = NSRect(
             x: x(cell: layout.textCell(index)), y: y, width: charWidth, height: rowHeight)
         for (box, active) in [(hexBox, activeColumn == .hex), (textBox, activeColumn == .text)] {

@@ -13,6 +13,8 @@ public protocol HexViewDataSource: AnyObject {
     /// Uncached read for copying a selection without evicting the view's page cache.
     func readForCopy(
         _ range: Range<UInt64>, completion: @escaping @MainActor (Result<Data, Error>) -> Void)
+    /// The parts of `range` holding edited bytes, sorted, for the changed-bytes fill.
+    func modifiedRanges(in range: Range<UInt64>) -> [Range<UInt64>]
 }
 
 extension HexViewDataSource {
@@ -21,6 +23,8 @@ extension HexViewDataSource {
     ) {
         completion(Result { try read(range) })
     }
+
+    public func modifiedRanges(in range: Range<UInt64>) -> [Range<UInt64>] { [] }
 }
 
 @MainActor
@@ -33,11 +37,25 @@ public protocol HexViewDelegate: AnyObject {
     func hexView(_ view: HexView, didFailToRead error: Error)
     /// A background prefetch landed and the view is about to redraw with the new bytes.
     func hexViewDidLoadBytes(_ view: HexView)
+    /// Typing asks to overwrite `bytes` at `offset` from `column`; the cursor then moves
+    /// to `cursorAfter`. Return false to refuse (the view beeps). By default views are
+    /// read-only.
+    func hexView(
+        _ view: HexView, overwrite bytes: Data, at offset: UInt64, column: HexLayout.Column,
+        cursorAfter: UInt64
+    ) -> Bool
+    /// A character typed in the text column that its encoding can't represent.
+    func hexView(_ view: HexView, cannotEncode character: Character)
 }
 
 extension HexViewDelegate {
     public func hexView(_ view: HexView, didFailToRead error: Error) {}
     public func hexViewDidLoadBytes(_ view: HexView) {}
+    public func hexView(
+        _ view: HexView, overwrite bytes: Data, at offset: UInt64, column: HexLayout.Column,
+        cursorAfter: UInt64
+    ) -> Bool { false }
+    public func hexView(_ view: HexView, cannotEncode character: Character) {}
 }
 
 /// Virtualized hex/text view (PLAN.md §4.4). The view is window-sized and draws only
@@ -80,6 +98,9 @@ public final class HexView: NSView {
     /// The last prefetch range that failed; not asked for again until the view needs a
     /// different range or reloads, so a persistent read error can't loop.
     var failedPrefetch: Range<UInt64>?
+    /// The byte whose high nibble was just typed in the hex column; the next hex digit
+    /// sets its low nibble. Any cursor move clears it.
+    var pendingNibble: UInt64?
 
     public override init(frame: NSRect) {
         super.init(frame: frame)
@@ -112,6 +133,7 @@ public final class HexView: NSView {
         selection = HexSelection(length: length)
         pendingPrefetch = nil
         failedPrefetch = nil
+        pendingNibble = nil
         horizontalOffset = 0
         relayout(keepingRow: false)
         delegate?.hexViewSelectionDidChange(self)
@@ -258,6 +280,7 @@ public final class HexView: NSView {
     }
 
     func selectionChanged(reveal: Bool) {
+        pendingNibble = nil
         if reveal {
             position.reveal(row: layout.row(of: selection.cursor))
             revealCursorHorizontally()

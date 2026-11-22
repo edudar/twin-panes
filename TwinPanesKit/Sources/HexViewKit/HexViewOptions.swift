@@ -27,6 +27,17 @@ public struct HexViewOptions: Equatable, Sendable {
                     ? Character(UnicodeScalar(byte)) : nil
             }
         }
+
+        /// The byte that typing `character` writes, or nil if this encoding can't hold it.
+        public func byte(for character: Character) -> UInt8? {
+            guard character.unicodeScalars.count == 1,
+                let value = character.unicodeScalars.first?.value
+            else { return nil }
+            switch self {
+            case .ascii: return value < 0x80 ? UInt8(value) : nil
+            case .latin1: return value < 0x100 ? UInt8(value) : nil
+            }
+        }
     }
 
     public static let allowedBytesPerRow = [8, 16, 32]

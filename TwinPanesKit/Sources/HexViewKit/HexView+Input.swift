@@ -106,6 +106,7 @@ extension HexView: NSMenuItemValidation {
     /// Tab switches the active column between hex and text.
     public override func insertTab(_ sender: Any?) {
         activeColumn = activeColumn == .hex ? .text : .hex
+        pendingNibble = nil
         needsDisplay = true
     }
     public override func insertBacktab(_ sender: Any?) { insertTab(sender) }
