@@ -45,7 +45,7 @@ public final class BrowserItem: WorkspaceItem {
     public private(set) var hasListed = false
     /// Access to the current folder, held for as long as this tab shows it (§5).
     private(set) var scope: SecurityScope?
-    private lazy var controller = BrowserViewController(item: self)
+    lazy var controller = BrowserViewController(item: self)
 
     public init(
         folder: URL, grants: FolderGrants, openFile: @escaping (URL, SecurityScope?) -> Void

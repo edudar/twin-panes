@@ -42,6 +42,7 @@ let package = Package(
         .testTarget(name: "WorkspaceKitTests", dependencies: ["WorkspaceKit"]),
         .testTarget(name: "HexViewKitTests", dependencies: ["HexViewKit"]),
         .testTarget(name: "EditorKitTests", dependencies: ["EditorKit", "TwinPanesCore"]),
+        .testTarget(name: "BrowserKitTests", dependencies: ["BrowserKit", "TwinPanesCore"]),
         .testTarget(name: "SandboxProbeTests", dependencies: ["SandboxProbe"]),
     ]
 )
