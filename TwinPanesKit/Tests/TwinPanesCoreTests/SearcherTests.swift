@@ -12,7 +12,40 @@ final class Flag: Sendable {
     var isSet: Bool { value.load(ordering: .relaxed) }
 }
 
-@Suite struct SearcherTests {
+/// One-shot async signal backed by `Mutex` + `CheckedContinuation`, so tests await
+/// worker entry without spinning Swift's cooperative pool or blocking it on a semaphore.
+private final class SearchSignal: Sendable {
+    private struct State: Sendable {
+        var signaled = false
+        var waiters: [CheckedContinuation<Void, Never>] = []
+    }
+
+    private let state = Mutex(State())
+
+    func signal() {
+        let waiters = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            guard !state.signaled else { return [] }
+            state.signaled = true
+            let list = state.waiters
+            state.waiters.removeAll()
+            return list
+        }
+        for waiter in waiters { waiter.resume() }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            let ready = state.withLock { state -> Bool in
+                if state.signaled { return true }
+                state.waiters.append(continuation)
+                return false
+            }
+            if ready { continuation.resume() }
+        }
+    }
+}
+
+@Suite(.serialized) struct SearcherTests {
     func text(_ s: String) throws -> SearchPattern { try .text(s, encoding: .utf8) }
 
     @Test func findsAcrossChunkBoundaries() throws {
@@ -100,26 +133,28 @@ final class Flag: Sendable {
     /// Review bug 3: every search shared one serial queue, so a long search in one tab
     /// held up every other tab's search. Searches now run on a small pool.
     @Test func aLongSearchDoesNotBlockAnother() async throws {
-        let started = Flag()
-        let release = Flag()
+        let started = SearchSignal()
+        let release = DispatchSemaphore(value: 0)
         let long = Task {
             try await Searcher.run { _ in
-                started.set()
-                while !release.isSet { usleep(1000) }
+                started.signal()
+                release.wait()
                 return 1
             }
         }
-        while !started.isSet { await Task.yield() }
+        await started.wait()
         let short = Task { try await Searcher.run { _ in 2 } }
+        // Generous timeout: on Xcode 16/26 all test targets share one process and
+        // Searcher.pool's 2 slots, so parallel EditorKit tests may hold slot 2 for
+        // several seconds while MainActor tests drain.
         let shortFinishedFirst = await withTaskGroup(of: Bool.self) { group in
             group.addTask { (try? await short.value) == 2 }
             group.addTask {
-                try? await Task.sleep(for: .seconds(2))
-                release.set()
+                try? await Task.sleep(for: .seconds(15))
                 return false
             }
             let first = await group.next() ?? false
-            release.set()
+            release.signal()
             group.cancelAll()
             return first
         }
@@ -128,15 +163,15 @@ final class Flag: Sendable {
     }
 
     @Test func runCancelsWithItsTask() async throws {
-        let started = Flag()
+        let started = SearchSignal()
         let task = Task {
             try await Searcher.run { token in
-                started.set()
+                started.signal()
                 while !token.isCancelled { usleep(1000) }
                 throw CancellationError()
             }
         }
-        while !started.isSet { await Task.yield() }
+        await started.wait()
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
     }
