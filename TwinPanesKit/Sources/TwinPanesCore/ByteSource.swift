@@ -8,6 +8,13 @@ public protocol ByteReading: Sendable {
     var length: UInt64 { get }
     /// Reads `range`, blocking on I/O if needed. Throws if the file can't deliver it.
     func read(_ range: Range<UInt64>) throws -> Data
+    /// Reads `range` for a one-pass scan (search, save) without filling any cache the
+    /// view relies on. May return fewer bytes if the file got shorter.
+    func readSequential(_ range: Range<UInt64>) throws -> Data
+}
+
+extension ByteReading {
+    public func readSequential(_ range: Range<UInt64>) throws -> Data { try read(range) }
 }
 
 public enum ByteSourceError: Error, Equatable, CustomStringConvertible {
