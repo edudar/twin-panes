@@ -37,7 +37,7 @@ public enum Inspector {
             Row(name: "UInt32", value: show(int(UInt32.self))),
             Row(name: "Int64", value: show(int(Int64.self))),
             Row(name: "UInt64", value: show(int(UInt64.self))),
-            Row(name: "Float16", value: show(int(UInt16.self).map { Float16(bitPattern: $0) })),
+            Row(name: "Float16", value: int(UInt16.self).map(half)),
             Row(name: "Float32", value: show(int(UInt32.self).map { Float(bitPattern: $0) })),
             Row(name: "Float64", value: show(int(UInt64.self).map { Double(bitPattern: $0) })),
             Row(name: "UTF-8", value: bytes.isEmpty ? nil : utf8(bytes)),
@@ -57,6 +57,25 @@ public enum Inspector {
                     date(Double($0 / 10_000_000), since: -11_644_473_600)
                 }),
         ]
+    }
+
+    /// A half-precision float from its bits. `Float16` exists only on Apple silicon; the
+    /// app is arm64-only, but tools such as CodeQL may build the package for x86_64.
+    static func half(_ bits: UInt16) -> String {
+        #if arch(arm64)
+            return "\(Float16(bitPattern: bits))"
+        #else
+            let sign: Float = bits >> 15 == 0 ? 1 : -1
+            let exponent = Int((bits >> 10) & 0x1F)
+            let fraction = Float(bits & 0x3FF)
+            switch exponent {
+            case 0: return "\(sign * fraction * 0x1p-24)"
+            case 31: return fraction == 0 ? "\(sign * .infinity)" : "nan"
+            default:
+                return
+                    "\(sign * (1 + fraction / 1024) * Float(sign: .plus, exponent: exponent - 15, significand: 1))"
+            }
+        #endif
     }
 
     static func binary(_ byte: UInt8) -> String {
