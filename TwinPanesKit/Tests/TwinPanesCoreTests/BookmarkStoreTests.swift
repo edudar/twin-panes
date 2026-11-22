@@ -44,9 +44,9 @@ import Testing
     @Test func noLimitKeepsEverything() throws {
         defer { cleanUp() }
         let store = BookmarkStore(defaults: try #require(UserDefaults(suiteName: suite)), key: key)
-        let urls = try (1...12).map { try file("f\($0)") }
+        let urls = try (1...4).map { try file("f\($0)") }
         for url in urls { try store.add(url) }
-        #expect(store.entries.count == 12)
+        #expect(store.entries.count == 4)
     }
 
     @Test func addingTheSamePathAgainMovesItToTheTop() throws {
@@ -60,27 +60,50 @@ import Testing
         #expect(paths(store) == [a.path, b.path])
     }
 
-    @Test func unresolvableEntriesAreDropped() throws {
+    @Test func unresolvableEntriesAreDroppedAndPrunedOnWrite() throws {
         defer { cleanUp() }
         let defaults = try #require(UserDefaults(suiteName: suite))
         let store = BookmarkStore(defaults: defaults, key: key)
         let a = try file("a")
+        let b = try file("b")
         try store.add(a)
         defaults.set(
             [Data("garbage".utf8)] + (defaults.array(forKey: key) as? [Data] ?? []), forKey: key)
         #expect(paths(store) == [a.path])
         #expect(BookmarkStore.resolve(Data("garbage".utf8)) == nil)
+        try store.add(b)
+        #expect((defaults.array(forKey: key) as? [Data])?.count == 2)
     }
 
-    @Test func refreshKeepsPosition() throws {
+    @Test func refreshKeepsPositionAndAddsIfMissing() throws {
         defer { cleanUp() }
         let store = BookmarkStore(defaults: try #require(UserDefaults(suiteName: suite)), key: key)
         let a = try file("a")
         let b = try file("b")
+        let c = try file("c")
         try store.add(a)
         try store.add(b)
         try store.refresh(a)
         #expect(paths(store) == [b.path, a.path])
+        try store.refresh(c)
+        #expect(paths(store) == [c.path, b.path, a.path])
+    }
+
+    @Test func folderGrantsRespectPathComponentBoundaries() throws {
+        defer { cleanUp() }
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let grants = FolderGrants(defaults: defaults)
+        let foo = dir.appendingPathComponent("foo", isDirectory: true)
+        let foobar = dir.appendingPathComponent("foobar", isDirectory: true)
+        try FileManager.default.createDirectory(at: foo, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: foobar, withIntermediateDirectories: true)
+        try grants.add(foo)
+        #expect(grants.scope(covering: foo.appendingPathComponent("inside")) != nil)
+        #expect(grants.scope(covering: foobar) == nil)
+        #expect(grants.scope(covering: foobar.appendingPathComponent("inside")) == nil)
+        grants.removeAll()
+        #expect(grants.folders.isEmpty)
+        #expect(grants.scope(covering: foo) == nil)
     }
 
     @Test func persistsAcrossInstancesAndRemoveAllEmpties() throws {

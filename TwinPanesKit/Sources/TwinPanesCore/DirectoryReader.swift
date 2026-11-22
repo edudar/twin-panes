@@ -63,18 +63,21 @@ public enum DirectoryReader {
         let values = try? url.resourceValues(forKeys: Set(keys))
         let isLink = values?.isSymbolicLink ?? false
         var isDirectory = values?.isDirectory ?? false
+        var isPackage = values?.isPackage ?? false
+        var fileSize = values?.fileSize
         if isLink {
             let target = try? url.resolvingSymlinksInPath()
-                .resourceValues(forKeys: [.isDirectoryKey])
+                .resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .fileSizeKey])
             isDirectory = target?.isDirectory ?? false
+            isPackage = target?.isPackage ?? false
+            if let targetSize = target?.fileSize { fileSize = targetSize }
         }
-        let isPackage = values?.isPackage ?? false
         let isFolder = isDirectory && !isPackage
         return DirectoryEntry(
             url: url, name: values?.localizedName ?? url.lastPathComponent,
             isDirectory: isFolder, isPackage: isPackage, isSymbolicLink: isLink,
             isHidden: values?.isHidden ?? false,
-            size: isFolder ? nil : values?.fileSize.map { UInt64($0) },
+            size: isFolder ? nil : fileSize.map { UInt64($0) },
             modified: values?.contentModificationDate,
             kind: values?.localizedTypeDescription ?? (isFolder ? "Folder" : "Document"))
     }

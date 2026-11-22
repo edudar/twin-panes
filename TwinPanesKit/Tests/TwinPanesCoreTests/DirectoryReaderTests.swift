@@ -60,6 +60,42 @@ import Testing
         #expect(throws: DirectoryReaderError.notAFolder(file)) {
             _ = try DirectoryReader.entries(of: file)
         }
+        let locked = dir.appendingPathComponent("locked")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: false)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: locked.path)
+        }
+        #expect(throws: DirectoryReaderError.needsAccess(locked)) {
+            _ = try DirectoryReader.entries(of: locked)
+        }
+    }
+
+    @Test func symlinksAndEmptyFolder() throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fm = FileManager.default
+        let empty = dir.appendingPathComponent("empty", isDirectory: true)
+        try fm.createDirectory(at: empty, withIntermediateDirectories: false)
+        #expect(try DirectoryReader.entries(of: empty).isEmpty)
+
+        try fm.createSymbolicLink(
+            at: dir.appendingPathComponent("link-to-app"),
+            withDestinationURL: dir.appendingPathComponent("Tool.app"))
+        try fm.createSymbolicLink(
+            at: dir.appendingPathComponent("link-to-file"),
+            withDestinationURL: dir.appendingPathComponent("file10.bin"))
+        try fm.createSymbolicLink(
+            at: dir.appendingPathComponent("broken-link"),
+            withDestinationURL: dir.appendingPathComponent("does-not-exist"))
+
+        let entries = try DirectoryReader.entries(of: dir)
+        let appLink = try #require(entries.first { $0.url.lastPathComponent == "link-to-app" })
+        #expect(appLink.isSymbolicLink && appLink.isPackage && !appLink.isDirectory)
+        let fileLink = try #require(entries.first { $0.url.lastPathComponent == "link-to-file" })
+        #expect(fileLink.isSymbolicLink && !fileLink.isDirectory && fileLink.size == 10)
+        let broken = try #require(entries.first { $0.url.lastPathComponent == "broken-link" })
+        #expect(broken.isSymbolicLink && !broken.isDirectory)
     }
 
     @Test func grantsPickTheMostSpecificFolder() throws {

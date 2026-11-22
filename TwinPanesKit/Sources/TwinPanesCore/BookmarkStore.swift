@@ -16,12 +16,12 @@ public final class BookmarkStore {
         self.limit = limit
     }
 
-    /// Records `url` at the top, replacing any entry for the same path and trimming to
-    /// `limit`. Call while access to it is active.
+    /// Records `url` at the top, replacing any entry for the same path, pruning entries
+    /// that no longer resolve, and trimming to `limit`. Call while access to it is active.
     public func add(_ url: URL) throws {
         let data = try Self.bookmark(url)
         let path = url.standardizedFileURL.path
-        stored = [data] + stored.filter { Self.path(of: $0) != path }
+        stored = [data] + stored.filter { Self.path(of: $0).map { $0 != path } ?? false }
     }
 
     /// The entries that still resolve, newest first.
@@ -29,12 +29,12 @@ public final class BookmarkStore {
         stored.compactMap { data in Self.resolve(data).map { ($0.url, data, $0.stale) } }
     }
 
-    /// Recreates the bookmark for `url` in place, keeping its position. Use when an
-    /// entry resolved as stale; adds it at the top if it isn't in the list.
+    /// Recreates the bookmark for `url` in place, keeping its position and pruning dead
+    /// entries. Use when an entry resolved as stale; adds it at the top if not present.
     public func refresh(_ url: URL) throws {
         let data = try Self.bookmark(url)
         let path = url.standardizedFileURL.path
-        var list = stored
+        var list = stored.filter { Self.path(of: $0) != nil }
         if let index = list.firstIndex(where: { Self.path(of: $0) == path }) {
             list[index] = data
             stored = list
