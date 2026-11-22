@@ -24,9 +24,13 @@ Twin Panes is early and changing quickly. Right now it can:
 - **Browse folders**: name, size, date and kind columns. Type to jump to a
   file, Return or ⌘↓ to go in, ⌘↑ or Backspace to go up, ⇧⌘G to type a path.
 - **Open any file as hex** with F3, F4 or Return in the browser, with
-  File › Open, by dropping a file on the window, or with Finder's *Open With*.
+  File › Open, by dropping a file (or folder) on the window, or with Finder's
+  *Open With*.
 - **Inspect large files**: a 4 GB file opens in well under a tenth of a second.
   Scrolling stays smooth and memory stays at tens of megabytes.
+- **Search and inspect**: find hex or text (UTF-8, UTF-16 LE/BE, case-folding)
+  across a whole 4 GB file with progress and cancel, highlight all matches, and
+  decode the bytes under the cursor in the data inspector (⌥⌘I).
 - **Navigate bytes**: go to an offset (⌘L), select ranges, and copy them as hex
   or text. A selection can also be saved to its own file.
 - **Change the view**: offsets in hex or decimal, byte grouping, and an ASCII or
@@ -40,16 +44,14 @@ remembers those grants.
 
 In rough order:
 
-1. **Search and inspect**: find hex or text across a whole 4 GB file, with
-   progress and cancel, and an inspector that decodes the bytes under the cursor.
-2. **Editing and saving**: overwrite bytes with undo, and saves that are
+1. **Editing and saving**: overwrite bytes with undo, and saves that are
    near-instant and crash-safe. Unsaved edits survive the app crashing.
-3. **The full file manager**: two panels, a sidebar, a Quick Look preview pane,
+2. **The full file manager**: two panels, a sidebar, a Quick Look preview pane,
    an F-key bar, and copy, move, rename and trash with progress and conflict
    handling.
-4. **More editing**: insert and delete bytes, plus plain-text and Markdown modes
+3. **More editing**: insert and delete bytes, plus plain-text and Markdown modes
    with find and replace.
-5. **Later**: a built-in terminal, multiple windows, remote connections, folder
+4. **Later**: a built-in terminal, multiple windows, remote connections, folder
    compare and more.
 
 The full plan, with every decision behind it, is in

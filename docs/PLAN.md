@@ -322,7 +322,12 @@ volume/grant capability matrix (M0 spike, §5).
 
 ### 4.4 View: `HexView` (AppKit)
 - Custom `NSView` drawing only visible rows with Core Text, using pre-shaped glyphs for
-  hex digits and printable ASCII.
+  hex digits and printable ASCII. **As built:** `HexGlyphTable` pre-shapes printable ASCII,
+  Latin-1, hex digits and placeholder dots once per font change and draws each row with
+  `CTFontDrawGlyphs`. A horizontal `NSScroller` appears automatically when a wide layout
+  (e.g. 32 bytes/row or `both` offsets) exceeds the viewport. Copying reads through
+  `ByteSource.readSequential` (async off the main actor above 256 KiB) so copying doesn't
+  evict the view's LRU pages.
 - **Virtual scrolling:** window-sized view; a custom scroller maps position to a top
   row index (UInt64). No gigantic document view, no float-precision drift. This is
   the riskiest part of M1 — build it first. **As built (M1):** the scroll position is
@@ -384,7 +389,9 @@ character, Unix time / Mac absolute time / Windows FILETIME. Editable later.
 **As built (M2):** `Inspector` (TwinPanesCore) decodes up to 8 bytes; `InspectorView`
 (HexViewKit) is a panel on the right of the hex editor with a byte-order switch,
 hidden by default and toggled with View › Show Inspector (⌥⌘I). Dates show as ISO 8601
-UTC, Unix time as 32-bit seconds.
+UTC, Unix time as 32-bit seconds. Uncached cursor reads use a non-superseding
+`ByteSource.prefetch` (and refresh when `HexView`'s viewport prefetch lands) so the
+inspector and viewport never cancel each other.
 
 ### 4.7 File manager (BrowserKit)
 
@@ -709,6 +716,13 @@ can't be plain menu shortcuts.
   view) and a sheet.
 
 Built in M0 with hard-coded default bindings; user-editable bindings arrive in M10.
+**As built:** `MainWindow` refreshes menus on focus change (`makeFirstResponder` /
+`becomeKey`) in addition to `menuNeedsUpdate(_:)`, deduplicates events between
+`performKeyEquivalent` and `sendEvent`, and `CommandRegistry` preserves registration order
+so primary shortcuts (e.g. `⌘G` ahead of `F3` on Find Next) appear in menus.
+`browser.switchPanel` is left out of the View menu until dual panels land in M5.
+Dropping a file on a window opens a hex tab in that window; dropping a folder opens a
+browser tab there and saves its grant.
 
 ### 4.12 App icon (D24)
 
