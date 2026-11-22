@@ -360,10 +360,24 @@ volume/grant capability matrix (M0 spike, §5).
   `PieceTable` snapshot from M3a, so the switch is a data-source swap.
 - "Find all" stores at most N results (e.g. 100k) and reports "more than N".
 - Target: disk-bound speed on 4 GB (a few seconds on internal SSD).
+- **As built (M2):** `Searcher` takes any `ByteReading`, which gained
+  `readSequential` (uncached for `ByteSource`, a plain read by default). 4 MB chunks,
+  `memchr` on the first exact byte, then verify; case-insensitive text folds ASCII
+  letters only. Calls are synchronous with a `SearchCancellation` token and a progress
+  callback per chunk; `Searcher.run` runs one on a single serial queue and cancels it
+  with the calling task. Find next/previous wraps once and says so; Find All keeps
+  non-overlapping matches up to 100,000 and highlights them, and next/previous then
+  step through that list without rescanning. Pattern kinds: hex, UTF-8, UTF-16 LE/BE
+  text. Smoke test: a full search of a 4 GiB file takes ~0.6–0.8 s on the dev Mac
+  (sparse file, so not disk-bound) and leaves the view's cached pages in place.
 
 ### 4.6 Data inspector
 At the cursor: Int/UInt 8/16/32/64 (LE/BE), Float16/32/64, binary, UTF-8/UTF-16
 character, Unix time / Mac absolute time / Windows FILETIME. Editable later.
+**As built (M2):** `Inspector` (TwinPanesCore) decodes up to 8 bytes; `InspectorView`
+(HexViewKit) is a panel on the right of the hex editor with a byte-order switch,
+shown by default and toggled with View › Show Inspector (⌥⌘I). Dates show as ISO 8601
+UTC, Unix time as 32-bit seconds.
 
 ### 4.7 File manager (BrowserKit)
 
@@ -636,7 +650,9 @@ one undo step. The hex text column follows the rules in §4.4.
 
 **Find & replace inside the edited file (all modes)**
 - ⌘F opens an inline find bar at the top of the editor item (not a window/panel);
-  ⌘G / ⇧⌘G next/previous, ⌥⌘F replace, "Replace All".
+  ⌘G / ⇧⌘G next/previous (also F3 / ⇧F3 in the editor), ⌘E uses the selection,
+  ⌥⌘F replace, "Replace All". Esc in the bar stops a running search, else closes the
+  bar (scope `item.editor.findBar`). Built for hex in M2.
 - Hex mode: hex-byte or text patterns (§4.5), searching the whole file via
   `Searcher` with progress. Replace arrives with M9a, after insert/delete (M8), so
   replacement can be any length from the start. The first usable hex version (M3b)
