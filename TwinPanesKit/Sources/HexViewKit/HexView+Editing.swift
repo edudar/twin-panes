@@ -54,8 +54,7 @@ extension HexView {
                 == true
         else { return false }
         selection.move(to: cursorAfter)
-        selectionChanged(reveal: true)
-        pendingNibble = nibble
+        selectionChanged(reveal: true, pendingNibble: nibble)
         return true
     }
 }

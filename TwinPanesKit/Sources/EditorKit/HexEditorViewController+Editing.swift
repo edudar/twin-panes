@@ -14,7 +14,10 @@ extension HexEditorViewController {
                 bytes, at: offset, column: column, selectionBefore: view.selection.range,
                 cursorAfter: cursorAfter)
         else { return false }
-        bytesChanged()
+        clearFindResults()
+        // `HexView` immediately moves the cursor and calls `hexViewSelectionDidChange`,
+        // which refreshes the view, status line and inspector once with the new cursor.
+        applyingTypingEdit = true
         return true
     }
 
@@ -35,11 +38,15 @@ extension HexEditorViewController {
     /// Find results may no longer match the bytes, so they go; the view and the
     /// inspector redraw from the new version.
     func bytesChanged() {
-        hexView.highlights = []
-        allMatches = nil
-        lastMatch = nil
+        clearFindResults()
         hexView.needsDisplay = true
         item?.updateStatus()
         updateInspector()
+    }
+
+    func clearFindResults() {
+        hexView.highlights = []
+        allMatches = nil
+        lastMatch = nil
     }
 }

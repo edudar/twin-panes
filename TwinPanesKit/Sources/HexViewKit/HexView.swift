@@ -46,6 +46,8 @@ public protocol HexViewDelegate: AnyObject {
     ) -> Bool
     /// A character typed in the text column that its encoding can't represent.
     func hexView(_ view: HexView, cannotEncode character: Character)
+    /// The active column switched between hex and text (e.g. via Tab).
+    func hexViewDidChangeColumn(_ view: HexView)
 }
 
 extension HexViewDelegate {
@@ -56,6 +58,7 @@ extension HexViewDelegate {
         cursorAfter: UInt64
     ) -> Bool { false }
     public func hexView(_ view: HexView, cannotEncode character: Character) {}
+    public func hexViewDidChangeColumn(_ view: HexView) {}
 }
 
 /// Virtualized hex/text view (PLAN.md §4.4). The view is window-sized and draws only
@@ -279,8 +282,15 @@ public final class HexView: NSView {
         selectionChanged(reveal: false)
     }
 
-    func selectionChanged(reveal: Bool) {
+    /// Drops any half-typed hex byte marker without moving the selection.
+    public func clearPendingNibble() {
+        guard pendingNibble != nil else { return }
         pendingNibble = nil
+        needsDisplay = true
+    }
+
+    func selectionChanged(reveal: Bool, pendingNibble nibble: UInt64? = nil) {
+        pendingNibble = nibble
         if reveal {
             position.reveal(row: layout.row(of: selection.cursor))
             revealCursorHorizontally()

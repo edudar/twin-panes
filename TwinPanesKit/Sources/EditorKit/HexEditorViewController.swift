@@ -46,6 +46,8 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     var lastMatch: Range<UInt64>?
     /// The result of the last Find All, while its pattern is still the bar's pattern.
     var allMatches: (pattern: SearchPattern, result: Searcher.AllMatches)?
+    /// True between `hexView(_:overwrite:...)` and its matching `hexViewSelectionDidChange`.
+    var applyingTypingEdit = false
 
     init(item: HexEditorItem) {
         self.item = item
@@ -119,8 +121,17 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     // MARK: HexViewDelegate
 
     func hexViewSelectionDidChange(_ view: HexView) {
+        if applyingTypingEdit {
+            applyingTypingEdit = false
+        } else {
+            item?.breakTypingBurst()
+        }
         item?.updateStatus()
         updateInspector()
+    }
+
+    func hexViewDidChangeColumn(_ view: HexView) {
+        item?.breakTypingBurst()
     }
 
     func hexViewDidLoadBytes(_ view: HexView) {

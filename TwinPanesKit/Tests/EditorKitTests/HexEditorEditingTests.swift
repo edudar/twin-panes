@@ -54,10 +54,33 @@ import TwinPanesCore
         defer { try? FileManager.default.removeItem(at: url) }
         let item = try makeItem()
         #expect(!item.canSave)
-        item.hexView.insertText("FF")
+        item.hexView.insertText("F")  // leaves pending high nibble at offset 0
+        item.hexView.highlights = [0..<2]
         item.discardChanges()
         #expect(!item.isDirty && !item.canUndo)
         #expect(try byte(item, 0) == 0)
+        #expect(item.hexView.highlights.isEmpty)
+        // Pending nibble must be cleared, so typing "1" sets the high nibble (0x10), not low (0x01).
+        item.hexView.insertText("1")
+        #expect(try byte(item, 0) == 0x10)
+        #expect(item.hexView.selection.cursor == 0)
+    }
+
+    @Test func navigatingAwayAndBackOrDoubleTabBreaksUndoCoalescing() throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        let item = try makeItem()
+        item.hexView.go(to: 0x10)
+        item.hexView.insertText("AB")  // step 1, cursor now at 0x11
+        item.hexView.moveRight(nil)  // 0x12
+        item.hexView.moveLeft(nil)  // back to 0x11 within 2 s
+        item.hexView.insertText("CD")  // must be step 2
+        #expect(item.undoStack.undoCount == 2)
+
+        // Switching columns and back within 2 s also breaks the typing burst.
+        item.hexView.insertTab(nil)
+        item.hexView.insertTab(nil)
+        item.hexView.insertText("EF")  // must be step 3
+        #expect(item.undoStack.undoCount == 3)
     }
 
     @Test func pausesMovesAndColumnSwitchesStartNewUndoSteps() throws {

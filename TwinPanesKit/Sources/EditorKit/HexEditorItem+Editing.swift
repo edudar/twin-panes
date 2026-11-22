@@ -17,8 +17,15 @@ extension HexEditorItem {
         buffer.restore(buffer.openedTree)
         undoStack = UndoStack()
         lastTyping = nil
+        if controller.isViewLoaded {
+            controller.hexView.clearPendingNibble()
+            controller.bytesChanged()
+        }
         onChange?()
     }
+
+    /// Starts a new undo step on the next keystroke (after a cursor move or column switch).
+    func breakTypingBurst() { lastTyping = nil }
     public var canUndo: Bool { undoStack.canUndo }
     public var canRedo: Bool { undoStack.canRedo }
 
