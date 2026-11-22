@@ -69,11 +69,7 @@ extension HexEditorViewController {
         if let all = allMatches, all.pattern == pattern, !all.result.isTruncated {
             return step(through: all.result.ranges, direction, from: selected)
         }
-        // Forward starts at the selection, or just after it if it's the last match.
-        let from =
-            direction == .forward
-            ? (selected == lastMatch ? selected.lowerBound + 1 : selected.lowerBound)
-            : selected.lowerBound
+        let from = FindStepper.searchStart(direction, selected: selected, lastMatch: lastMatch)
         let searcher = Searcher(source: item.source)
         run { token, progress in
             try searcher.next(
@@ -121,19 +117,12 @@ extension HexEditorViewController {
         through ranges: [Range<UInt64>], _ direction: Searcher.Direction,
         from selected: Range<UInt64>, quiet: Bool = false
     ) {
-        guard !ranges.isEmpty else {
+        guard
+            let index = FindStepper.index(
+                in: ranges, direction, selected: selected, lastMatch: lastMatch)
+        else {
             findBar.show("Not found")
             return NSSound.beep()
-        }
-        let index: Int
-        switch direction {
-        case .forward:
-            let start = selected == lastMatch ? selected.lowerBound + 1 : selected.lowerBound
-            let next = ranges.partitioningIndex { $0.lowerBound >= start }
-            index = next < ranges.count ? next : 0
-        case .backward:
-            let previous = ranges.partitioningIndex { $0.lowerBound >= selected.lowerBound } - 1
-            index = previous >= 0 ? previous : ranges.count - 1
         }
         select(ranges[index])
         if !quiet { findBar.show("\((index + 1).formatted()) of \(ranges.count.formatted())") }

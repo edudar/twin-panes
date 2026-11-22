@@ -52,6 +52,15 @@ public final class HexEditorItem: WorkspaceItem {
         return parts.joined(separator: " · ")
     }
 
+    /// The offset Go to Offset means by `text` (decimal, hex or relative to `cursor`,
+    /// see `HexOffsetParser`), or nil if it isn't one or lies outside the file.
+    func offset(for text: String, cursor: UInt64) -> UInt64? {
+        guard let offset = HexOffsetParser.parse(text, current: cursor),
+            offset < max(length, 1)
+        else { return nil }
+        return offset
+    }
+
     func updateStatus() { host?.showStatus(statusText) }
 
     /// Stops a running search, which would otherwise keep scanning (and keep the file

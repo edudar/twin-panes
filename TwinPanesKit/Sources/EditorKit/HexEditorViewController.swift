@@ -172,9 +172,8 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         alert.window.initialFirstResponder = field
         alert.beginSheetModal(for: window) { [weak self] response in
             guard let self, response == .alertFirstButtonReturn else { return }
-            if let offset = HexOffsetParser.parse(
-                field.stringValue, current: self.hexView.selection.cursor),
-                offset < max(self.item.length, 1)
+            if let offset = self.item.offset(
+                for: field.stringValue, cursor: self.hexView.selection.cursor)
             {
                 self.hexView.go(to: offset)
             } else {
