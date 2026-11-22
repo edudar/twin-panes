@@ -5,7 +5,7 @@ others) and every contributor in this repository, collected from the maintainer'
 feedback. Follow them without being asked again.
 
 Background: [README.md](README.md) (what the app is), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-(build, test, layout), [docs/PLAN.md](docs/PLAN.md) (decisions D1–D25, architecture,
+(build, test, layout), [docs/PLAN.md](docs/PLAN.md) (decisions, architecture,
 milestones). Read the relevant parts of PLAN.md before changing behaviour.
 
 ## How to write code
@@ -63,34 +63,30 @@ build/DerivedData/Build/Products/Debug/Twin\ Panes.app/Contents/MacOS/Twin\ Pane
 
 - **Commit only when the maintainer says "commit"; push only when they say "push"**
   ("commit and push" means both). "Push when the check passes" means wait for CI green.
+  This is an approval gate — it does not relax the 250-line limit or logical grouping.
+  Never pile multiple fixes or steps into one dirty working tree: implement and verify
+  one logical change (at most 250 changed lines), then pause for approval to commit
+  before starting the next.
 - Each commit is **at most 250 changed lines**, one logical change, and builds and passes
   tests on its own. Split large work into a sequence of such commits.
 - Never commit failing or disabled tests.
 - Commit messages: a short subject, then a body saying what changed and why.
 
-## UI
-
-- Native macOS look and behaviour: Safari-style tabs, system colours, standard controls.
-- Panels appear on demand: the find bar (⌘F) and the inspector (⌥⌘I) start hidden.
-- Everything opens inside the single main window (D7); dialogs stay dialogs.
-
 ## Documentation
 
-- **Keep docs/PLAN.md true to the code.** When code changes structure or behaviour, update
-  the plan in the same piece of work: architecture tables must match the real modules
-  and dependencies, and an "As built" note records how a feature was actually done.
-- Fold reviews and decisions into PLAN.md itself (decisions table, §9 open/deferred);
-  don't leave them in side documents. Record deferred items with where they land.
-- README.md is for people discovering the project (what it is, what works, where it's
-  going); build and source details go in docs/DEVELOPMENT.md.
-- Public repository: never put personal file names or other private details in docs or
-  commits (describe test files by folder, not by name).
-
-## Project facts
-
-- Name **Twin Panes**; bundle ID `io.github.edudar.twinpanes`; repo `edudar/twin-panes`;
-  macOS 15+, Apple silicon only; Swift 6 strict concurrency; sandboxed.
-- Open `TwinPanes.xcodeproj` (not the folder). Libraries live in the `TwinPanesKit`
-  package; the app target is thin.
-- External drives, SMB and other network volumes are deferred (M3b and M13+); the M0
-  sandbox spike covers the boot volume only.
+- **Read before changing behaviour:** check the relevant sections of [docs/PLAN.md](docs/PLAN.md)
+  (decisions, architecture, milestones) and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+  (build, test, module layout) before designing or editing code.
+- **When to create docs:** create a milestone plan at `docs/plans/<milestone>.md` before
+  starting milestone work, and keep it current while the milestone is in progress. Do not
+  create side documents for reviews or decisions; fold them into `docs/PLAN.md`.
+- **When to update docs:**
+  - [docs/PLAN.md](docs/PLAN.md) — update in the same piece of work whenever code changes
+    structure, decisions, or behaviour: keep architecture tables accurate, record how
+    features were built in "As built" notes, and log deferred items in §9 with where they
+    land.
+  - [README.md](README.md) — update for user-facing changes (what works today, roadmap).
+  - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — update when build commands, test workflows,
+    CI, or module/source layout change.
+- **Public repository hygiene:** never include personal file names or other private details
+  in docs or commits (describe test files by folder, not by name).
