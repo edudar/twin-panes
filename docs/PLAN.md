@@ -23,7 +23,7 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D7 | **Single main frame.** Viewing, editing, previewing, terminals and similar features never open new windows; they live inside the main window. Dialogs (sheets/alerts/modal panels) stay dialogs. | See §4.8. The editor uses a custom `EditorSession` instead of `NSDocument` (rationale in §4). |
 | D8 | Multiple main windows are allowed but low priority (tabs cover most needs). Requires **Merge All Windows**: left-panel tabs from all windows merge into the target's left panel, right into right. | See §4.9. Data model must not assume one window. |
 | D9 | Keep §4.8 defaults for now: F3 → quick view in the opposite panel, F4 → editor tab in the active panel (mode picked by file type, §4.10; hex only until M9a), terminal → bottom drawer + Ctrl+O | Revisit once in daily use; all key bindings stay configurable (command registry, §4.11). |
-| D10 | Build order: hex editor to its first usable version (M3b), then the browser, then back to hex polish | See §6. |
+| D10 | Build order: hex editor to its first usable version (M3b), then the browser, then back to hex polish. A basic real browser (M1b) comes right after the read-only viewer, so every later milestone works on files you navigate to | See §6. M1b was added 2026-11-21: without it the only ways to real files were File › Open, drops and Open With. |
 | D11 | Bundle ID `io.github.edudar.twinpanes` (was `io.github.edudar.filer` until 2026-11-20) | Fixed once on the App Store. The app's name is Twin Panes (D25). |
 | D12 | The editor has three modes — **Hex, Plain text, Markdown** — with find/replace inside the file being edited in every mode | See §4.10. Text editing needs insert/delete, so insert/delete (M8) must land before the text modes (M9a). |
 | D13 | Public GitHub repo `edudar/twin-panes` (was `edudar/filer` until 2026-11-20), licence **Apache-2.0** | Free GitHub Actions minutes on macOS runners. Apache-2.0 is App Store–compatible. Never commit signing secrets — use GitHub encrypted secrets for CI signing later. |
@@ -68,13 +68,13 @@ content; the `M0` rows exist now.
 | WorkspaceKit | `TwinPanesKit/Sources/WorkspaceKit` | M0 | the single main frame, independent of item types: `WorkspaceItem`, `MainFrameLayout` and its view controller, main window and controller, tab bar, close workflow, workspace registry, command registry and dispatcher, focus chain, menu bindings (§4.8, §4.11) |
 | HexViewKit | `TwinPanesKit/Sources/HexViewKit` | M1 | virtualized hex/text view, selection, inspector UI |
 | EditorKit | `TwinPanesKit/Sources/EditorKit` | M1 | the editor item: mode switcher, find bar; hosts the mode views over one `EditorSession` |
-| BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M4 | panes, file listing, operations queue, preview pane |
+| BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b | the browser tab: folder listing, navigation, folder access; later (M4–M7) async listing, live updates, tabs per panel, operations queue, preview pane |
 | TextEditKit | `TwinPanesKit/Sources/TextEditKit` | M9 | plain-text and Markdown modes, large-text viewer |
 | SandboxProbe | `TwinPanesKit/Sources/SandboxProbe` | M0 only | Foundation-only probes for the sandbox spike (§5); only the app's Debug menu uses it; goes away with that menu |
 
 `EditorKit`, `HexViewKit` and `TextEditKit` are empty modules in M0; they exist so
 the dependency rules below are enforced by `Package.swift` from the first commit.
-`BrowserKit` is added in M4.
+`BrowserKit` is added in M1b.
 
 **Dependencies** (what each module may import; enforced by `Package.swift`)
 
@@ -85,7 +85,7 @@ the dependency rules below are enforced by `Package.swift` from the first commit
 | HexViewKit, TextEditKit, BrowserKit | WorkspaceKit, TwinPanesCore |
 | EditorKit | HexViewKit, TextEditKit, WorkspaceKit, TwinPanesCore |
 | SandboxProbe | Foundation only |
-| app target | links WorkspaceKit, EditorKit and SandboxProbe today (imports WorkspaceKit and SandboxProbe); BrowserKit from M4 |
+| app target | links WorkspaceKit, EditorKit and SandboxProbe today (imports WorkspaceKit and SandboxProbe); BrowserKit from M1b |
 
 No module imports one at its own level: HexViewKit, TextEditKit and BrowserKit never
 import each other. Anything that crosses kits (the preview pane's hex view, F4
@@ -731,7 +731,8 @@ opacity and glass), and check the icon at 16 and 32 px in Finder list view.
   spike.
 - **File manager:** sandboxed, it can only browse folders the user granted. Plan for a
   one-time grant flow (e.g. home folder, external volumes) persisted as bookmarks.
-- **Sandbox spike (M0, signed build, ~3–4 days)** — covers browsing *and* the
+- **Sandbox spike (M0, signed build, ~3–4 days)** — a by-hand test, not a feature:
+  it checks what the sandbox lets a browser do (list, preview, copy, trash) *and* the
   editor's write path, because its result decides which save and recovery guarantees
   Twin Panes can make before the editor is built around them.
   - **Browsing:** grant the home folder and an external volume, then list, preview,
@@ -764,17 +765,18 @@ opacity and glass), and check the icon at 16 and 32 px in Finder list view.
 
 ## 6. Milestones
 
-Order (D10): hex editor to first usable version → file-manager core → hex polish →
-the rest.
+Order (D10): read-only hex viewer → basic browser → hex editor to first usable
+version → file-manager core → hex polish → the rest.
 
 | # | Milestone | Scope | Done when |
 |---|---|---|---|
-| M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.twinpanes`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15, 26 and 27 (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5): browsing, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15, 26 and 27; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix written up and the save/recovery policy per volume decided from it |
+| M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.twinpanes`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15, 26 and 27 (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5, by hand): what a sandboxed browser may do, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15, 26 and 27; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix written up and the save/recovery policy per volume decided from it |
 | M1 | Read-only hex viewer | Virtual scroller first, then thread-safe ByteSource + cache with async prefetch and placeholders, HexView, selection, copy as hex/text (capped), Go to offset, view options (offset base, grouping, ASCII/Latin-1 text column), non-regular files refused, `SecurityScope` tokens, open via File › Open / drag-drop / Finder "Open With" (document types per §4, no NSDocument) — each opens a **tab in the main frame**, Open Recent via bookmarks | 4 GB file opens in < 100 ms, scrolls at 120 Hz (also from a USB/SMB volume, with placeholders instead of stalls), memory < 100 MB; all measured on real hardware, also while a search runs |
+| M1b | Basic browser | `BrowserKit`: one panel listing a real folder (name, size, date, kind; folders first; hidden files off), Enter/double-click/⌘↓ into folders, ⌘↑/Backspace to the parent, F3/F4/Enter on a file opens it in the hex editor, path field for Go to Folder (⇧⌘G), type-to-select. Folder access: starts at the real home folder, asks once for access when the sandbox refuses a folder, keeps that as an app-scoped bookmark, and the browser tab holds the folder's `SecurityScope`. Replaces the M0 placeholder browser | Navigate from home to any granted folder and open a file in the hex editor without File › Open; access survives a relaunch |
 | M2 | Inspect & search | Inspector panel, `Searcher` over a byte-reading protocol with the uncached `F_NOCACHE` read path, find next/previous/all (hex + text, capped results), status bar (offset, selection length, file size) | Full search of a 4 GB file with progress + cancel, without evicting the view's pages |
 | M3a | Overwrite editing | Persistent PieceTable (snapshots), undo as a stack of roots with coalescing, overwrite in hex and text columns (encoding rules per §4.4), dirty-byte highlight, Searcher over snapshots | Fuzz tests pass; edits don't stall concurrent search |
 | M3b | Saving & sessions → **first usable hex version** | `EditorSession` + `SessionRegistry`, dirty state, read-only mode, add buffer as a file, save strategies A (clone-stage-replace) and B (in place + journal + commit record) chosen per the M0 capability matrix, backing generations, recovery guarantee per volume (+ private copy or narrowed mode), external-change policy with own-write suppression, operation journal + crash restore, save race handling, unsaved-changes sheets, Undo/Redo menu wired to the session | Edit + save on 4 GB is near-instant; undo after save restores original bytes; killing the app mid-edit or mid-save loses nothing, and power loss loses at most the last ~1 s of edits; typing during a save keeps the new edits and their journal; saving never triggers the external-change sheet; external modification never corrupts unsaved edits; **the fault-injection suite (§7) passes** |
-| M4 | Browser foundation | Single panel: async listing, navigation, back/forward, sorting, hidden-files toggle, folder-grant flow + bookmarks (informed by the M0 spike), per-tab `SecurityScope`, live updates | Browse a 100k-file folder without UI stalls |
+| M4 | Browser foundation | Builds on M1b: async listing that never blocks the UI, back/forward history, sorting by column, hidden-files toggle, live updates (FSEvents), per-volume access flow informed by the M0 spike | Browse a 100k-file folder without UI stalls |
 | M5 | Dual panels + tabs | Second panel, active-panel focus, per-panel tab bar, tab restore on relaunch via AppKit restoration (D23), collapsible sidebar (Favorites, Locations) | Daily navigation possible without Finder |
 | M6 | NC keys + file operations | Function-key bar, F2–F8 actions with ⌘ equivalents, operations queue (copy/move/trash/new folder/rename) with progress and conflict handling, cross-volume move with per-item failure reporting | Copy/move large trees reliably with cancel and conflicts |
 | M7 | Preview pane + hex integration | Collapsible right pane with Quick Look + metadata, viewer factory injected by the TwinPanes app target, QuickView item (F3 quick view in opposite panel, read-only `ByteSource`, unsaved-edits marker), F4 editor tab (hex), hex view in preview for unsupported types | Hex editor reachable entirely from the file manager; moving the cursor through 1,000 files in quick view creates no sessions |
