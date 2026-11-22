@@ -361,21 +361,88 @@ struct SmokeTest {
         print("  info opening it in a tab took \(open)")
         let view = item.hexView
         view.frame = NSRect(x: 0, y: 0, width: 900, height: 1000)
+        Self.printFrames(await scrollThroughFile(item), "")
+        let after = Self.residentMegabytes()
+        print("  info resident memory \(after) MB, \(after - before) MB more than before opening")
+
+        // §4.4: the same while a full-file search runs (review, plan gaps).
+        let searcher = Searcher(source: item.source)
+        let search = Task {
+            try await Searcher.run { token in
+                try searcher.all(try SearchPattern.hex("FF"), cancellation: token)
+            }
+        }
+        Self.printFrames(await scrollThroughFile(item), " while searching")
+        search.cancel()
+        _ = try? await search.value
+        print("  info resident memory while searching \(Self.residentMegabytes()) MB")
+        await fullSearch(check, item: item)
+        await realDataSearch(check)
+    }
+
+    /// Jumps through the whole file in 240 steps, letting prefetches land, and times one
+    /// redraw at each.
+    private func scrollThroughFile(_ item: HexEditorItem) async -> [Duration] {
+        let view = item.hexView
+        let clock = ContinuousClock()
         var frames: [Duration] = []
         for step in 0..<240 {
-            // Jump through the whole file, then let prefetches land and redraw.
-            view.go(to: UInt64(step) * ((4 << 30) / 240))
+            view.go(to: UInt64(step) * (item.length / 240))
             view.display()
             await settle(milliseconds: 5)
             frames.append(clock.measure { view.display() })
         }
+        return frames
+    }
+
+    private static func printFrames(_ frames: [Duration], _ label: String) {
         let sorted = frames.sorted()
         print(
-            "  info frame time p50 \(sorted[sorted.count / 2]), p95 \(sorted[sorted.count * 95 / 100]), max \(sorted.last!)"
-        )
-        let after = Self.residentMegabytes()
-        print("  info resident memory \(after) MB, \(after - before) MB more than before opening")
-        await fullSearch(check, item: item)
+            "  info frame time\(label) p50 \(sorted[sorted.count / 2]), "
+                + "p95 \(sorted[sorted.count * 95 / 100]), max \(sorted.last!)")
+    }
+
+    /// §7: search throughput on real (non-sparse) data. A sparse zero file is the best
+    /// case: no byte ever matches the anchor. 256 MiB of pseudo-random bytes hits it
+    /// every 256 bytes on average. Printed, not gated.
+    private func realDataSearch(_ check: (Bool, String) -> Void) async {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("smoke-random-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: url) }
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        do {
+            let handle = try FileHandle(forWritingTo: url)
+            var state: UInt64 = 0x2545_F491_4F6C_DD1D
+            var chunk = [UInt64](repeating: 0, count: 1 << 17)  // 1 MiB
+            for _ in 0..<256 {
+                for index in chunk.indices {
+                    state ^= state << 13
+                    state ^= state >> 7
+                    state ^= state << 17
+                    chunk[index] = state
+                }
+                try chunk.withUnsafeBytes { try handle.write(contentsOf: Data($0)) }
+            }
+            try handle.close()
+            let source = try ByteSource(url: url)
+            let pattern = try SearchPattern.hex("DE AD BE EF CA FE BA BE")
+            let clock = ContinuousClock()
+            var found: Searcher.AllMatches?
+            let elapsed = try await clock.measure {
+                found = try await Searcher.run { token in
+                    try Searcher(source: source).all(pattern, cancellation: token)
+                }
+            }
+            let seconds =
+                Double(elapsed.components.seconds)
+                + Double(elapsed.components.attoseconds) / 1e18
+            print(
+                "  info search of 256 MiB of random data took \(elapsed) "
+                    + "(\(Int(256 / max(seconds, 0.001))) MiB/s, \(found?.ranges.count ?? 0) matches)"
+            )
+        } catch {
+            check(false, "real-data search: \(error)")
+        }
     }
 
     /// M2 target: a full search of the 4 GiB file, with progress and cancel, without
