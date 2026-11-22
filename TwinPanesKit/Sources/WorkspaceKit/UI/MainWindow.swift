@@ -104,6 +104,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
     public func windowWillClose(_ notification: Notification) {
         workspace.unregister(layout)
         for item in layout.allItems {
+            item.willClose()
             item.host = nil
             item.onChange = nil
         }

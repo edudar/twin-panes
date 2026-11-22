@@ -22,7 +22,7 @@ public final class HexEditorItem: WorkspaceItem {
 
     /// Keeps sandbox access for as long as the tab is open (PLAN.md §5).
     private let scope: SecurityScope?
-    private lazy var controller = HexEditorViewController(item: self)
+    lazy var controller = HexEditorViewController(item: self)
 
     /// Opens `url`. Throws `ByteSourceError` for anything but a readable regular file.
     public init(url: URL, scope: SecurityScope? = nil) throws {
@@ -53,6 +53,10 @@ public final class HexEditorItem: WorkspaceItem {
     }
 
     func updateStatus() { host?.showStatus(statusText) }
+
+    /// Stops a running search, which would otherwise keep scanning (and keep the file
+    /// open) after the tab is gone.
+    public func willClose() { controller.cancelSearch() }
 
     static func hex(_ value: UInt64) -> String {
         "0x" + String(value, radix: 16, uppercase: true)

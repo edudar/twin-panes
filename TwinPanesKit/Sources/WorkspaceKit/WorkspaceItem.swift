@@ -67,6 +67,10 @@ public protocol WorkspaceItem: AnyObject {
 
     /// Throws away unsaved changes of the session this item views.
     func discardChanges()
+
+    /// The item is about to go away: its tab closed (after the close workflow agreed) or
+    /// its window closed. Stop background work such as a running search here.
+    func willClose()
 }
 
 extension WorkspaceItem {
@@ -76,6 +80,7 @@ extension WorkspaceItem {
     public var preferredFirstResponder: NSView? { nil }
     public func save() async throws {}
     public func discardChanges() {}
+    public func willClose() {}
 
     /// The key the close workflow groups by.
     var closeGroupKey: AnyHashable { sessionKey ?? AnyHashable(id) }

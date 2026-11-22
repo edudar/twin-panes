@@ -10,6 +10,7 @@ final class TestItem: WorkspaceItem {
     let title: String
     let session: TestSession?
     var ownDirty = false
+    private(set) var closes = 0
     weak var host: WorkspaceHost?
     var onChange: (() -> Void)?
     lazy var viewController = NSViewController()
@@ -37,6 +38,8 @@ final class TestItem: WorkspaceItem {
             ownDirty = false
         }
     }
+
+    func willClose() { closes += 1 }
 
     func discardChanges() {
         if let session {
