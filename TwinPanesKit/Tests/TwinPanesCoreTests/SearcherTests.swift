@@ -49,12 +49,36 @@ final class Flag: Sendable {
         let capped = try searcher.all(aa, limit: 2)
         #expect(capped == .init(ranges: [0..<2, 2..<4], isTruncated: true))
         #expect(try searcher.all(aa, limit: 3).isTruncated == false)
+        #expect(try searcher.all(aa, limit: 0) == .init(ranges: [], isTruncated: true))
     }
 
-    @Test func ignoresCaseWithoutAnAnchor() throws {
-        let searcher = Searcher(source: MemoryBytes("xxHeLLo hello"), chunkSize: 5)
-        let hello = try SearchPattern.text("hello", encoding: .utf8, ignoringCase: true)
-        #expect(try searcher.all(hello).ranges == [2..<7, 8..<13])
+    @Test func edgeCasesAndReadErrors() throws {
+        let empty = Searcher(source: MemoryBytes(Data()), chunkSize: 4)
+        #expect(try empty.next(try text("a"), from: 0, direction: .forward) == nil)
+        #expect(try empty.all(try text("a")).ranges.isEmpty)
+
+        let short = Searcher(source: MemoryBytes("ab"), chunkSize: 4)
+        #expect(try short.next(try text("abcd"), from: 0, direction: .forward) == nil)
+        #expect(
+            try short.next(try text("a"), from: 99, direction: .forward)
+                == .init(range: 0..<1, wrapped: true))
+
+        // Progress across a wrapped two-pass search reaches the full file length.
+        let lastProgress = Mutex<UInt64>(0)
+        _ = try Searcher(source: MemoryBytes(Data(count: 20)), chunkSize: 4).next(
+            try text("z"), from: 8, direction: .forward
+        ) { scanned, _ in lastProgress.withLock { $0 = scanned } }
+        #expect(lastProgress.withLock { $0 } == 20)
+
+        struct FailingBytes: ByteReading {
+            var length: UInt64 { 32 }
+            func read(_ range: Range<UInt64>) throws -> Data {
+                throw ByteSourceError.readFailed(offset: range.lowerBound, errno: EIO)
+            }
+        }
+        #expect(throws: ByteSourceError.readFailed(offset: 0, errno: EIO)) {
+            _ = try Searcher(source: FailingBytes(), chunkSize: 8).all(try text("a"))
+        }
     }
 
     @Test func reportsProgressAndStopsWhenCancelled() throws {

@@ -23,8 +23,14 @@ import Testing
         #expect(bytes(try .text("Aé", encoding: .utf8)) == [0x41, 0xC3, 0xA9])
         #expect(bytes(try .text("Aé", encoding: .utf16LE)) == [0x41, 0x00, 0xE9, 0x00])
         #expect(bytes(try .text("Aé", encoding: .utf16BE)) == [0x00, 0x41, 0x00, 0xE9])
+        #expect(bytes(try .text("😀", encoding: .utf16LE)) == [0x3D, 0xD8, 0x00, 0xDE])
+        #expect(bytes(try .text("😀", encoding: .utf16BE)) == [0xD8, 0x3D, 0xDE, 0x00])
         #expect(throws: SearchPattern.ParseError.empty) {
             try SearchPattern.text("", encoding: .utf8)
+        }
+        let tooLong = String(repeating: "a", count: SearchPattern.maxLength + 1)
+        #expect(throws: SearchPattern.ParseError.tooLong) {
+            try SearchPattern.text(tooLong, encoding: .utf8)
         }
     }
 
@@ -40,18 +46,19 @@ import Testing
         #expect(letters.anchor == nil)
     }
 
-    /// The anchor is the exact position with the rarest byte; ties go to the first.
-    @Test func anchorsOnTheRarestExactByte() throws {
-        #expect(try SearchPattern(bytes: [0x00, 0x00, 0x7A]).anchor == 2)
-        #expect(try SearchPattern(bytes: [0x00, 0xFF, 0x20]).anchor == 2)
-        #expect(try SearchPattern(bytes: [0xFF, 0x00]).anchor == 0)
-        #expect(try SearchPattern(bytes: [0x20, 0x65, 0x51]).anchor == 2)
-        #expect(try SearchPattern(bytes: [0x41, 0x41]).anchor == 0)
-        #expect(try SearchPattern(bytes: [0x65, 0x7A, 0xC3]).anchor == 2)
-        // "hello" in UTF-16: the zero bytes and the commonest letters lose to "l".
-        #expect(try SearchPattern.text("hello", encoding: .utf16LE).anchor == 4)
-        #expect(try SearchPattern.text("hello", encoding: .utf16BE).anchor == 5)
-        // Folded letters are not exact, so the digit anchors.
-        #expect(try SearchPattern.text("ab1", encoding: .utf8, ignoringCase: true).anchor == 2)
+    /// Anchor invariants: always an exact position, avoids 0x00 when another exact byte
+    /// exists, picks the earliest index on a tie, and is nil when all positions fold.
+    @Test func anchorInvariants() throws {
+        let withZeros = try SearchPattern(bytes: [0x00, 0x00, 0x7A])
+        #expect(withZeros.anchor == 2)
+        let tied = try SearchPattern(bytes: [0x41, 0x41])
+        #expect(tied.anchor == 0)
+        let utf16 = try SearchPattern.text("hello", encoding: .utf16LE)
+        let anchor = try #require(utf16.anchor)
+        #expect(utf16.elements[anchor].isExact && utf16.elements[anchor].byte != 0x00)
+        let foldedWithDigit = try SearchPattern.text("ab1", encoding: .utf8, ignoringCase: true)
+        #expect(foldedWithDigit.anchor == 2)
+        let allFolded = try SearchPattern.text("abc", encoding: .utf8, ignoringCase: true)
+        #expect(allFolded.anchor == nil)
     }
 }

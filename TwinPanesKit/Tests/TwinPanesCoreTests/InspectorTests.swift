@@ -34,6 +34,8 @@ import Testing
         #expect(
             values([0x40, 0x09, 0x21, 0xFB, 0x54, 0x44, 0x2D, 0x18], .big)["Float64"]
                 == "3.141592653589793")
+        #expect(values([0x00, 0x00, 0x80, 0x7F])["Float32"] == "inf")
+        #expect(values([0x00, 0x00, 0xC0, 0x7F])["Float32"] == "nan")
     }
 
     @Test func rowsNeedingMoreBytesAreEmpty() {
@@ -48,8 +50,10 @@ import Testing
 
     @Test func decodesCharacters() {
         #expect(values([0xC3, 0xA9])["UTF-8"] == "U+00E9 “é”")
+        #expect(values([0xE2, 0x82, 0xAC])["UTF-8"] == "U+20AC “€”")
         #expect(values([0xF0, 0x9F, 0x98, 0x80])["UTF-8"] == "U+1F600 “😀”")
         #expect(values([0x80])["UTF-8"] == "invalid")
+        #expect(values([0xC3])["UTF-8"] == "invalid")
         #expect(values([0x0A])["UTF-8"] == "U+000A")
         #expect(values([0x3D, 0xD8, 0x00, 0xDE])["UTF-16"] == "U+1F600 “😀”")
         #expect(values([0x00, 0xE9], .big)["UTF-16"] == "U+00E9 “é”")
@@ -62,6 +66,10 @@ import Testing
         #expect(
             values(withUnsafeBytes(of: unix.littleEndian, Array.init))["Unix time (32-bit)"]
                 == "2001-01-01T00:00:00Z")
+        let preEpoch = Int32(-86_400)
+        #expect(
+            values(withUnsafeBytes(of: preEpoch.littleEndian, Array.init))["Unix time (32-bit)"]
+                == "1969-12-31T00:00:00Z")
         let mac = Double(0).bitPattern
         #expect(
             values(withUnsafeBytes(of: mac.littleEndian, Array.init))["Mac absolute time"]
@@ -71,5 +79,11 @@ import Testing
             values(withUnsafeBytes(of: filetime.littleEndian, Array.init))["Windows FILETIME"]
                 == "2001-01-01T00:00:00Z")
         #expect(values(Array(repeating: 0x7F, count: 8))["Mac absolute time"] == "out of range")
+        #expect(
+            values(withUnsafeBytes(of: Double.nan.bitPattern.littleEndian, Array.init))[
+                "Mac absolute time"] == "out of range")
+        #expect(
+            values(withUnsafeBytes(of: UInt64.max.littleEndian, Array.init))["Windows FILETIME"]
+                == "out of range")
     }
 }

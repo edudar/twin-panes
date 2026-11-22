@@ -49,17 +49,6 @@ import Testing
         #expect(names.contains("clone-stage-replace (hard-linked)"))
     }
 
-    @Test func fileProbeNotesACoveringFolderGrant() throws {
-        defer { try? FileManager.default.removeItem(at: root) }
-        let file = root.appendingPathComponent("covered.bin")
-        try Data("x".utf8).write(to: file)
-        #expect(probe.probeFile(file).outcome(of: "covering folder grant")?.isFailure == false)
-        let covered = probe.probeFile(file, coveringFolder: root)
-        #expect(
-            covered.outcome(of: "covering folder grant")
-                == .skipped("\(root.path): rows include folder access"))
-    }
-
     @Test func fileProbeKeepsContent() throws {
         defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("disposable.bin")
@@ -69,6 +58,7 @@ import Testing
         let report = probe.probeFile(file)
 
         #expect(report.grant == .file)
+        #expect(report.outcome(of: "covering folder grant")?.isFailure == false)
         #expect(report.outcome(of: "read")?.isFailure == false)
         #expect(report.outcome(of: "dataless (evicted)") == .ok("no: content is local"))
         #expect(report.outcome(of: "clone-stage-replace")?.isFailure == false)
@@ -78,11 +68,14 @@ import Testing
                 == .skipped("file mode keeps the test file; run folder mode"))
     }
 
-    @Test func savedBookmarkResolves() throws {
+    @Test func savedBookmarkResolvesAndNotesCoveringGrant() throws {
         defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("bookmarked.txt")
         try Data("x".utf8).write(to: file)
-        let report = probe.probeFile(file)
+        let report = probe.probeFile(file, coveringFolder: root)
+        #expect(
+            report.outcome(of: "covering folder grant")
+                == .skipped("\(root.path): rows include folder access"))
         let data = try #require(report.bookmark)
         let result = SandboxProbe.resolveSavedBookmark(data)
         #expect(!result.outcome.isFailure, "\(result.outcome.detail)")
