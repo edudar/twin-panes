@@ -95,4 +95,28 @@ import TwinPanesCore
         #expect(item.hexView.highlights.isEmpty)
         #expect(controller.allMatches == nil && controller.lastMatch == nil)
     }
+
+    /// Done-when for M3a: an edit doesn't wait for a running search, and the search
+    /// reports the file as it was when it started.
+    @Test func editsDoNotWaitForARunningSearch() async throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        let item = try makeItem()
+        let controller = item.controller
+        let gated = GatedBytes(wrapping: item.snapshot)
+        controller.searchSourceOverride = gated
+        controller.findBar.kind = .hex
+        controller.findBar.field.stringValue = "30 31"
+        controller.findAll()
+        await gated.waitUntilStarted()
+
+        item.hexView.go(to: 0x30)
+        item.hexView.insertText("FF")
+        #expect(try byte(item, 0x30) == 0xFF)
+        #expect(controller.isSearching)
+
+        gated.release()
+        await gated.waitUntilFinished()
+        try await waitForSearch(controller)
+        #expect(controller.allMatches?.result.ranges == [0x30..<0x32])
+    }
 }

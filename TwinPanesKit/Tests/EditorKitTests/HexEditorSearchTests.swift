@@ -10,7 +10,7 @@ import TwinPanesCore
 /// Non-blocking one-shot async signal, safe to await from Swift concurrency without
 /// occupying a cooperative thread (blocking with `DispatchSemaphore` inside `Task`
 /// starves the 3-thread cooperative pool on GitHub Actions runners).
-private final class AsyncSignal: Sendable {
+final class AsyncSignal: Sendable {
     private struct State: Sendable {
         var signaled = false
         var waiters: [CheckedContinuation<Void, Never>] = []
@@ -44,16 +44,26 @@ private final class AsyncSignal: Sendable {
 /// Deterministic `ByteReading` whose first read (on `Searcher`'s `OperationQueue`) signals
 /// `entered` and blocks until `release()` is called, so search cancellation and generation
 /// tests need neither 4 GiB sparse files nor arbitrary sleeps.
-private final class GatedBytes: ByteReading, Sendable {
-    let data: Data
+final class GatedBytes: ByteReading, Sendable {
+    private struct Bytes: ByteReading {
+        let data: Data
+        var length: UInt64 { UInt64(data.count) }
+        func read(_ range: Range<UInt64>) throws -> Data {
+            data[Int(range.lowerBound)..<Int(range.upperBound)]
+        }
+    }
+
+    let base: any ByteReading
     private let entered = AsyncSignal()
     private let gate = DispatchSemaphore(value: 0)
     private let exited = AsyncSignal()
     private let blockedOnce = Mutex(false)
 
-    init(_ data: Data) { self.data = data }
+    init(_ data: Data) { base = Bytes(data: data) }
+    /// Gates reads of `base`, such as an editor snapshot.
+    init(wrapping base: any ByteReading) { self.base = base }
 
-    var length: UInt64 { UInt64(data.count) }
+    var length: UInt64 { base.length }
 
     func waitUntilStarted() async { await entered.wait() }
     func release() { gate.signal() }
@@ -69,9 +79,9 @@ private final class GatedBytes: ByteReading, Sendable {
             entered.signal()
             gate.wait()
             defer { exited.signal() }
-            return data[Int(range.lowerBound)..<Int(range.upperBound)]
+            return try base.read(range)
         }
-        return data[Int(range.lowerBound)..<Int(range.upperBound)]
+        return try base.read(range)
     }
 }
 

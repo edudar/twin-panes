@@ -169,6 +169,7 @@ extension HexEditorViewController {
         searchTask?.cancel()
         searchGeneration += 1
         let generation = searchGeneration
+        let version = item?.buffer.tree
         findBar.show("Searching…")
         findBar.setProgress(0)
         let progress: Searcher.Progress = { [weak self] scanned, total in
@@ -192,7 +193,12 @@ extension HexEditorViewController {
             self.searchTask = nil
             self.findBar.setProgress(nil)
             switch result {
-            case .success(let value): done(value)
+            case .success(let value):
+                done(value)
+                if let version, self.item?.buffer.tree.isSameVersion(as: version) == false {
+                    self.item?.host?.showStatus(
+                        "The file was edited during the search; the results are from before")
+                }
             case .failure(is CancellationError): self.findBar.show("Cancelled")
             case .failure(let error): self.findBar.show("Search failed: \(error)", isError: true)
             }
