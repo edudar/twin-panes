@@ -25,7 +25,8 @@ milestones). Read the relevant parts of PLAN.md before changing behaviour.
 
 ## Verifying
 
-Before every commit, all of these pass:
+After every fix or change — and before every commit — build and run all of these without
+waiting to be asked:
 
 ```bash
 swift format lint --strict --recursive TwinPanesKit TwinPanes
