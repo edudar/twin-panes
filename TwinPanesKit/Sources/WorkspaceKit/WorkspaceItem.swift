@@ -62,7 +62,11 @@ public protocol WorkspaceItem: AnyObject {
     /// Called by the item when its title or dirty state changes.
     var onChange: (() -> Void)? { get set }
 
-    /// Saves the session this item views. Only called while `isDirty`.
+    /// Whether `save()` can write the session now. When false the close prompt offers
+    /// only Discard and Cancel (the hex editor until saving lands in M3b).
+    var canSave: Bool { get }
+
+    /// Saves the session this item views. Only called while `isDirty` and `canSave`.
     func save() async throws
 
     /// Throws away unsaved changes of the session this item views.
@@ -76,6 +80,7 @@ public protocol WorkspaceItem: AnyObject {
 extension WorkspaceItem {
     public var sessionKey: AnyHashable? { nil }
     public var isDirty: Bool { false }
+    public var canSave: Bool { true }
     public var icon: NSImage? { nil }
     public var preferredFirstResponder: NSView? { nil }
     public func save() async throws {}

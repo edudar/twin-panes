@@ -10,6 +10,7 @@ final class TestItem: WorkspaceItem {
     let title: String
     let session: TestSession?
     var ownDirty = false
+    var canSave = true
     private(set) var closes = 0
     weak var host: WorkspaceHost?
     var onChange: (() -> Void)?

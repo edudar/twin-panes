@@ -75,6 +75,8 @@ public final class CloseCoordinator {
             case .discard:
                 session.representative.discardChanges()
             case .save:
+                // A prompt that offered no Save can't mean it; treat it as Cancel.
+                guard session.representative.canSave else { return false }
                 do {
                     try await session.representative.save()
                 } catch {

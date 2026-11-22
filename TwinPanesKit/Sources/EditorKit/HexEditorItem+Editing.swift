@@ -9,6 +9,16 @@ extension HexEditorItem {
     static let typingPause: Duration = .seconds(2)
 
     public var isDirty: Bool { buffer.isModified }
+    /// Saving comes with sessions in M3b; until then closing can only discard.
+    public var canSave: Bool { false }
+
+    /// Drops every edit and its history (the close prompt's Discard).
+    public func discardChanges() {
+        buffer.restore(buffer.openedTree)
+        undoStack = UndoStack()
+        lastTyping = nil
+        onChange?()
+    }
     public var canUndo: Bool { undoStack.canUndo }
     public var canRedo: Bool { undoStack.canRedo }
 

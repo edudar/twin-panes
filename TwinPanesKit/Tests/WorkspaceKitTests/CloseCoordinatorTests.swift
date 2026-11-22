@@ -90,6 +90,20 @@ import Testing
         #expect(session.isDirty)
     }
 
+    /// An item that can't save yet (the hex editor before M3b) is never saved: Save from
+    /// its prompt cancels, Discard throws the changes away.
+    @Test func itemsThatCannotSaveAreOnlyDiscarded() async {
+        let session = TestSession()
+        session.isDirty = true
+        let item = TestItem("unsavable", session: session)
+        item.canSave = false
+        windowA.insert(item)
+        #expect(await coordinator(answer: .save, log: Log()).confirmClose([item]) == false)
+        #expect(session.saves == 0 && session.isDirty)
+        #expect(await coordinator(answer: .discard, log: Log()).confirmClose([item]))
+        #expect(session.discards == 1 && !session.isDirty)
+    }
+
     @Test func itemsWithoutSessionAreTheirOwnSession() async {
         let a = TestItem("a"), b = TestItem("b")
         a.ownDirty = true

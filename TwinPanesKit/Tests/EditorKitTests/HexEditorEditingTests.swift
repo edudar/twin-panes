@@ -50,6 +50,16 @@ import TwinPanesCore
         #expect(item.hexView.selection.cursor == 0x12)
     }
 
+    @Test func discardingDropsEditsAndHistory() throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        let item = try makeItem()
+        #expect(!item.canSave)
+        item.hexView.insertText("FF")
+        item.discardChanges()
+        #expect(!item.isDirty && !item.canUndo)
+        #expect(try byte(item, 0) == 0)
+    }
+
     @Test func pausesMovesAndColumnSwitchesStartNewUndoSteps() throws {
         defer { try? FileManager.default.removeItem(at: url) }
         let item = try makeItem()

@@ -255,12 +255,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private func askToSave(_ session: DirtySession) async -> CloseDecision {
         let alert = NSAlert()
-        alert.messageText =
-            "Do you want to save the changes made to “\(session.representative.title)”?"
-        alert.informativeText = "Your changes will be lost if you don’t save them."
-        alert.addButton(withTitle: "Save")
+        let title = session.representative.title
+        let canSave = session.representative.canSave
+        if canSave {
+            alert.messageText = "Do you want to save the changes made to “\(title)”?"
+            alert.informativeText = "Your changes will be lost if you don’t save them."
+            alert.addButton(withTitle: "Save")
+        } else {
+            alert.messageText = "Discard the changes made to “\(title)”?"
+            alert.informativeText =
+                "This version of Twin Panes can’t save edits yet, so closing discards them."
+        }
         alert.addButton(withTitle: "Cancel")
-        let dontSave = alert.addButton(withTitle: "Don’t Save")
+        let dontSave = alert.addButton(withTitle: canSave ? "Don’t Save" : "Discard Changes")
         dontSave.keyEquivalent = "d"
         dontSave.keyEquivalentModifierMask = .command
 
@@ -274,9 +281,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         } else {
             response = alert.runModal()
         }
-        switch response {
-        case .alertFirstButtonReturn: return .save
-        case .alertThirdButtonReturn: return .discard
+        switch (response, canSave) {
+        case (.alertFirstButtonReturn, true): return .save
+        case (.alertThirdButtonReturn, true), (.alertSecondButtonReturn, false): return .discard
         default: return .cancel
         }
     }
