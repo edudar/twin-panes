@@ -22,7 +22,8 @@ looking at.
 Twin Panes is early and changing quickly. Right now it can:
 
 - **Browse folders**: name, size, date and kind columns. Type to jump to a
-  file, Return or ⌘↓ to go in, ⌘↑ or Backspace to go up, ⇧⌘G to type a path.
+  file, Return or ⌘↓ to go in. Go up with the ".." row at the top of the list
+  (Return or double-click), ⌘↑ or Backspace; ⇧⌘G to type a path.
 - **Open any file as hex** with F3, F4 or Return in the browser, with
   File › Open, by dropping a file (or folder) on the window, or with Finder's
   *Open With*.

@@ -77,7 +77,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         item?.updateStatus()
     }
 
-    /// Shows the item's current listing; selects `name` if given, else the first row.
+    /// Shows the item's current listing; selects `name` if given, else the first row
+    /// (".." when there is one).
     func reload(selecting name: String?) {
         guard isViewLoaded, let item else { return }
         pathField.stringValue = item.folder.path
@@ -87,28 +88,49 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         accessLabel.stringValue =
             "Twin Panes needs your permission to show “\(item.title)”.\n"
             + "Grant access once and it’s remembered."
+        let offset = showsParentRow ? 1 : 0
         let row =
             name.flatMap { n in item.entries.firstIndex { $0.url.lastPathComponent == n } }
-            ?? 0
-        if !item.entries.isEmpty {
+            .map { $0 + offset } ?? 0
+        if tableView.numberOfRows > 0 {
             tableView.selectRowIndexes([row], byExtendingSelection: false)
             tableView.scrollRowToVisible(row)
         }
     }
 
-    var selectedEntry: DirectoryEntry? {
-        guard let item, item.entries.indices.contains(tableView.selectedRow) else { return nil }
-        return item.entries[tableView.selectedRow]
+    /// Row 0 is "..", the parent folder, everywhere but the top folder. It's a view row
+    /// only: `item.entries` never contains it.
+    var showsParentRow: Bool { item.map { $0.folder.path != "/" } ?? false }
+
+    /// The entry shown in `row`; nil for the ".." row and rows out of range.
+    func entry(atRow row: Int) -> DirectoryEntry? {
+        let index = row - (showsParentRow ? 1 : 0)
+        guard let item, item.entries.indices.contains(index) else { return nil }
+        return item.entries[index]
     }
+
+    /// True when the cursor is on the ".." row.
+    var isParentRowSelected: Bool { showsParentRow && tableView.selectedRow == 0 }
+
+    var selectedEntry: DirectoryEntry? { entry(atRow: tableView.selectedRow) }
 
     // MARK: Commands
 
     @objc func browserOpen(_ sender: Any?) {
-        if let entry = selectedEntry { item?.open(entry) } else { NSSound.beep() }
+        if isParentRowSelected {
+            item?.goToParent()
+        } else if let entry = selectedEntry {
+            item?.open(entry)
+        } else {
+            NSSound.beep()
+        }
     }
 
-    @objc func browserView(_ sender: Any?) { browserOpen(sender) }
-    @objc func browserEdit(_ sender: Any?) { browserOpen(sender) }
+    /// F3/F4 act on files and folders, not on "..".
+    @objc func browserView(_ sender: Any?) {
+        if selectedEntry != nil { browserOpen(sender) } else { NSSound.beep() }
+    }
+    @objc func browserEdit(_ sender: Any?) { browserView(sender) }
     @objc func browserParent(_ sender: Any?) { item?.goToParent() }
 
     @objc func browserGoToFolder(_ sender: Any?) {
@@ -150,7 +172,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard let item else { return false }
         switch menuItem.action {
-        case #selector(browserOpen(_:)), #selector(browserView(_:)), #selector(browserEdit(_:)):
+        case #selector(browserOpen(_:)):
+            return selectedEntry != nil || isParentRowSelected
+        case #selector(browserView(_:)), #selector(browserEdit(_:)):
             return selectedEntry != nil
         case #selector(browserParent(_:)):
             return item.folder.path != "/"

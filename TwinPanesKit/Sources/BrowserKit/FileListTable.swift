@@ -40,17 +40,20 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         tableView.setAccessibilityIdentifier("fileList")
     }
 
-    func numberOfRows(in tableView: NSTableView) -> Int { item?.entries.count ?? 0 }
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        guard let item else { return 0 }
+        return item.entries.count + (showsParentRow ? 1 : 0)
+    }
 
     func tableView(
         _ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int
     )
         -> NSView?
     {
-        guard let item, item.entries.indices.contains(row),
-            let id = tableColumn?.identifier.rawValue, let column = Column(rawValue: id)
+        guard let id = tableColumn?.identifier.rawValue, let column = Column(rawValue: id)
         else { return nil }
-        let entry = item.entries[row]
+        if showsParentRow, row == 0 { return parentCell(column) }
+        guard let entry = entry(atRow: row) else { return nil }
         let label = NSTextField(labelWithString: text(for: entry, column))
         label.lineBreakMode = .byTruncatingMiddle
         if column != .name {
@@ -64,6 +67,21 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         icon.heightAnchor.constraint(equalToConstant: 16).isActive = true
         let stack = NSStackView(views: [icon, label])
         stack.spacing = 6
+        return stack
+    }
+
+    /// The ".." row: a folder icon and ".." in the name column, the rest blank.
+    private func parentCell(_ column: Column) -> NSView? {
+        guard column == .name else { return nil }
+        let label = NSTextField(labelWithString: "..")
+        label.setAccessibilityLabel("Parent folder")
+        let icon = NSImageView(image: NSWorkspace.shared.icon(for: .folder))
+        icon.imageScaling = .scaleProportionallyDown
+        icon.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        let stack = NSStackView(views: [icon, label])
+        stack.spacing = 6
+        stack.setAccessibilityIdentifier("parentRow")
         return stack
     }
 
@@ -85,12 +103,16 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
     )
         -> String?
     {
-        guard let item, item.entries.indices.contains(row) else { return nil }
-        return item.entries[row].name
+        entry(atRow: row)?.name
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard let item else { return }
+        if isParentRowSelected {
+            let parent = item.folder.deletingLastPathComponent().path
+            item.host?.showStatus("Parent folder: \(parent)")
+            return
+        }
         guard let entry = selectedEntry else { return item.updateStatus() }
         let size = entry.size.map { " · \($0.formatted()) bytes" } ?? ""
         item.host?.showStatus("\(entry.url.path)\(size)")

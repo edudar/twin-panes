@@ -86,12 +86,17 @@ struct SmokeTest {
             "file list is innermost scope (\(chain))")
         check(resolve(.function(3), chain) == .browserView, "F3 in browser → browser.view")
         check(resolve(.function(4), chain) == .browserEdit, "F4 in browser → browser.edit")
+        guard let table = browser.preferredFirstResponder as? NSTableView else {
+            check(false, "the browser's first responder is its file list")
+            return
+        }
+        await parentRow(check, browser: browser, table: table, folder: folder, window: window)
+        table.selectRowIndexes([1], byExtendingSelection: false)
         check(dispatch(.returnKey, in: window), "Return opens the selected folder")
         check(browser.folder.lastPathComponent == "sub", "now inside sub")
         check(dispatch(KeyChord("\u{7f}"), in: window), "Backspace goes to the parent")
         check(browser.folder == folder.standardizedFileURL, "back in the sample folder")
-        (browser.preferredFirstResponder as? NSTableView)?
-            .selectRowIndexes([1], byExtendingSelection: false)
+        table.selectRowIndexes([2], byExtendingSelection: false)
         check(dispatch(.function(4), in: window), "F4 dispatched on a file")
         let opened = app.workspace.allItems.compactMap { $0 as? HexEditorItem }
         check(
@@ -222,6 +227,46 @@ struct SmokeTest {
                 charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0)
         else { return false }
         return app.dispatcher.handle(event, in: window)
+    }
+
+    /// The ".." row: drawn first in the list, Return on it and a real double-click on it
+    /// go up a folder.
+    private func parentRow(
+        _ check: (Bool, String) -> Void, browser: BrowserItem, table: NSTableView,
+        folder: URL, window: NSWindow
+    ) async {
+        let sample = folder.standardizedFileURL
+        func enterSub() async {
+            browser.go(to: sample.appendingPathComponent("sub"))
+            await settle()
+        }
+        await enterSub()
+        let cell = table.view(atColumn: 0, row: 0, makeIfNecessary: false)
+        check(
+            cell.flatMap { Self.view(in: $0, id: "parentRow") } != nil,
+            "\"..\" is drawn as the first row inside a folder")
+        check(table.selectedRow == 0, "\"..\" is selected on entering a folder")
+        check(dispatch(.returnKey, in: window), "Return on \"..\" dispatched")
+        check(browser.folder == sample, "Return on \"..\" goes to the parent")
+        check(table.selectedRow == 1, "and selects the folder you came from")
+
+        await enterSub()
+        let rect = table.rect(ofRow: 0)
+        let point = table.convert(NSPoint(x: rect.minX + 30, y: rect.midY), to: nil)
+        for clicks in 1...2 {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                guard
+                    let event = NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                        clickCount: clicks, pressure: type == .leftMouseDown ? 1 : 0)
+                else { return check(false, "make a mouse event") }
+                NSApp.postEvent(event, atStart: false)
+            }
+        }
+        await settle()
+        check(browser.folder == sample, "double-clicking \"..\" goes to the parent")
     }
 
     func status(of controller: MainWindowController) -> String {

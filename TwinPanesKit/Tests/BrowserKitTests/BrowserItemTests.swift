@@ -158,13 +158,14 @@ import TwinPanesCore
         #expect(grants.scope(covering: root.appendingPathComponent("sub")) != nil)
         #expect(item.controller.validateMenuItem(parentItem))
 
-        // Empty folder disables open/view/edit.
+        // An empty folder has only "..": View is disabled, Open goes up.
         let empty = root.appendingPathComponent("sub/inner")
         item.go(to: empty)
-        let openItem = NSMenuItem(
-            title: "Open", action: #selector(BrowserViewController.browserOpen(_:)),
+        let viewItem = NSMenuItem(
+            title: "View", action: #selector(BrowserViewController.browserView(_:)),
             keyEquivalent: "")
-        #expect(!item.controller.validateMenuItem(openItem))
+        #expect(!item.controller.validateMenuItem(viewItem))
+        #expect(item.controller.isParentRowSelected)
     }
 
     @Test func viewControllerSurvivesAfterItemDeallocates() {
@@ -172,7 +173,7 @@ import TwinPanesCore
         var item: BrowserItem? = browser(at: root)
         let controller = item!.controller
         _ = controller.view
-        #expect(controller.numberOfRows(in: controller.tableView) == 2)
+        #expect(controller.numberOfRows(in: controller.tableView) == 3)
 
         // Closing a tab releases BrowserItem while AppKit may still invoke callbacks
         // on the view controller during the current run-loop turn.
@@ -184,5 +185,83 @@ import TwinPanesCore
             title: "Open", action: #selector(BrowserViewController.browserOpen(_:)),
             keyEquivalent: "")
         #expect(!controller.validateMenuItem(openItem))
+    }
+
+    // MARK: The ".." row
+
+    @Test func theParentRowComesFirstAndIsSelectedOnArrival() {
+        defer { cleanUp() }
+        let item = browser(at: root)
+        let controller = item.controller
+        _ = controller.view
+        #expect(controller.showsParentRow)
+        #expect(controller.numberOfRows(in: controller.tableView) == item.entries.count + 1)
+        #expect(controller.entry(atRow: 0) == nil)
+        #expect(controller.entry(atRow: 1)?.name == "sub")
+        #expect(controller.entry(atRow: 2)?.name == "file.txt")
+        #expect(controller.entry(atRow: 3) == nil)
+        #expect(controller.isParentRowSelected)
+        #expect(controller.selectedEntry == nil)
+        let cell = controller.tableView(
+            controller.tableView, viewFor: controller.tableView.tableColumns[0], row: 0)
+        #expect(Self.labels(in: cell) == [".."])
+    }
+
+    @Test func theTopFolderHasNoParentRow() {
+        defer { cleanUp() }
+        let item = browser(at: URL(fileURLWithPath: "/"))
+        let controller = item.controller
+        _ = controller.view
+        #expect(!controller.showsParentRow)
+        #expect(controller.numberOfRows(in: controller.tableView) == item.entries.count)
+        #expect(controller.entry(atRow: 0)?.name == item.entries.first?.name)
+        #expect(!controller.isParentRowSelected)
+    }
+
+    @Test func openingTheParentRowGoesUp() {
+        defer { cleanUp() }
+        let item = browser(at: root.appendingPathComponent("sub"))
+        let controller = item.controller
+        _ = controller.view
+        controller.tableView.selectRowIndexes([0], byExtendingSelection: false)
+        controller.browserOpen(nil)
+        #expect(item.folder.path == root.path)
+        #expect(controller.selectedEntry?.name == "sub")
+        #expect(controller.tableView.selectedRow == 1)
+    }
+
+    @Test func viewAndEditOnTheParentRowDoNothing() {
+        defer { cleanUp() }
+        let item = browser(at: root.appendingPathComponent("sub"))
+        let controller = item.controller
+        _ = controller.view
+        #expect(controller.isParentRowSelected)
+        func enabled(_ action: Selector) -> Bool {
+            controller.validateMenuItem(NSMenuItem(title: "", action: action, keyEquivalent: ""))
+        }
+        #expect(enabled(#selector(BrowserViewController.browserOpen(_:))))
+        #expect(!enabled(#selector(BrowserViewController.browserView(_:))))
+        #expect(!enabled(#selector(BrowserViewController.browserEdit(_:))))
+        controller.browserView(nil)
+        controller.browserEdit(nil)
+        #expect(item.folder.path == root.appendingPathComponent("sub").path)
+        #expect(opened.files.isEmpty)
+    }
+
+    @Test func typeToSelectSkipsTheParentRow() {
+        defer { cleanUp() }
+        let item = browser(at: root)
+        let controller = item.controller
+        _ = controller.view
+        let table = controller.tableView
+        let column = table.tableColumns[0]
+        #expect(controller.tableView(table, typeSelectStringFor: column, row: 0) == nil)
+        #expect(controller.tableView(table, typeSelectStringFor: column, row: 1) == "sub")
+    }
+
+    static func labels(in view: NSView?) -> [String] {
+        guard let view else { return [] }
+        let own = (view as? NSTextField).map { [$0.stringValue] } ?? []
+        return own + view.subviews.flatMap { labels(in: $0) }
     }
 }

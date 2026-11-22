@@ -487,6 +487,13 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   grant, stale bookmarks must be re-requested. These are what the M0 sandbox spike
   measures (§5). Each browser tab holds a `SecurityScope` token for its location
   (§5).
+- **As built (M1b, visible way up):** the file list's first row is "..", the parent
+  folder, in every folder but `/`. It's a view row only (`BrowserViewController`
+  offsets rows by one; `BrowserItem.entries` never holds it), so status counts and
+  later F5–F8 selections leave it out. It's selected on entering a folder; Return or
+  double-click on it goes up and selects the folder you came from; F3/F4 on it beep;
+  type-to-select skips it. ⌘↑/Backspace still go up. The smoke test goes up with
+  Return and with a real double-click on the row.
 
 ### 4.8 Single main frame: workspace model (D7)
 
@@ -947,6 +954,9 @@ byte histogram.
   - Tab: switch panels in the browser vs. insert a tab in the editor (resolved by
     focus, but confirm it feels right).
 - **NC-style marking and drive switching** — not needed day one; candidates for M13+.
+- **Path bar as a path control** (2026-11-22): each folder of the path clickable to
+  jump there, click or ⇧⌘G turns it into the editable path field. Deferred to M4 with
+  the address and history work; the ".." row (§4.7) is the visible way up until then.
 - **Accessibility and localization** — out of scope for now (D19), including the
   proposed baseline VoiceOver support for the hex viewport in M1.
 - **Block devices, privileged save** — not planned (D14).
