@@ -1,4 +1,5 @@
 import AppKit
+import BrowserKit
 import EditorKit
 import WorkspaceKit
 
@@ -12,7 +13,6 @@ import WorkspaceKit
     @objc optional func newBrowserTab(_ sender: Any?)
     @objc optional func newEditorTab(_ sender: Any?)
     @objc optional func newEditorView(_ sender: Any?)
-    @objc optional func browserView(_ sender: Any?)
     @objc optional func browserSwitchPanel(_ sender: Any?)
     @objc optional func editorFindNext(_ sender: Any?)
     @objc optional func showTestSheet(_ sender: Any?)
@@ -41,6 +41,10 @@ extension CommandID {
     static let nextTab: CommandID = "workspace.nextTab"
     static let previousTab: CommandID = "workspace.previousTab"
     static let browserView: CommandID = "browser.view"
+    static let browserEdit: CommandID = "browser.edit"
+    static let browserOpen: CommandID = "browser.open"
+    static let browserParent: CommandID = "browser.parent"
+    static let browserGoToFolder: CommandID = "browser.goToFolder"
     static let browserSwitchPanel: CommandID = "browser.switchPanel"
     static let editorFindNext: CommandID = "editor.findNext"
     static let showTestSheet: CommandID = "debug.showTestSheet"
@@ -52,7 +56,6 @@ extension CommandID {
 }
 
 extension ItemKind {
-    static let browser: ItemKind = "browser"
     static let report: ItemKind = "report"
 }
 
@@ -83,7 +86,11 @@ enum DefaultCommands {
         add(
             .previousTab, "Show Previous Tab",
             #selector(MainFrameViewController.selectPreviousTab(_:)))
-        add(.browserView, "View", #selector(AppActions.browserView(_:)))
+        add(.browserView, "View", #selector(BrowserActions.browserView(_:)))
+        add(.browserEdit, "Edit", #selector(BrowserActions.browserEdit(_:)))
+        add(.browserOpen, "Open", #selector(BrowserActions.browserOpen(_:)))
+        add(.browserParent, "Enclosing Folder", #selector(BrowserActions.browserParent(_:)))
+        add(.browserGoToFolder, "Go to Folder…", #selector(BrowserActions.browserGoToFolder(_:)))
         add(.browserSwitchPanel, "Switch Panel", #selector(AppActions.browserSwitchPanel(_:)))
         add(.editorFindNext, "Find Next", #selector(AppActions.editorFindNext(_:)))
         add(.showTestSheet, "Show Test Sheet", #selector(AppActions.showTestSheet(_:)))
@@ -115,8 +122,20 @@ enum DefaultCommands {
         registry.bind(KeyChord("\t", .control), to: .nextTab)
         registry.bind(KeyChord("\t", [.control, .shift]), to: .previousTab)
         registry.bind(.function(3), to: .browserView, in: browser)
+        registry.bind(.function(4), to: .browserEdit, in: browser)
+        registry.bind(.returnKey, to: .browserOpen, in: fileList)
+        registry.bind(
+            KeyChord(Self.arrow(NSDownArrowFunctionKey), .command), to: .browserOpen, in: browser)
+        registry.bind(
+            KeyChord(Self.arrow(NSUpArrowFunctionKey), .command), to: .browserParent, in: browser)
+        registry.bind(KeyChord("\u{7f}"), to: .browserParent, in: fileList)
+        registry.bind(KeyChord("g", [.command, .shift]), to: .browserGoToFolder, in: browser)
         registry.bind(.tab, to: .browserSwitchPanel, in: fileList)
         registry.bind(.function(3), to: .editorFindNext, in: editor)
         return registry
+    }
+
+    private static func arrow(_ key: Int) -> String {
+        String(Character(UnicodeScalar(UInt32(key))!))
     }
 }

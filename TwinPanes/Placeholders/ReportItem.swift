@@ -19,6 +19,9 @@ final class ReportItem: WorkspaceItem {
         self.text = text
     }
 
+    var icon: NSImage? {
+        NSImage(systemSymbolName: "list.bullet.rectangle", accessibilityDescription: nil)
+    }
     var viewController: NSViewController { controller }
     var preferredFirstResponder: NSView? { controller.textView }
 

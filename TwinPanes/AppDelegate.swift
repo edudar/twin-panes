@@ -1,4 +1,5 @@
 import AppKit
+import BrowserKit
 import EditorKit
 import TwinPanesCore
 import WorkspaceKit
@@ -17,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private(set) var windowControllers: [MainWindowController] = []
     private var editorCount = 0
-    private var browserCount = 0
+    let folderGrants = FolderGrants()
 
     // MARK: Lifecycle
 
@@ -88,9 +89,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return controller
     }
 
-    func makeBrowser() -> PlaceholderBrowserItem {
-        browserCount += 1
-        return PlaceholderBrowserItem(title: "Browser \(browserCount)")
+    /// A browser tab at `folder`, or the active browser's folder, or the real home.
+    func makeBrowser(at folder: URL? = nil) -> BrowserItem {
+        let current = activeController?.layout.focusedPanelItem as? BrowserItem
+        return BrowserItem(
+            folder: folder ?? current?.folder ?? DirectoryReader.realHomeDirectory,
+            grants: folderGrants
+        ) { [weak self] url, scope in
+            self?.openFile(url, scope: scope)
+        }
     }
 
     func makeEditorSession() -> PlaceholderEditorSession {

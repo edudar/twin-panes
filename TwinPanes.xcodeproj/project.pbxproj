@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1C6558D7E6A952D810ADFA89 /* BrowserKit in Frameworks */ = {isa = PBXBuildFile; productRef = AC97F00EE6074A748F9367F3 /* BrowserKit */; };
 		652F13CB9B001DF5A980924B /* SandboxProbe in Frameworks */ = {isa = PBXBuildFile; productRef = 17D08F03DE63A666EC4BB22F /* SandboxProbe */; };
 		C4CBF0BD81ECE447DBF3FFCC /* EditorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1EEC312AF49ADC4F44BA62AC /* EditorKit */; };
 		CEC3D5889379938D34F718F1 /* WorkspaceKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5C7AFC0EAF72331C93A28512 /* WorkspaceKit */; };
@@ -33,6 +34,7 @@
 			files = (
 				CEC3D5889379938D34F718F1 /* WorkspaceKit in Frameworks */,
 				C4CBF0BD81ECE447DBF3FFCC /* EditorKit in Frameworks */,
+				1C6558D7E6A952D810ADFA89 /* BrowserKit in Frameworks */,
 				652F13CB9B001DF5A980924B /* SandboxProbe in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -88,6 +90,7 @@
 			packageProductDependencies = (
 				5C7AFC0EAF72331C93A28512 /* WorkspaceKit */,
 				1EEC312AF49ADC4F44BA62AC /* EditorKit */,
+				AC97F00EE6074A748F9367F3 /* BrowserKit */,
 				17D08F03DE63A666EC4BB22F /* SandboxProbe */,
 			);
 			productName = TwinPanes;
@@ -214,6 +217,11 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		AC97F00EE6074A748F9367F3 /* BrowserKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference "TwinPanesKit" */;
+			productName = BrowserKit;
+		};
 		17D08F03DE63A666EC4BB22F /* SandboxProbe */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = CA2E97AE102B69380F859296 /* XCLocalSwiftPackageReference "TwinPanesKit" */;

@@ -65,6 +65,7 @@ final class PlaceholderEditorItem: WorkspaceItem {
     var title: String { viewNumber == 1 ? session.name : "\(session.name) (\(viewNumber))" }
     var isDirty: Bool { session.isDirty }
     var sessionKey: AnyHashable? { ObjectIdentifier(session) }
+    var icon: NSImage? { NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil) }
     var viewController: NSViewController { controller }
     var preferredFirstResponder: NSView? { controller.textView }
 
