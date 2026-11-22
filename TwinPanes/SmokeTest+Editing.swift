@@ -112,6 +112,34 @@ extension SmokeTest {
         type("\t", in: window)  // back to the hex column
     }
 
+    /// A file without write permission opens read-only (M3b, D-b): typing changes
+    /// nothing and the status line says why.
+    func readOnlyFile(_ check: (Bool, String) -> Void, window target: NSWindow) async {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("smoke-readonly-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            try Data(repeating: 0x11, count: 64).write(to: url)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o444], ofItemAtPath: url.path)
+        } catch {
+            return check(false, "write a read-only sample: \(error)")
+        }
+        guard let item = app.openFile(url), let controller = app.controller(containing: item.id),
+            let window = controller.window
+        else { return check(false, "a read-only file opens") }
+        check(window === target, "it opens in the window under test")
+        defer { controller.layout.remove(item.id) }
+        await settle()
+        window.makeFirstResponder(item.hexView)
+        type("FF", in: window)
+        check(
+            (try? item.read(0..<1)) == Data([0x11]) && !item.isDirty,
+            "typing into a read-only file changes nothing")
+        let status = self.status(of: controller)
+        check(status.contains("read-only"), "the status line says why: \(status)")
+    }
+
     /// Edits near the end of a 4 GiB file, and while a Find All scans all of it.
     func editingLargeFile(_ check: (Bool, String) -> Void, item: HexEditorItem) async {
         guard let window = item.viewController.view.window else {

@@ -81,13 +81,13 @@ private final class StatusSpy: WorkspaceHost {
         item.hexView.moveRight(nil)  // 0x12
         item.hexView.moveLeft(nil)  // back to 0x11 within 2 s
         item.hexView.insertText("CD")  // must be step 2
-        #expect(item.undoStack.undoCount == 2)
+        #expect(item.session.undoStack.undoCount == 2)
 
         // Switching columns and back within 2 s also breaks the typing burst.
         item.hexView.insertTab(nil)
         item.hexView.insertTab(nil)
         item.hexView.insertText("EF")  // must be step 3
-        #expect(item.undoStack.undoCount == 3)
+        #expect(item.session.undoStack.undoCount == 3)
     }
 
     @Test func pausesMovesAndColumnSwitchesStartNewUndoSteps() throws {
@@ -104,7 +104,7 @@ private final class StatusSpy: WorkspaceHost {
         type(2, .hex, after: 4)  // after a pause: new step
         type(3, .text, after: 4)  // other column: new step
         type(9, .text, after: 4)  // somewhere else: new step
-        #expect(item.undoStack.undoCount == 4)
+        #expect(item.session.undoStack.undoCount == 4)
     }
 
     @Test func undoAndRedoMenuItemsFollowTheHistory() throws {
@@ -214,5 +214,72 @@ private final class StatusSpy: WorkspaceHost {
         controller.find(.forward)
         try await waitForSearch(controller)
         #expect(controller.findBar.statusLabel.stringValue == "Not found")
+    }
+
+    /// A read-only file opens, but typing changes nothing and says why (M3b, D-b).
+    @Test func readOnlyTabsRefuseTypingAndSayWhy() throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data((0..<256).map { UInt8($0) }).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
+        let item = try HexEditorItem(url: url)
+        _ = item.controller.view
+        let host = StatusSpy()
+        item.host = host
+        #expect(item.statusText.hasSuffix("Read-only: you don’t have permission to change it"))
+        item.hexView.go(to: 0x10)
+        item.hexView.insertText("FF")
+        #expect(try byte(item, 0x10) == 0x10)
+        #expect(!item.isDirty && !item.canUndo && item.hexView.pendingNibble == nil)
+        #expect(host.messages.last?.contains("read-only") == true)
+    }
+
+    /// Changes that reach the tab from its session, not from its own typing (a revert
+    /// today, another view later), refresh it like its own edits do.
+    @Test func sessionChangesFromElsewhereRefreshTheTab() throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        let item = try makeItem()
+        let host = StatusSpy()
+        item.host = host
+        var changes = 0
+        item.onChange = { changes += 1 }
+        item.hexView.highlights = [0x20..<0x22]
+        try item.session.overwrite(
+            Data([0xEE]), at: 0x20, selectionBefore: 0x20..<0x21, selectionAfter: 0x21..<0x22)
+        #expect(changes == 1 && item.hexView.highlights.isEmpty)
+        #expect(host.messages.last?.hasSuffix("Modified (saving comes in M3b)") == true)
+
+        item.hexView.go(to: 0x30)
+        item.hexView.insertText("A")  // half a byte typed, then the session reverts
+        item.session.revert()
+        #expect(!item.isDirty && changes == 3 && item.hexView.pendingNibble == nil)
+        #expect(try byte(item, 0x20) == 0x20 && byte(item, 0x30) == 0x30)
+        #expect(host.messages.last?.contains("Modified") == false)
+        // The next keystroke starts a new step: nothing is left to coalesce with.
+        item.hexView.insertText("B")
+        #expect(item.session.undoStack.undoCount == 1)
+    }
+
+    /// The session reports a keystroke before the hex view moves the cursor; the status
+    /// line still updates once per keystroke, with the new cursor.
+    @Test func eachKeystrokeUpdatesTheStatusOnce() throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        let item = try makeItem()
+        item.hexView.go(to: 0x40)
+        let host = StatusSpy()
+        item.host = host
+        item.hexView.insertText("A")
+        item.hexView.insertText("B")
+        #expect(host.messages.count == 2)
+        #expect(host.messages.last?.hasPrefix("Offset 0x41") == true)
+        #expect(!item.controller.applyingTypingEdit)
+    }
+
+    @Test func tabsOfOneSessionShareItsKey() throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        let item = try makeItem()
+        let other = HexEditorItem(session: item.session)
+        #expect(item.sessionKey == other.sessionKey)
+        #expect(item.sessionKey == AnyHashable(item.session.id))
+        #expect(try HexEditorItem(url: url).sessionKey != item.sessionKey)
     }
 }

@@ -2,70 +2,75 @@ import Foundation
 import HexViewKit
 import TwinPanesCore
 
-/// Overwrite editing and undo for the tab (docs/plans/M3a.md).
+/// Overwrite editing and undo for the tab (docs/plans/M3a.md), through its session
+/// (docs/plans/M3b.md).
 extension HexEditorItem {
     /// Typing within this long of the last keystroke, right where it left the cursor and
     /// in the same column, joins the same undo step.
     static let typingPause: Duration = .seconds(2)
 
-    public var isDirty: Bool { buffer.isModified }
-    /// Saving comes with sessions in M3b; until then closing can only discard.
+    public var isDirty: Bool { session.isDirty }
+    /// Saving comes later in M3b; until then closing can only discard.
     public var canSave: Bool { false }
+    public var canUndo: Bool { session.canUndo }
+    public var canRedo: Bool { session.canRedo }
 
     /// Drops every edit and its history (the close prompt's Discard).
-    public func discardChanges() {
-        buffer.restore(buffer.openedTree)
-        undoStack = UndoStack()
-        lastTyping = nil
-        if controller.isViewLoaded {
-            controller.hexView.clearPendingNibble()
-            controller.bytesChanged()
-        }
-        onChange?()
-    }
+    public func discardChanges() { session.revert() }
 
     /// Starts a new undo step on the next keystroke (after a cursor move or column switch).
     func breakTypingBurst() { lastTyping = nil }
-    public var canUndo: Bool { undoStack.canUndo }
-    public var canRedo: Bool { undoStack.canRedo }
 
-    /// Overwrites `bytes` at `offset` and records the undo step, from `selectionBefore`
-    /// to a cursor at `cursorAfter`. Returns false (and shows why) if the write failed.
+    /// Overwrites `bytes` at `offset` and records the undo step, from `selectionBefore` to
+    /// a cursor at `cursorAfter`. Returns false (and shows why) if the write failed or the
+    /// file is read-only.
     func overwrite(
         _ bytes: Data, at offset: UInt64, column: HexLayout.Column,
         selectionBefore: Range<UInt64>, cursorAfter: UInt64,
         now: ContinuousClock.Instant = .now
     ) -> Bool {
-        let before = UndoStack.State(tree: buffer.tree, selection: selectionBefore)
-        do {
-            try buffer.overwrite(at: offset, with: bytes)
-        } catch {
-            host?.showStatus("Can't change the byte at \(Self.hex(offset)): \(error)")
-            return false
-        }
-        let after = UndoStack.State(tree: buffer.tree, selection: cursorAfter..<(cursorAfter + 1))
         let continues =
             lastTyping.map {
                 $0.column == column && now - $0.time < Self.typingPause
                     && selectionBefore == $0.cursorAfter..<($0.cursorAfter + 1)
             } ?? false
-        undoStack.record(before: before, after: after, coalescing: continues)
+        do {
+            try session.overwrite(
+                bytes, at: offset, selectionBefore: selectionBefore,
+                selectionAfter: cursorAfter..<(cursorAfter + 1), coalescing: continues)
+        } catch EditorSessionError.readOnly(let reason) {
+            host?.showStatus("“\(title)” is read-only: \(reason)")
+            return false
+        } catch {
+            host?.showStatus("Can't change the byte at \(Self.hex(offset)): \(error)")
+            return false
+        }
         lastTyping = Typing(column: column, cursorAfter: cursorAfter, time: now)
-        onChange?()
         return true
     }
 
     /// Goes back one undo step; returns the state to show, or nil if there's none.
-    func undo() -> UndoStack.State? { restore(undoStack.undo()) }
+    func undo() -> UndoStack.State? { session.undo() }
 
     /// Goes forward one step; returns the state to show, or nil if there's none.
-    func redo() -> UndoStack.State? { restore(undoStack.redo()) }
+    func redo() -> UndoStack.State? { session.redo() }
 
-    private func restore(_ state: UndoStack.State?) -> UndoStack.State? {
-        guard let state else { return nil }
-        buffer.restore(state.tree)
-        lastTyping = nil
+    /// The session changed, from this tab or elsewhere (a revert, later another view).
+    /// This tab's own keystroke only needs the old find results gone and a redraw; the
+    /// hex view then moves the cursor, which refreshes the status line and inspector
+    /// once. Anything else also ends the typing burst and drops a half-typed byte.
+    func sessionChanged(_ change: EditorSession.Change) {
+        let ownTyping = controller.applyingTypingEdit
+        if !ownTyping { lastTyping = nil }
+        if controller.isViewLoaded {
+            if ownTyping {
+                controller.clearFindResults()
+                hexView.needsDisplay = true
+            } else {
+                hexView.clearPendingNibble()
+                controller.bytesChanged()
+            }
+        }
         onChange?()
-        return state
     }
 }

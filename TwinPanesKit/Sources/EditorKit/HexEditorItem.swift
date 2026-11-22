@@ -8,23 +8,29 @@ extension ItemKind {
     public static let editor: ItemKind = "editor"
 }
 
-/// A hex editor tab over one file. Edits go into an `EditBuffer` (M3a); every read the
-/// view, search, inspector and Save Selection make goes through its current snapshot.
-/// Sessions and saving come in M3b.
+/// A hex editor tab over one file's `EditorSession` (docs/plans/M3b.md, D-a). The session
+/// owns the bytes, the undo history and the saved version; the tab keeps presentation
+/// (selection, typing burst, find, view options) and follows the session's changes.
+/// Every read the view, search, inspector and Save Selection make goes through the
+/// session's current snapshot.
 @MainActor
 public final class HexEditorItem: WorkspaceItem {
     public let id = ItemID()
     public let kind: ItemKind = .editor
     public let preferredSlot: SlotID = .leftPanel
-    public let url: URL
-    public let source: ByteSource
-    /// The edit model over `source`.
-    public let buffer: EditBuffer
+    public let session: EditorSession
     public weak var host: WorkspaceHost?
     public var onChange: (() -> Void)?
 
-    /// Undo history; entries carry this tab's selection (docs/plans/M3a.md, D-c).
-    var undoStack = UndoStack()
+    public var url: URL { session.url }
+    public var source: ByteSource { session.buffer.original }
+    /// The edit model over `source`.
+    public var buffer: EditBuffer { session.buffer }
+    /// Keeps sandbox access while the session lives (PLAN.md §5).
+    var scope: SecurityScope? { session.scope }
+    /// Views of one session share it, so the close workflow asks once per session.
+    public var sessionKey: AnyHashable? { session.id }
+
     /// The last typed byte, for coalescing a typing burst into one undo step.
     var lastTyping: Typing?
     struct Typing {
@@ -33,17 +39,18 @@ public final class HexEditorItem: WorkspaceItem {
         let time: ContinuousClock.Instant
     }
 
-    /// Keeps sandbox access for as long as the tab is open (PLAN.md §5).
-    let scope: SecurityScope?
     lazy var controller = HexEditorViewController(item: self)
 
-    /// Opens `url`. Throws `ByteSourceError` for anything but a readable regular file.
-    public init(url: URL, scope: SecurityScope? = nil) throws {
-        self.url = url
-        self.scope = scope
-        let source = try ByteSource(url: url)
-        self.source = source
-        self.buffer = try EditBuffer(original: source)
+    /// Opens `url` in a new session. Throws `ByteSourceError` for anything but a readable
+    /// regular file.
+    public convenience init(url: URL, scope: SecurityScope? = nil) throws {
+        self.init(session: try EditorSession(url: url, scope: scope))
+    }
+
+    /// A tab showing `session`.
+    public init(session: EditorSession) {
+        self.session = session
+        session.observe(self) { [weak self] change in self?.sessionChanged(change) }
     }
 
     /// The current version, for reading on any thread.
@@ -66,7 +73,11 @@ public final class HexEditorItem: WorkspaceItem {
             parts.append("Selected \(range.count) bytes (\(Self.hex(range.lowerBound))…\(last))")
         }
         parts.append("Size \(Self.byteCount(length))")
-        if isDirty { parts.append("Modified (saving comes in M3b)") }
+        if case .readOnly(let reason) = session.access {
+            parts.append("Read-only: \(reason)")
+        } else if isDirty {
+            parts.append("Modified (saving comes in M3b)")
+        }
         return parts.joined(separator: " · ")
     }
 
