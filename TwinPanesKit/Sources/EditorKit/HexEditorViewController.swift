@@ -37,6 +37,9 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     private var hexToInspector: NSLayoutConstraint?
 
     // Find state (HexEditorViewController+Find.swift).
+    /// Internal test seam so search tests can inject a deterministic `ByteReading`.
+    var searchSourceOverride: (any ByteReading)?
+    var searchSource: any ByteReading { searchSourceOverride ?? item.source }
     var searchTask: Task<Void, Never>?
     var searchGeneration = 0
     /// The match the last find selected; "next" starts after it.
@@ -120,13 +123,18 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         updateInspector()
     }
 
-    /// Shows the bytes at the cursor; waits for the page if it isn't cached yet.
+    func hexViewDidLoadBytes(_ view: HexView) {
+        updateInspector()
+    }
+
+    /// Shows the bytes at the cursor; waits for the page if it isn't cached yet without
+    /// cancelling the hex view's own viewport prefetch.
     func updateInspector() {
         guard !inspector.isHidden else { return }
         let cursor = hexView.selection.cursor
         let range = cursor..<min(item.length, cursor + UInt64(Inspector.byteCount))
         if let bytes = item.cachedBytes(range) { return inspector.show(bytes) }
-        item.prefetch(range) { [weak self] _ in
+        item.source.prefetch(range, supersede: false) { [weak self] _ in
             guard let self, self.hexView.selection.cursor == cursor else { return }
             self.inspector.show(self.item.cachedBytes(range) ?? Data())
         }
@@ -201,8 +209,11 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
             guard let self, response == .OK, let destination = panel.url else { return }
             self.item.host?.showStatus("Saving \(range.count.formatted()) bytes…")
             let source = self.item.source
+            let scope = self.item.scope
             Task.detached(priority: .userInitiated) {
-                let error = Self.write(source, range: range, to: destination)
+                let error = withExtendedLifetime(scope) {
+                    Self.write(source, range: range, to: destination)
+                }
                 await MainActor.run { [weak self] in
                     self?.item.host?.showStatus(
                         error.map {
@@ -215,7 +226,8 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         }
     }
 
-    /// Saves `range` of `source` to `destination`; returns the error, if any.
+    /// Saves `range` of `source` to `destination`; removes any partial output on failure
+    /// and returns the error, if any.
     nonisolated static func write(
         _ source: ByteSource, range: Range<UInt64>, to destination: URL
     )
@@ -225,6 +237,7 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
             try source.write(range, to: destination)
             return nil
         } catch {
+            try? FileManager.default.removeItem(at: destination)
             return error
         }
     }

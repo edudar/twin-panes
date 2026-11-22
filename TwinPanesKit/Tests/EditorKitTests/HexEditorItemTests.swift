@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import EditorKit
+@testable import TwinPanesCore
 
 @MainActor
 @Suite struct HexEditorItemTests {
@@ -41,5 +42,24 @@ import Testing
         #expect(item.statusText.hasSuffix("(4,096 bytes) · Read-only"))
         item.hexView.select(0x10..<0x14)
         #expect(item.statusText.contains("Selected 4 bytes (0x10…0x13)"))
+    }
+
+    @Test func copyDoesNotFillPageCacheAndFailedSaveCleansPartialFile() async throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        let item = try item(bytes: 4096)
+        var copied: Data?
+        item.readForCopy(0..<1024) { result in
+            copied = try? result.get()
+        }
+        #expect(copied?.count == 1024)
+        #expect(item.source.cachedPageCount == 0)
+
+        let out = url.deletingLastPathComponent()
+            .appendingPathComponent("partial-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: out) }
+        try FileHandle(forWritingTo: url).truncate(atOffset: 100)
+        let error = HexEditorViewController.write(item.source, range: 0..<2000, to: out)
+        #expect(error != nil)
+        #expect(!FileManager.default.fileExists(atPath: out.path))
     }
 }

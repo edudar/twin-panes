@@ -63,34 +63,38 @@ extension HexEditorViewController {
     }
 
     func find(_ direction: Searcher.Direction) {
-        guard !findBar.isHidden, !findBar.field.stringValue.isEmpty else { return editorFind(nil) }
+        guard !findBar.field.stringValue.isEmpty else { return editorFind(nil) }
         guard let pattern = currentPattern() else { return }
         let selected = hexView.selection.range
         if let all = allMatches, all.pattern == pattern, !all.result.isTruncated {
             return step(through: all.result.ranges, direction, from: selected)
         }
         let from = FindStepper.searchStart(direction, selected: selected, lastMatch: lastMatch)
-        let searcher = Searcher(source: item.source)
+        let searcher = Searcher(source: searchSource)
         run { token, progress in
             try searcher.next(
                 pattern, from: from, direction: direction, cancellation: token, progress: progress)
         } done: { [weak self] match in
             guard let self else { return }
             guard let match else {
-                self.findBar.show("Not found")
+                self.reportFind("Not found")
                 return NSSound.beep()
             }
             self.select(match.range)
             let wrap = direction == .forward ? " (wrapped to the start)" : " (wrapped to the end)"
-            self.findBar.show(
+            self.reportFind(
                 "Found at \(HexEditorItem.hex(match.range.lowerBound))\(match.wrapped ? wrap : "")")
         }
     }
 
     func findAll() {
         guard !findBar.field.stringValue.isEmpty else { return editorFind(nil) }
+        if findBar.isHidden {
+            findBar.isHidden = false
+            applyVisibility()
+        }
         guard let pattern = currentPattern() else { return }
-        let searcher = Searcher(source: item.source)
+        let searcher = Searcher(source: searchSource)
         run { token, progress in
             try searcher.all(pattern, cancellation: token, progress: progress)
         } done: { [weak self] result in
@@ -110,6 +114,11 @@ extension HexEditorViewController {
             self.step(
                 through: result.ranges, .forward, from: cursor..<cursor, quiet: result.isTruncated)
         }
+    }
+
+    private func reportFind(_ message: String) {
+        findBar.show(message)
+        if findBar.isHidden { item.host?.showStatus(message) }
     }
 
     /// Moves to the next or previous range in `ranges` (sorted) relative to `selected`.

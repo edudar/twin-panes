@@ -21,7 +21,7 @@ public final class HexEditorItem: WorkspaceItem {
     public var onChange: (() -> Void)?
 
     /// Keeps sandbox access for as long as the tab is open (PLAN.md §5).
-    private let scope: SecurityScope?
+    let scope: SecurityScope?
     lazy var controller = HexEditorViewController(item: self)
 
     /// Opens `url`. Throws `ByteSourceError` for anything but a readable regular file.
@@ -89,4 +89,32 @@ extension HexEditorItem: HexViewDataSource {
     }
 
     public func read(_ range: Range<UInt64>) throws -> Data { try source.read(range) }
+
+    /// Copies through `readSequential` so copying up to 16 MiB never evicts the view's
+    /// LRU page cache; large selections read off the main thread while keeping `scope`.
+    public func readForCopy(
+        _ range: Range<UInt64>, completion: @escaping @MainActor (Result<Data, Error>) -> Void
+    ) {
+        let readExact: @Sendable (ByteSource) -> Result<Data, Error> = { source in
+            Result {
+                let data = try source.readSequential(range)
+                guard UInt64(data.count) == range.count else {
+                    throw ByteSourceError.truncated(
+                        expected: range.upperBound, available: range.lowerBound + UInt64(data.count)
+                    )
+                }
+                return data
+            }
+        }
+        if range.count <= 256 * 1024 {
+            completion(readExact(source))
+            return
+        }
+        let source = self.source
+        let scope = self.scope
+        Task.detached(priority: .userInitiated) {
+            let result = withExtendedLifetime(scope) { readExact(source) }
+            await MainActor.run { completion(result) }
+        }
+    }
 }
