@@ -23,12 +23,15 @@ import Testing
         let granted = root.appendingPathComponent("granted", isDirectory: true)
         try FileManager.default.createDirectory(at: granted, withIntermediateDirectories: true)
 
-        let report = probe.probeFolder(granted)
+        // Not to the Trash: this process can't empty ~/.Trash afterwards, so each run left
+        // a trash-me.txt there (review, test hygiene). The Debug menu still trashes.
+        let report = probe.probeFolder(granted, trash: false)
+        #expect(report.outcome(of: "trash") == .skipped("left out of this run"))
 
         for name in [
             "create scratch folder", "create file", "fullfsync", "in-place write",
             "xattr set+get", "hard link", "clone → sibling", "clone → container",
-            "clone-stage-replace", "trash",
+            "clone-stage-replace",
         ] {
             let outcome = try #require(report.outcome(of: name), "missing step \(name)")
             #expect(!outcome.isFailure, "\(name): \(outcome.detail)")

@@ -55,7 +55,9 @@ extension SandboxProbe {
 
     // MARK: Folder grant
 
-    public func probeFolder(_ url: URL) -> ProbeReport {
+    /// `trash: false` skips the Trash step, for runs (unit tests) that can't empty the
+    /// Trash afterwards.
+    public func probeFolder(_ url: URL, trash: Bool = true) -> ProbeReport {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         var steps = Steps()
@@ -111,6 +113,10 @@ extension SandboxProbe {
             let linkInode = try Self.stat(link).st_ino
             return fileInode == linkInode
                 ? "link still shares the file" : "link now points at the old inode (broken)"
+        }
+        if !trash {
+            steps.record("trash", .skipped("left out of this run"))
+            return report(url, .folder, steps, bookmark)
         }
         steps.run("trash") {
             let victim = scratch.appendingPathComponent("trash-me.txt")
