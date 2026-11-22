@@ -5,7 +5,7 @@ import Foundation
 /// the view's pages.
 ///
 /// The search calls are synchronous and run on the caller's thread. `run(_:)` puts one
-/// on the searcher's own serial queue and cancels it with the calling task.
+/// on a small app-wide pool and cancels it with the calling task.
 public struct Searcher: Sendable {
     public static let defaultChunkSize = 4 << 20
     /// "Find all" keeps at most this many matches and then reports that there are more.
@@ -81,9 +81,19 @@ public struct Searcher: Sendable {
         return AllMatches(ranges: ranges, isTruncated: truncated)
     }
 
-    private static let queue = DispatchQueue(label: "Searcher", qos: .userInitiated)
+    /// How many searches run at once, app-wide (PLAN.md §3: a small fixed pool, so a long
+    /// search in one tab doesn't hold up another's, nor floods the disk).
+    public static let maxConcurrentSearches = 2
 
-    /// Runs `work` on the search queue. Cancelling the calling task cancels the search,
+    private static let pool: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "Searcher"
+        queue.maxConcurrentOperationCount = maxConcurrentSearches
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
+
+    /// Runs `work` on the search pool. Cancelling the calling task cancels the search,
     /// which then throws `CancellationError` at the next chunk.
     public static func run<T: Sendable>(
         _ work: @escaping @Sendable (SearchCancellation) throws -> T
@@ -91,7 +101,7 @@ public struct Searcher: Sendable {
         let token = SearchCancellation()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                queue.async { continuation.resume(with: Result { try work(token) }) }
+                pool.addOperation { continuation.resume(with: Result { try work(token) }) }
             }
         } onCancel: {
             token.cancel()

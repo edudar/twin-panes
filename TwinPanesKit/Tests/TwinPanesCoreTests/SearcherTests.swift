@@ -65,6 +65,36 @@ import Testing
         }
     }
 
+    /// Review bug 3: every search shared one serial queue, so a long search in one tab
+    /// held up every other tab's search. Searches now run on a small pool.
+    @Test func aLongSearchDoesNotBlockAnother() async throws {
+        let started = Atomic(false)
+        let release = Atomic(false)
+        let long = Task {
+            try await Searcher.run { _ in
+                started.store(true, ordering: .relaxed)
+                while !release.load(ordering: .relaxed) { usleep(1000) }
+                return 1
+            }
+        }
+        while !started.load(ordering: .relaxed) { await Task.yield() }
+        let short = Task { try await Searcher.run { _ in 2 } }
+        let shortFinishedFirst = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { (try? await short.value) == 2 }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(2))
+                release.store(true, ordering: .relaxed)
+                return false
+            }
+            let first = await group.next() ?? false
+            release.store(true, ordering: .relaxed)
+            group.cancelAll()
+            return first
+        }
+        #expect(try await long.value == 1)
+        #expect(shortFinishedFirst)
+    }
+
     @Test func runCancelsWithItsTask() async throws {
         let started = Atomic(false)
         let task = Task {
