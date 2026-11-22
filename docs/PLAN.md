@@ -376,7 +376,7 @@ At the cursor: Int/UInt 8/16/32/64 (LE/BE), Float16/32/64, binary, UTF-8/UTF-16
 character, Unix time / Mac absolute time / Windows FILETIME. Editable later.
 **As built (M2):** `Inspector` (TwinPanesCore) decodes up to 8 bytes; `InspectorView`
 (HexViewKit) is a panel on the right of the hex editor with a byte-order switch,
-shown by default and toggled with View › Show Inspector (⌥⌘I). Dates show as ISO 8601
+hidden by default and toggled with View › Show Inspector (⌥⌘I). Dates show as ISO 8601
 UTC, Unix time as 32-bit seconds.
 
 ### 4.7 File manager (BrowserKit)

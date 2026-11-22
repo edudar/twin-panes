@@ -58,7 +58,9 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         hexView.delegate = self
         hexView.dataSource = item
         hexView.setAccessibilityIdentifier("hexView")
+        // Both panels appear on demand: ⌘F for the find bar, ⌥⌘I for the inspector.
         findBar.isHidden = true
+        inspector.isHidden = true
         configureFindBar()
         divider.boxType = .separator
 

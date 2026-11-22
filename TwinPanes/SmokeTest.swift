@@ -214,16 +214,9 @@ struct SmokeTest {
         editorView.window?.layoutIfNeeded()
         let editor = editorView.bounds, hexFrame = hex.hexView.frame
         check(
-            hexFrame.width >= editor.width - 320 && hexFrame.height >= editor.height - 2,
-            "hex view fills the editor beside the inspector: \(hexFrame) in \(editor)")
-        if let table = Self.view(in: editorView, id: "inspectorTable") as? NSTableView {
-            check(table.numberOfRows == 17, "inspector has a row per type: \(table.numberOfRows)")
-            check(
-                table.rows(in: table.visibleRect).length > 5,
-                "inspector rows are visible: \(table.visibleRect)")
-        } else {
-            check(false, "editor has an inspector table")
-        }
+            hexFrame.size == editor.size,
+            "with find bar and inspector hidden the hex view fills the editor: \(hexFrame) in \(editor)"
+        )
         hex.hexView.display()  // drawing asks for the visible bytes in the background
         for _ in 0..<50 where hex.source.cachedBytes(0..<256) == nil { await settle() }
         check(hex.source.cachedBytes(0..<256) != nil, "visible rows were prefetched")
@@ -283,12 +276,21 @@ struct SmokeTest {
         check(field.superview?.superview?.isHidden == true, "Esc closes the find bar")
         check(hex.hexView.highlights.isEmpty, "closing the bar clears the highlights")
         check(
-            dispatch(KeyChord("i", [.command, .option]), in: window), "⌥⌘I toggles the inspector")
+            dispatch(KeyChord("i", [.command, .option]), in: window), "⌥⌘I shows the inspector")
         root.layoutSubtreeIfNeeded()
         check(
-            hex.hexView.frame.size == root.bounds.size,
-            "without bar and inspector the hex view fills the editor: \(hex.hexView.frame)")
+            hex.hexView.frame.width == root.bounds.width - 281
+                && hex.hexView.frame.height == root.bounds.height,
+            "hex view sits beside the inspector: \(hex.hexView.frame)")
+        if let table = Self.view(in: root, id: "inspectorTable") as? NSTableView {
+            check(table.numberOfRows == 17, "inspector has a row per type: \(table.numberOfRows)")
+            check(
+                table.rows(in: table.visibleRect).length > 5,
+                "inspector rows are visible: \(table.visibleRect)")
+        }
         _ = dispatch(KeyChord("i", [.command, .option]), in: window)
+        root.layoutSubtreeIfNeeded()
+        check(hex.hexView.frame.size == root.bounds.size, "⌥⌘I again hides the inspector")
     }
 
     /// M1 targets on a sparse 4 GiB file: open < 100 ms, drawing a frame well under
