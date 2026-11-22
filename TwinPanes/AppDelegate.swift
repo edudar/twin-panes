@@ -253,24 +253,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: Close prompt
 
-    private func askToSave(_ session: DirtySession) async -> CloseDecision {
+    func makeCloseAlert(for session: DirtySession) -> NSAlert {
         let alert = NSAlert()
         let title = session.representative.title
-        let canSave = session.representative.canSave
-        if canSave {
+        if session.representative.canSave {
             alert.messageText = "Do you want to save the changes made to “\(title)”?"
             alert.informativeText = "Your changes will be lost if you don’t save them."
             alert.addButton(withTitle: "Save")
+            alert.addButton(withTitle: "Cancel")
+            let dontSave = alert.addButton(withTitle: "Don’t Save")
+            dontSave.hasDestructiveAction = true
+            dontSave.keyEquivalent = "d"
+            dontSave.keyEquivalentModifierMask = .command
         } else {
             alert.messageText = "Discard the changes made to “\(title)”?"
             alert.informativeText =
                 "This version of Twin Panes can’t save edits yet, so closing discards them."
+            let discard = alert.addButton(withTitle: "Discard Changes")
+            discard.hasDestructiveAction = true
+            discard.keyEquivalent = "d"
+            discard.keyEquivalentModifierMask = .command
+            let cancel = alert.addButton(withTitle: "Cancel")
+            cancel.keyEquivalent = "\u{1b}"
         }
-        alert.addButton(withTitle: "Cancel")
-        let dontSave = alert.addButton(withTitle: canSave ? "Don’t Save" : "Discard Changes")
-        dontSave.keyEquivalent = "d"
-        dontSave.keyEquivalentModifierMask = .command
+        return alert
+    }
 
+    static func closeDecision(
+        for response: NSApplication.ModalResponse, canSave: Bool
+    ) -> CloseDecision {
+        switch (response, canSave) {
+        case (.alertFirstButtonReturn, true): return .save
+        case (.alertThirdButtonReturn, true), (.alertFirstButtonReturn, false): return .discard
+        default: return .cancel
+        }
+    }
+
+    private func askToSave(_ session: DirtySession) async -> CloseDecision {
+        let alert = makeCloseAlert(for: session)
         let response: NSApplication.ModalResponse
         if let window = controller(containing: session.representative.id)?.window {
             if let controller = controller(containing: session.representative.id) {
@@ -281,10 +301,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         } else {
             response = alert.runModal()
         }
-        switch (response, canSave) {
-        case (.alertFirstButtonReturn, true): return .save
-        case (.alertThirdButtonReturn, true), (.alertSecondButtonReturn, false): return .discard
-        default: return .cancel
-        }
+        return Self.closeDecision(for: response, canSave: session.representative.canSave)
     }
 }
