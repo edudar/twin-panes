@@ -77,10 +77,14 @@ Architecture, decisions and milestones are in [PLAN.md](PLAN.md).
 
 `.github/workflows/ci.yml` runs on macOS 15, 26 and 27. Each job runs the
 package tests, builds the app, checks the signed entitlements and runs the smoke
-test. Lint runs on macOS 27. A failed smoke check shows as an annotation on the
-run page.
+test. Lint and a second package run under Thread Sanitizer run on macOS 27. A
+failed smoke check shows as an annotation on the run page.
 
 ## Commits
 
 Keep each commit at most about 250 changed lines and about one thing, so it can
 be read on its own. Every commit should build and pass `swift test`.
+
+The full working rules (test-first order, fixing bugs one at a time, what to verify
+before a commit, documentation and UI conventions) are in [AGENTS.md](../AGENTS.md),
+which coding agents read automatically.
