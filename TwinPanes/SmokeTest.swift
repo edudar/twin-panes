@@ -256,6 +256,10 @@ struct SmokeTest {
         hex.hexView.display()  // drawing asks for the visible bytes in the background
         for _ in 0..<50 where hex.source.cachedBytes(0..<256) == nil { await settle() }
         check(hex.source.cachedBytes(0..<256) != nil, "visible rows were prefetched")
+        // The glyphs really reach the screen: on macOS 27.2 a flipped text matrix drew them
+        // all outside the view, leaving only the cursor box (about 200 pixels).
+        let ink = Self.inkedPixels(in: hex.hexView)
+        check(ink > 5_000, "the hex view draws offsets, hex and text (\(ink) inked pixels)")
 
         hex.hexView.go(to: 0x1041)
         check(hex.hexView.selection.cursor == 0x1041, "go to offset moves the cursor")
@@ -564,6 +568,27 @@ struct SmokeTest {
         } catch {
             return nil
         }
+    }
+
+    /// Renders `view` and counts pixels that differ clearly from its bottom-right corner
+    /// (the background).
+    static func inkedPixels(in view: NSView) -> Int {
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return 0 }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let background = rep.colorAt(x: rep.pixelsWide - 40, y: rep.pixelsHigh - 4)
+        else { return 0 }
+        var count = 0
+        for y in stride(from: 0, to: rep.pixelsHigh, by: 2) {
+            for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
+                guard let color = rep.colorAt(x: x, y: y) else { continue }
+                let difference =
+                    abs(color.redComponent - background.redComponent)
+                    + abs(color.greenComponent - background.greenComponent)
+                    + abs(color.blueComponent - background.blueComponent)
+                if difference > 0.3 { count += 1 }
+            }
+        }
+        return count
     }
 
     static func view(in root: NSView, id: String) -> NSView? {

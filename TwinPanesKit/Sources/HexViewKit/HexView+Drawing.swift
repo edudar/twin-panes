@@ -129,7 +129,6 @@ extension HexView {
         dataGlyphs: inout [CGGlyph], dataPositions: inout [CGPoint]
     ) {
         let baselineY = y + glyphTable.baselineOffset
-        context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
 
         // Offset gutter.
         offsetGlyphs.removeAll(keepingCapacity: true)
@@ -137,11 +136,10 @@ extension HexView {
         let label = layout.offsetLabel(layout.rowStart(row))
         for (cell, byte) in label.utf8.enumerated() {
             offsetGlyphs.append(glyphTable.glyph(for: byte))
-            offsetPositions.append(CGPoint(x: x(cell: cell), y: baselineY))
+            offsetPositions.append(CGPoint(x: x(cell: cell), y: 0))
         }
         context.setFillColor(NSColor.secondaryLabelColor.cgColor)
-        CTFontDrawGlyphs(
-            glyphTable.ctFont, offsetGlyphs, offsetPositions, offsetGlyphs.count, context)
+        drawGlyphs(offsetGlyphs, at: offsetPositions, baseline: baselineY, in: context)
 
         guard count > 0 else { return }
 
@@ -155,24 +153,40 @@ extension HexView {
             if let bytes {
                 let byte = bytes[bytes.startIndex + index]
                 dataGlyphs.append(glyphTable.hexDigits[Int(byte >> 4)])
-                dataPositions.append(CGPoint(x: x(cell: hexCell), y: baselineY))
+                dataPositions.append(CGPoint(x: x(cell: hexCell), y: 0))
                 dataGlyphs.append(glyphTable.hexDigits[Int(byte & 0x0F)])
-                dataPositions.append(CGPoint(x: x(cell: hexCell + 1), y: baselineY))
+                dataPositions.append(CGPoint(x: x(cell: hexCell + 1), y: 0))
                 dataGlyphs.append(glyphTable.textGlyph(for: byte, encoding: encoding))
-                dataPositions.append(CGPoint(x: x(cell: textCell), y: baselineY))
+                dataPositions.append(CGPoint(x: x(cell: textCell), y: 0))
             } else {
                 let dot = glyphTable.placeholder
                 dataGlyphs.append(dot)
-                dataPositions.append(CGPoint(x: x(cell: hexCell), y: baselineY))
+                dataPositions.append(CGPoint(x: x(cell: hexCell), y: 0))
                 dataGlyphs.append(dot)
-                dataPositions.append(CGPoint(x: x(cell: hexCell + 1), y: baselineY))
+                dataPositions.append(CGPoint(x: x(cell: hexCell + 1), y: 0))
                 dataGlyphs.append(dot)
-                dataPositions.append(CGPoint(x: x(cell: textCell), y: baselineY))
+                dataPositions.append(CGPoint(x: x(cell: textCell), y: 0))
             }
         }
         let color = bytes == nil ? NSColor.tertiaryLabelColor : NSColor.labelColor
         context.setFillColor(color.cgColor)
-        CTFontDrawGlyphs(glyphTable.ctFont, dataGlyphs, dataPositions, dataGlyphs.count, context)
+        drawGlyphs(dataGlyphs, at: dataPositions, baseline: baselineY, in: context)
+    }
+
+    /// Draws glyphs whose positions are x offsets on one baseline at `baseline` (view
+    /// coordinates). The view is flipped, so the CTM is flipped back around the baseline
+    /// and the text matrix stays identity: then the positions mean the same whether Core
+    /// Text applies the text matrix to them or not (macOS 27.2 does; a flipped text matrix
+    /// put every glyph above the view, so nothing showed).
+    private func drawGlyphs(
+        _ glyphs: [CGGlyph], at positions: [CGPoint], baseline: Double, in context: CGContext
+    ) {
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.textMatrix = .identity
+        context.translateBy(x: 0, y: baseline)
+        context.scaleBy(x: 1, y: -1)
+        CTFontDrawGlyphs(glyphTable.ctFont, glyphs, positions, glyphs.count, context)
     }
 
     /// Asks the data source for the visible rows plus one screen above and below.
