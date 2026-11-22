@@ -131,21 +131,31 @@ public final class ByteSource: ByteReading {
 
     /// Loads the pages covering `range` on a background queue, then calls `completion`
     /// on the main queue with any error: `.truncated` if the file is now shorter than
-    /// `range`. A newer `prefetch` makes a queued one stop early and complete with nil.
+    /// `range`. When `supersede` is true (the default, used for viewport scrolling), a
+    /// newer superseding prefetch makes queued older ones stop early and complete with nil;
+    /// pass `false` for independent point reads such as the data inspector.
     public func prefetch(
         _ range: Range<UInt64>,
+        supersede: Bool = true,
         completion: @escaping @MainActor @Sendable (ByteSourceError?) -> Void
     ) {
         let range = clamp(range)
-        let request = latestPrefetch.withLock { latest -> UInt64 in
-            latest += 1
-            return latest
+        if range.isEmpty {
+            DispatchQueue.main.async { completion(nil) }
+            return
         }
+        let request: UInt64? =
+            supersede
+            ? latestPrefetch.withLock { latest -> UInt64 in
+                latest += 1
+                return latest
+            }
+            : nil
         ioQueue.async { [self] in
             var failure: ByteSourceError?
             for page in Self.pages(covering: range) {
-                // A newer request (the view scrolled on) makes this one moot.
-                if latestPrefetch.withLock({ $0 }) != request { break }
+                // A newer superseding request (the view scrolled on) makes this one moot.
+                if let request, latestPrefetch.withLock({ $0 }) != request { break }
                 do {
                     let data = try loadPage(page)
                     // The page came back shorter than the part of `range` it should hold.

@@ -62,6 +62,63 @@ import Testing
         #expect(throws: ByteSourceError.openFailed(path: missing.path, errno: ENOENT)) {
             _ = try ByteSource(url: missing)
         }
+        let fifo = dir.appendingPathComponent("pipe")
+        #expect(mkfifo(fifo.path, 0o600) == 0)
+        // Open O_NONBLOCK to avoid hanging? ByteSource opens without O_NONBLOCK, so
+        // keep a writer open on the FIFO while checking ByteSource rejects it.
+        let writer = open(fifo.path, O_RDWR | O_CLOEXEC)
+        defer { if writer >= 0 { close(writer) } }
+        #expect(throws: ByteSourceError.notRegularFile(path: fifo.path, kind: "pipe")) {
+            _ = try ByteSource(url: fifo)
+        }
+        let broken = dir.appendingPathComponent("broken-link")
+        try FileManager.default.createSymbolicLink(at: broken, withDestinationURL: missing)
+        #expect(throws: ByteSourceError.openFailed(path: broken.path, errno: ENOENT)) {
+            _ = try ByteSource(url: broken)
+        }
+        let (target, data) = try makeFile(16, name: "target.bin")
+        let link = dir.appendingPathComponent("file-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        #expect(try ByteSource(url: link).read(0..<16) == data)
+
+        let secret = dir.appendingPathComponent("unreadable.bin")
+        try Data([1, 2, 3]).write(to: secret)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: secret.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: secret.path)
+        }
+        #expect(throws: ByteSourceError.openFailed(path: secret.path, errno: EACCES)) {
+            _ = try ByteSource(url: secret)
+        }
+    }
+
+    @Test func evictsPagesInByteSourceAndReloads() throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let page = ByteSource.pageSize
+        let (url, data) = try makeFile(Int(page) * 3)
+        let source = try ByteSource(url: url, pageCapacity: 2)
+        _ = try source.read(0..<16)
+        _ = try source.read(page..<(page + 16))
+        _ = try source.read((page * 2)..<(page * 2 + 16))
+        #expect(source.cachedPageCount == 2)
+        #expect(source.cachedBytes(0..<16) == nil)
+        #expect(try source.read(0..<16) == data[0..<16])
+    }
+
+    @Test func multiPageTruncationReportsExactAvailableBytes() async throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let page = ByteSource.pageSize
+        let (url, _) = try makeFile(Int(page) * 2)
+        let source = try ByteSource(url: url)
+        let cut = page + 123
+        try FileHandle(forWritingTo: url).truncate(atOffset: cut)
+        #expect(throws: ByteSourceError.truncated(expected: page * 2, available: cut)) {
+            _ = try source.read(0..<(page * 2))
+        }
+        #expect(
+            await prefetch(source, 0..<(page * 2)) == .truncated(expected: page * 2, available: cut)
+        )
     }
 
     @Test func reportsTruncation() throws {
@@ -83,6 +140,24 @@ import Testing
         }
         #expect(error == nil)
         #expect(source.cachedBytes(150_000..<150_100) == data[150_000..<150_100])
+    }
+
+    @Test func emptyFileAndOutOfBoundsPrefetchDoNotTrap() async throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (emptyURL, _) = try makeFile(0, name: "empty.bin")
+        let empty = try ByteSource(url: emptyURL)
+        #expect(empty.length == 0)
+        #expect(try empty.read(0..<0).isEmpty)
+        #expect(empty.cachedBytes(0..<0) == Data())
+        #expect(try empty.readSequential(0..<0).isEmpty)
+        #expect(await prefetch(empty, 0..<0) == nil)
+        #expect(await prefetch(empty, 0..<16) == nil)
+
+        let page = ByteSource.pageSize
+        let (alignedURL, _) = try makeFile(Int(page), name: "aligned.bin")
+        let aligned = try ByteSource(url: alignedURL)
+        #expect(await prefetch(aligned, page..<page) == nil)
+        #expect(await prefetch(aligned, page..<page + 16) == nil)
     }
 
     func prefetch(_ source: ByteSource, _ range: Range<UInt64>) async -> ByteSourceError? {
@@ -135,6 +210,31 @@ import Testing
         #expect(source.cachedBytes(ranges[0]) == nil)
         #expect(source.cachedBytes(ranges[1]) == nil)
         #expect(source.cachedBytes(ranges[2]) != nil)
+    }
+
+    @MainActor @Test func nonSupersedingPrefetchCoexistsWithViewportPrefetch() async throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let page = ByteSource.pageSize
+        let (url, _) = try makeFile(Int(page) * 25)
+        let source = try ByteSource(url: url)
+        let pointRange: Range<UInt64> = 0..<16
+        let viewportRange: Range<UInt64> = (page * 20)..<(page * 22)
+        final class Counter { var done = 0 }
+        let counter = Counter()
+        source.holdIOForTesting()
+        await withCheckedContinuation { (finish: CheckedContinuation<Void, Never>) in
+            source.prefetch(pointRange, supersede: false) { _ in
+                counter.done += 1
+                if counter.done == 2 { finish.resume() }
+            }
+            source.prefetch(viewportRange, supersede: true) { _ in
+                counter.done += 1
+                if counter.done == 2 { finish.resume() }
+            }
+            source.releaseIOForTesting()
+        }
+        #expect(source.cachedBytes(pointRange) != nil)
+        #expect(source.cachedBytes(viewportRange) != nil)
     }
 
     /// PLAN.md §7: several threads read, look up the cache, scan and prefetch at once,
