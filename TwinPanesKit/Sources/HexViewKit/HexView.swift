@@ -8,8 +8,19 @@ public protocol HexViewDataSource: AnyObject {
     var length: UInt64 { get }
     func cachedBytes(_ range: Range<UInt64>) -> Data?
     func prefetch(_ range: Range<UInt64>, completion: @escaping @MainActor (Error?) -> Void)
-    /// Blocking read, used for copying a selection.
+    /// Blocking read, used for small synchronous reads.
     func read(_ range: Range<UInt64>) throws -> Data
+    /// Uncached read for copying a selection without evicting the view's page cache.
+    func readForCopy(
+        _ range: Range<UInt64>, completion: @escaping @MainActor (Result<Data, Error>) -> Void)
+}
+
+extension HexViewDataSource {
+    public func readForCopy(
+        _ range: Range<UInt64>, completion: @escaping @MainActor (Result<Data, Error>) -> Void
+    ) {
+        completion(Result { try read(range) })
+    }
 }
 
 @MainActor
@@ -20,10 +31,13 @@ public protocol HexViewDelegate: AnyObject {
     /// Loading the bytes to show failed. Called once per failed range; the view shows
     /// placeholders and doesn't retry that range until it scrolls or reloads.
     func hexView(_ view: HexView, didFailToRead error: Error)
+    /// A background prefetch landed and the view is about to redraw with the new bytes.
+    func hexViewDidLoadBytes(_ view: HexView)
 }
 
 extension HexViewDelegate {
     public func hexView(_ view: HexView, didFailToRead error: Error) {}
+    public func hexViewDidLoadBytes(_ view: HexView) {}
 }
 
 /// Virtualized hex/text view (PLAN.md §4.4). The view is window-sized and draws only
@@ -55,6 +69,7 @@ public final class HexView: NSView {
     public internal(set) var activeColumn: HexLayout.Column = .hex
 
     var position = HexScrollPosition(rowCount: 1, rowHeight: 16, viewHeight: 0)
+    var glyphTable = HexGlyphTable(font: .monospacedSystemFont(ofSize: 13, weight: .regular))
     var charWidth: Double = 8
     var rowHeight: Double = 16
     let inset = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 4)
@@ -105,9 +120,9 @@ public final class HexView: NSView {
     }
 
     func relayout(keepingRow: Bool) {
+        glyphTable = HexGlyphTable(font: font)
         let ascent = Double(font.ascender), descent = Double(-font.descender)
-        charWidth = Double(
-            ("0" as NSString).size(withAttributes: [.font: font]).width)
+        charWidth = glyphTable.advance
         rowHeight = (ascent + descent + Double(font.leading)).rounded(.up) + 3
         let textWidth = Double(bounds.width - scrollerWidth) - inset.left - inset.right
         let topOffset = keepingRow ? layout.rowStart(position.topRow) : 0
@@ -174,13 +189,15 @@ public final class HexView: NSView {
     }
 
     /// Selects `range` and scrolls its start into view, a third from the top if it was
-    /// off screen.
+    /// off screen, or minimally if its row was partly clipped.
     public func select(_ range: Range<UInt64>) {
         selection.select(range)
         let row = layout.row(of: range.lowerBound)
         if !position.visibleRows.contains(row) {
             let lead = UInt64(max(0, position.viewHeight / rowHeight / 3))
             position.scrollToTop(row: row >= lead ? row - lead : 0)
+        } else {
+            position.reveal(row: row)
         }
         selectionChanged(reveal: false)
     }

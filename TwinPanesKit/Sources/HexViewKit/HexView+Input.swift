@@ -155,12 +155,17 @@ extension HexView: NSMenuItemValidation {
             delegate?.hexView(self, selectionTooLargeToCopy: range)
             return
         }
-        do {
-            let text = HexCopy.string(try dataSource.read(range), as: format)
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
-        } catch {
-            NSSound.beep()
+        dataSource.readForCopy(range) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let data):
+                let text = HexCopy.string(data, as: format)
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            case .failure(let error):
+                NSSound.beep()
+                self.delegate?.hexView(self, didFailToRead: error)
+            }
         }
     }
 

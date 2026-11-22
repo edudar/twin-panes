@@ -1,9 +1,17 @@
 import AppKit
+import CoreText
 
 extension HexView {
     public override func draw(_ dirtyRect: NSRect) {
         NSColor.textBackgroundColor.setFill()
         dirtyRect.intersection(bounds).fill()
+
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let contentRect = NSRect(
+            x: 0, y: 0, width: max(0, bounds.width - scrollerWidth), height: bounds.height)
+        context.saveGState()
+        context.clip(to: contentRect)
+        defer { context.restoreGState() }
 
         let rows = position.visibleRows
         let first = layout.rowStart(rows.lowerBound)
@@ -19,6 +27,17 @@ extension HexView {
         if visible == nil { requestPrefetch(rows) }
 
         let isFocused = window?.firstResponder === self && window?.isKeyWindow == true
+        // Pre-sized buffers shared across all visible rows for Core Text drawing.
+        let maxDataGlyphs = layout.bytesPerRow * 3
+        var offsetGlyphs: [CGGlyph] = []
+        var offsetPositions: [CGPoint] = []
+        offsetGlyphs.reserveCapacity(layout.offsetCells)
+        offsetPositions.reserveCapacity(layout.offsetCells)
+        var dataGlyphs: [CGGlyph] = []
+        var dataPositions: [CGPoint] = []
+        dataGlyphs.reserveCapacity(maxDataGlyphs)
+        dataPositions.reserveCapacity(maxDataGlyphs)
+
         for (index, row) in rows.enumerated() {
             let y = inset.top + Double(index) * rowHeight - position.topRowInset
             let start = layout.rowStart(row)
@@ -35,7 +54,10 @@ extension HexView {
                     } : Data()
             }
             drawSelection(row: row, y: y, focused: isFocused)
-            drawRow(row: row, bytes: bytes, count: Int(rowEnd - start), y: y)
+            drawRow(
+                row: row, bytes: bytes, count: Int(rowEnd - start), y: y, in: context,
+                offsetGlyphs: &offsetGlyphs, offsetPositions: &offsetPositions,
+                dataGlyphs: &dataGlyphs, dataPositions: &dataPositions)
         }
     }
 
@@ -88,57 +110,72 @@ extension HexView {
         ).fill()
     }
 
-    private func drawRow(row: UInt64, bytes: Data?, count: Int, y: Double) {
-        let baseline = NSPoint(x: 0, y: y + 1.5)
-        let primary: [NSAttributedString.Key: Any] = [
-            .font: font, .foregroundColor: NSColor.labelColor,
-        ]
-        let secondary: [NSAttributedString.Key: Any] = [
-            .font: font, .foregroundColor: NSColor.secondaryLabelColor,
-        ]
-        let faint: [NSAttributedString.Key: Any] = [
-            .font: font, .foregroundColor: NSColor.tertiaryLabelColor,
-        ]
-        (layout.offsetLabel(layout.rowStart(row)) as NSString)
-            .draw(at: NSPoint(x: x(cell: 0), y: baseline.y), withAttributes: secondary)
+    private func drawRow(
+        row: UInt64, bytes: Data?, count: Int, y: Double, in context: CGContext,
+        offsetGlyphs: inout [CGGlyph], offsetPositions: inout [CGPoint],
+        dataGlyphs: inout [CGGlyph], dataPositions: inout [CGPoint]
+    ) {
+        let baselineY = y + glyphTable.baselineOffset
+        context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+
+        // Offset gutter.
+        offsetGlyphs.removeAll(keepingCapacity: true)
+        offsetPositions.removeAll(keepingCapacity: true)
+        let label = layout.offsetLabel(layout.rowStart(row))
+        for (cell, byte) in label.utf8.enumerated() {
+            offsetGlyphs.append(glyphTable.glyph(for: byte))
+            offsetPositions.append(CGPoint(x: x(cell: cell), y: baselineY))
+        }
+        context.setFillColor(NSColor.secondaryLabelColor.cgColor)
+        CTFontDrawGlyphs(
+            glyphTable.ctFont, offsetGlyphs, offsetPositions, offsetGlyphs.count, context)
+
         guard count > 0 else { return }
 
-        // Build each column as one string with spaces where the layout puts gaps.
-        let hexWidth = layout.hexCell(count - 1) + 2 - layout.hexStart
-        var hex = [Character](repeating: " ", count: hexWidth)
-        var text = [Character](repeating: " ", count: count)
-        let digits = Array("0123456789ABCDEF")
-        let dot: Character = "·"
+        // Hex and text columns in one Core Text draw call.
+        dataGlyphs.removeAll(keepingCapacity: true)
+        dataPositions.removeAll(keepingCapacity: true)
+        let encoding = options.textEncoding
         for index in 0..<count {
-            let at = layout.hexCell(index) - layout.hexStart
+            let hexCell = layout.hexCell(index)
+            let textCell = layout.textCell(index)
             if let bytes {
                 let byte = bytes[bytes.startIndex + index]
-                hex[at] = digits[Int(byte >> 4)]
-                hex[at + 1] = digits[Int(byte & 0x0F)]
-                text[index] = options.textEncoding.character(for: byte) ?? "."
+                dataGlyphs.append(glyphTable.hexDigits[Int(byte >> 4)])
+                dataPositions.append(CGPoint(x: x(cell: hexCell), y: baselineY))
+                dataGlyphs.append(glyphTable.hexDigits[Int(byte & 0x0F)])
+                dataPositions.append(CGPoint(x: x(cell: hexCell + 1), y: baselineY))
+                dataGlyphs.append(glyphTable.textGlyph(for: byte, encoding: encoding))
+                dataPositions.append(CGPoint(x: x(cell: textCell), y: baselineY))
             } else {
-                hex[at] = dot
-                hex[at + 1] = dot
-                text[index] = dot
+                let dot = glyphTable.placeholder
+                dataGlyphs.append(dot)
+                dataPositions.append(CGPoint(x: x(cell: hexCell), y: baselineY))
+                dataGlyphs.append(dot)
+                dataPositions.append(CGPoint(x: x(cell: hexCell + 1), y: baselineY))
+                dataGlyphs.append(dot)
+                dataPositions.append(CGPoint(x: x(cell: textCell), y: baselineY))
             }
         }
-        let style = bytes == nil ? faint : primary
-        (String(hex) as NSString)
-            .draw(at: NSPoint(x: x(cell: layout.hexStart), y: baseline.y), withAttributes: style)
-        (String(text) as NSString)
-            .draw(at: NSPoint(x: x(cell: layout.textStart), y: baseline.y), withAttributes: style)
+        let color = bytes == nil ? NSColor.tertiaryLabelColor : NSColor.labelColor
+        context.setFillColor(color.cgColor)
+        CTFontDrawGlyphs(glyphTable.ctFont, dataGlyphs, dataPositions, dataGlyphs.count, context)
     }
 
     /// Asks the data source for the visible rows plus one screen above and below.
     func requestPrefetch(_ rows: Range<UInt64>) {
         guard let dataSource else { return }
+        let visible =
+            layout.rowStart(rows.lowerBound)..<min(layout.length, layout.rowStart(rows.upperBound))
         let margin = UInt64(rows.count)
         let from = rows.lowerBound >= margin ? rows.lowerBound - margin : 0
         let to = min(layout.rowCount, rows.upperBound + margin)
         let range = layout.rowStart(from)..<min(layout.length, layout.rowStart(to))
-        guard !range.isEmpty, range != failedPrefetch,
-            pendingPrefetch.map({ !$0.contains(range.lowerBound) }) ?? true
-        else { return }
+        let covered =
+            pendingPrefetch.map {
+                $0.lowerBound <= visible.lowerBound && visible.upperBound <= $0.upperBound
+            } ?? false
+        guard !range.isEmpty, range != failedPrefetch, !covered else { return }
         pendingPrefetch = range
         dataSource.prefetch(range) { [weak self] error in
             guard let self else { return }
@@ -150,6 +187,7 @@ extension HexView {
             } else {
                 self.failedPrefetch = nil
                 self.needsDisplay = true
+                self.delegate?.hexViewDidLoadBytes(self)
             }
         }
     }
