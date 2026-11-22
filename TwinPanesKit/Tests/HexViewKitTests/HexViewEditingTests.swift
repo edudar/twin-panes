@@ -85,6 +85,46 @@ import Testing
         #expect(byte(999) == 0x79)
         #expect(view.selection.cursor == 999)
         #expect(source.data.count == 1000)
+
+        // Two-digit hex entry at the last byte writes the full byte and stays put.
+        view.insertTab(nil)
+        view.insertText("A")
+        #expect(view.pendingNibble == 999 && view.selection.cursor == 999)
+        view.insertText("C")
+        #expect(byte(999) == 0xAC && view.pendingNibble == nil && view.selection.cursor == 999)
+    }
+
+    @Test func emptyFileTabReloadAndDeleteKeysAreSafe() {
+        // Tab and reloadData drop pendingNibble; Backspace/Delete are no-ops.
+        view.go(to: 5)
+        view.insertText("A")
+        #expect(view.pendingNibble == 5)
+        view.insertTab(nil)
+        #expect(view.pendingNibble == nil)
+        view.insertTab(nil)
+        view.insertText("B")
+        #expect(view.pendingNibble == 5)
+        view.reloadData()
+        #expect(view.pendingNibble == nil)
+
+        view.go(to: 5)
+        let before = byte(5)
+        view.deleteBackward(nil)
+        view.deleteForward(nil)
+        #expect(byte(5) == before && view.selection.cursor == 5)
+
+        // Empty (0-byte) file accepts no edits in either column.
+        let emptySource = FakeHexSource(count: 0)
+        emptySource.cached = true
+        let emptySpy = DelegateSpy()
+        emptySpy.source = emptySource
+        let emptyView = HexView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        emptyView.delegate = emptySpy
+        emptyView.dataSource = emptySource
+        emptyView.insertText("A")
+        emptyView.insertTab(nil)
+        emptyView.insertText("X")
+        #expect(emptySpy.writes.isEmpty)
     }
 
     @Test func hexTypingFallsBackToReadWhenUncachedAndReportsErrors() {
@@ -115,12 +155,12 @@ import Testing
     }
 
     /// Drawing the changed-bytes fill with ranges past the end and short data must not trap.
-    @Test func drawsModifiedRangesEvenOnShortData() {
+    @Test func drawsModifiedRangesEvenOnShortData() throws {
         source.modified = [0..<5, 990..<5000]
-        let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
-        if let rep { view.cacheDisplay(in: view.bounds, to: rep) }
+        let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
         view.moveToEndOfDocument(nil)
         source.shortBy = 40
-        if let rep { view.cacheDisplay(in: view.bounds, to: rep) }
+        view.cacheDisplay(in: view.bounds, to: rep)
     }
 }

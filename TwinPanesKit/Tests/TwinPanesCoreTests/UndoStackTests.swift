@@ -83,30 +83,44 @@ struct UndoStackTests {
         }
         var stack = UndoStack()
         var tree = PieceTree(originalLength: 64)
-        var history = [original]  // versions undo can reach, oldest first
+        var selection: Range<UInt64> = 0..<1
+        var history: [(bytes: [UInt8], selection: Range<UInt64>)] = [(original, selection)]
         var position = 0  // index in `history` of the current version
         for step in 0..<2000 {
             let context: Comment = "seed \(seed), step \(step)"
             switch Int.random(in: 0..<4, using: &rng) {
             case 0 where stack.canUndo:
-                tree = try undo(&stack).tree
+                let restored = try undo(&stack)
+                tree = restored.tree
+                selection = restored.selection
                 position -= 1
             case 1 where stack.canRedo:
-                tree = try redo(&stack).tree
+                let restored = try redo(&stack)
+                tree = restored.tree
+                selection = restored.selection
                 position += 1
             default:
                 let offset = UInt64.random(in: 0..<64, using: &rng)
                 let next = tree.overwriting(
                     at: offset, with: Piece(.add, offset: UInt64(add.count), length: 1))
                 add.append(UInt8.random(in: 0...255, using: &rng))
+                let afterSelection = min(offset + 1, 63)..<(min(offset + 1, 63) + 1)
+                let coalescing = Bool.random(using: &rng) && stack.canUndo
                 stack.record(
-                    before: State(tree: tree, selection: 0..<0),
-                    after: State(tree: next, selection: 0..<0))
+                    before: State(tree: tree, selection: selection),
+                    after: State(tree: next, selection: afterSelection),
+                    coalescing: coalescing)
                 tree = next
-                history = Array(history[...position]) + [bytes(tree)]
-                position += 1
+                selection = afterSelection
+                if coalescing {
+                    history = Array(history[..<position]) + [(bytes(tree), selection)]
+                } else {
+                    history = Array(history[...position]) + [(bytes(tree), selection)]
+                    position += 1
+                }
             }
-            #expect(bytes(tree) == history[position], context)
+            #expect(bytes(tree) == history[position].bytes, context)
+            #expect(selection == history[position].selection, context)
             #expect(
                 stack.canUndo == (position > 0) && stack.canRedo == (position < history.count - 1),
                 context)

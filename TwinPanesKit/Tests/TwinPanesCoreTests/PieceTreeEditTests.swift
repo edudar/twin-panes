@@ -43,6 +43,19 @@ struct PieceTreeEditTests {
             Piece(.add, offset: 0, length: 5), at: 300)
         #expect(inserted.pieceCount == 3)
         #expect(inserted.removing(300..<305).pieceCount == 1)
+
+        // Right-neighbour coalescing: inserting right before a piece it continues merges them.
+        let rightMerged = PieceTree(originalLength: 10)
+            .inserting(Piece(.add, offset: 5, length: 2), at: 4)
+            .inserting(Piece(.add, offset: 3, length: 2), at: 4)
+        #expect(rightMerged.pieceCount == 3)
+        #expect(rightMerged.pieces(in: 4..<8) == [Piece(.add, offset: 3, length: 4)])
+
+        // Zero-length replace and deleting the whole tree keep invariants intact.
+        let unchanged = rightMerged.replacing(4..<4, with: nil)
+        #expect(unchanged.length == rightMerged.length && unchanged.isValid())
+        let empty = rightMerged.removing(0..<rightMerged.length)
+        #expect(empty.length == 0 && empty.pieceCount == 0 && empty.isValid())
     }
 
     /// Random overwrites, inserts and deletes against a flat byte array, with snapshots

@@ -1,10 +1,17 @@
 import AppKit
 import Foundation
-import HexViewKit
 import Testing
 import TwinPanesCore
+import WorkspaceKit
 
 @testable import EditorKit
+@testable import HexViewKit
+
+@MainActor
+private final class StatusSpy: WorkspaceHost {
+    var messages: [String] = []
+    func showStatus(_ message: String) { messages.append(message) }
+}
 
 @MainActor
 @Suite(.serialized) struct HexEditorEditingTests {
@@ -159,6 +166,49 @@ import TwinPanesCore
 
         // A follow-up Find Next searches the edited snapshot (where "30 31" is now gone).
         controller.searchSourceOverride = nil
+        controller.find(.forward)
+        try await waitForSearch(controller)
+        #expect(controller.findBar.statusLabel.stringValue == "Not found")
+    }
+
+    @Test func inspectorFindAndUnencodableStatusTrackEdits() async throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        let item = try makeItem()
+        let controller = item.controller
+        let host = StatusSpy()
+        item.host = host
+        controller.toggleInspector(nil)
+
+        func uint8Value() -> String? {
+            controller.inspector.rows.first { $0.name == "UInt8" }?.value
+        }
+
+        // Typing updates the data inspector live; undo and redo update it back.
+        item.hexView.go(to: 0x10)
+        #expect(uint8Value() == String(0x10))
+        item.hexView.insertText("A")  // high nibble: 0x10 -> 0xA0, cursor stays at 0x10
+        #expect(uint8Value() == String(0xA0))
+        controller.undo(nil)
+        #expect(uint8Value() == String(0x10))
+        controller.redo(nil)
+        #expect(uint8Value() == String(0xA0))
+
+        // Unencodable character in text column reports a status message.
+        item.hexView.insertTab(nil)
+        item.hexView.insertText("é")
+        #expect(host.messages.last?.contains("ASCII") == true)
+
+        // UI Find locates newly typed bytes and stops matching overwritten bytes.
+        item.hexView.insertTab(nil)
+        item.hexView.go(to: 0x20)
+        item.hexView.insertText("DEAD")
+        controller.findBar.kind = .hex
+        controller.findBar.field.stringValue = "DE AD"
+        controller.findAll()
+        try await waitForSearch(controller)
+        #expect(item.hexView.highlights == [0x20..<0x22])
+
+        controller.findBar.field.stringValue = "20 21"
         controller.find(.forward)
         try await waitForSearch(controller)
         #expect(controller.findBar.statusLabel.stringValue == "Not found")
