@@ -206,7 +206,9 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
                 let error = Self.write(source, range: range, to: destination)
                 await MainActor.run { [weak self] in
                     self?.item.host?.showStatus(
-                        error.map { "Saving failed: \($0.localizedDescription)" }
+                        error.map {
+                            "Saving failed: \(($0 as? ByteSourceError)?.description ?? $0.localizedDescription)"
+                        }
                             ?? "Saved \(range.count.formatted()) bytes to \(destination.lastPathComponent)"
                     )
                 }
@@ -214,22 +216,14 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         }
     }
 
-    /// Streams `range` to `destination` in 1 MB chunks through the uncached path.
+    /// Saves `range` of `source` to `destination`; returns the error, if any.
     nonisolated static func write(
         _ source: ByteSource, range: Range<UInt64>, to destination: URL
     )
         -> Error?
     {
         do {
-            FileManager.default.createFile(atPath: destination.path, contents: nil)
-            let handle = try FileHandle(forWritingTo: destination)
-            defer { try? handle.close() }
-            var offset = range.lowerBound
-            while offset < range.upperBound {
-                let end = min(range.upperBound, offset + 1 << 20)
-                try handle.write(contentsOf: try source.readSequential(offset..<end))
-                offset = end
-            }
+            try source.write(range, to: destination)
             return nil
         } catch {
             return error
