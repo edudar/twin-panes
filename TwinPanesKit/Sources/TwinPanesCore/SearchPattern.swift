@@ -44,14 +44,40 @@ public struct SearchPattern: Equatable, Sendable {
 
     public let elements: [Element]
 
-    /// The first exact position, which the search finds with `memchr`.
+    /// The exact position whose byte is rarest by `commonness(of:)` (the first, on a
+    /// tie), which the search finds with `memchr`; nil when every position folds case.
     let anchor: Int?
 
     public init(elements: [Element]) throws {
         guard !elements.isEmpty else { throw ParseError.empty }
         guard elements.count <= Self.maxLength else { throw ParseError.tooLong }
         self.elements = elements
-        self.anchor = elements.firstIndex(where: \.isExact)
+        // `min(by:)` keeps the first of equal elements, so ties go to the earliest.
+        self.anchor = elements.indices.filter { elements[$0].isExact }.min {
+            Self.commonness(of: elements[$0].byte) < Self.commonness(of: elements[$1].byte)
+        }
+    }
+
+    /// Lowercase letters from most to least common in English text.
+    private static let letterOrder = Array("etaoinshrdlcumwfgypbvkjxqz".utf8)
+
+    /// A fixed ranking of how often `byte` turns up in typical files: higher is more
+    /// common. Zero (padding, UTF-16 high bytes), 0xFF and space top it, then lowercase
+    /// letters by English frequency, then other text bytes; non-ASCII bytes rank lowest.
+    static func commonness(of byte: UInt8) -> Int {
+        switch byte {
+        case 0x00: return 255
+        case 0xFF: return 250
+        case 0x20: return 245
+        case UInt8(ascii: "a")...UInt8(ascii: "z"):
+            return 240 - letterOrder.firstIndex(of: byte)!
+        case 0x0A, 0x0D, 0x09: return 190
+        case UInt8(ascii: "0")...UInt8(ascii: "9"): return 180
+        case UInt8(ascii: "A")...UInt8(ascii: "Z"): return 170
+        case 0x21...0x7E: return 150
+        case 0x01...0x1F, 0x7F: return 120
+        default: return 100
+        }
     }
 
     public init(bytes: [UInt8]) throws {

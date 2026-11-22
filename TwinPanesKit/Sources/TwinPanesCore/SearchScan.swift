@@ -112,7 +112,8 @@ struct SearchScan {
     }
 
     /// Matches in `buffer` starting in `from..<before`; `body` returns the next index to
-    /// look at, or nil to stop. Finds the anchor byte with `memchr`, then verifies.
+    /// look at, or nil to stop. Finds the anchor byte with `memchr`, then verifies; with no
+    /// anchor, finds either case of the first byte the same way.
     static func matches(
         _ pattern: SearchPattern, in buffer: UnsafeRawBufferPointer, before limit: Int,
         from start: Int, _ body: (Int) -> Int?
@@ -142,13 +143,27 @@ struct SearchScan {
                 }
             }
         } else {
-            while i < last {
-                if verify(i) {
-                    guard let next = body(i) else { return }
-                    i = max(next, i + 1)
+            // Every position folds case: find the first element's two bytes with one
+            // `memchr` each, keeping each hit until the scan passes it.
+            let first = elements[0]
+            @inline(__always) func find(_ byte: UInt8, from i: Int) -> Int {
+                guard let hit = memchr(bytes + i, Int32(byte), last - i) else { return last }
+                return bytes.distance(to: hit.assumingMemoryBound(to: UInt8.self))
+            }
+            var nextByte = find(first.byte, from: i)
+            var nextAlternative = find(first.alternative, from: i)
+            while true {
+                if nextByte < i { nextByte = find(first.byte, from: i) }
+                if nextAlternative < i { nextAlternative = find(first.alternative, from: i) }
+                let at = min(nextByte, nextAlternative)
+                guard at < last else { return }
+                if verify(at) {
+                    guard let next = body(at) else { return }
+                    i = max(next, at + 1)
                 } else {
-                    i += 1
+                    i = at + 1
                 }
+                guard i < last else { return }
             }
         }
     }
