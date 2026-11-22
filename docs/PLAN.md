@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.17 (2026-11-22). Living document; requirements will keep growing.
+Status: draft v0.18 (2026-11-22). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -28,8 +28,8 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D12 | The editor has three modes — **Hex, Plain text, Markdown** — with find/replace inside the file being edited in every mode | See §4.10. Text editing needs insert/delete, so insert/delete (M8) must land before the text modes (M9a). |
 | D13 | Public GitHub repo `edudar/twin-panes` (was `edudar/filer` until 2026-11-20), licence **Apache-2.0** | Free GitHub Actions minutes on macOS runners. Apache-2.0 is App Store–compatible. Never commit signing secrets — use GitHub encrypted secrets for CI signing later. |
 | D14 | The editor opens **regular files only** | No block devices, no packages as files. Files without write permission, locked (`uchg`) or root-owned open read-only; no privileged save. |
-| D15 | **Unsaved edits survive a crash**: the add buffer is always a file, and edit operations are journaled and replayed on relaunch | See §4.2. Lands with sessions in M3b. A recovered session has its edits but no undo history. The guarantee holds only where the bytes the edits sit on are durably kept (a clone or private copy); elsewhere it is narrowed and the UI says so (§4.1). |
-| D16 | **APFS clone at open** protects unsaved edits from external modification | See §4.1. Where cloning isn't possible (non-APFS, or a volume the sandbox can't write to), fall back to detect-and-warn. |
+| D15 | **Unsaved edits survive a crash**: the add buffer is always a file, and edit operations are journaled and replayed on relaunch | See §4.2. Lands in M3c, after sessions (M3b). A recovered session has its edits but no undo history. The guarantee holds only where the bytes the edits sit on are durably kept (a clone or private copy); elsewhere it is narrowed and the UI says so (§4.1). |
+| D16 | **APFS clone at the first edit** protects unsaved edits from external modification (was "at open" until 2026-11-22; viewing never writes) | See §4.1; lands in M3c. Where cloning isn't possible (non-APFS, or a volume the sandbox can't write to), fall back to detect-and-warn. |
 | D17 | **Two save strategies, both crash-safe.** Preferred: clone the original to a staging file, patch the staging file, coordinated replace. Fallback where replacement isn't possible or inode identity must be kept: in-place patch with a durable journal and an explicit commit record. | See §4.3. Which strategy applies is decided per volume and grant type from the M0 spike's capability matrix. |
 | D18 | Hex display settings (offset base, byte grouping, text-column encoding) are **user-selectable view options** | See §4.4. |
 | D19 | Out of scope for now: **accessibility** (VoiceOver for custom views) and **localization**. Hex replace arrives with M9a, after insert/delete, so it is any-length from the start | Revisit after the daily-driver milestones. |
@@ -40,7 +40,7 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D24 | **One app icon: Twin Panes, Navy + coral**, as an Icon Composer `.icon` with default, dark, clear and tinted styles. Byte Panes and the Midnight mint palette stay as reference designs; no in-app icon picker | See §4.12. macOS can't switch an app's icon outside a running session, so a picker isn't worth it. Shipped in M0. |
 | D25 | **The app is named Twin Panes** (was Filer until 2026-11-20) | Display and product name "Twin Panes"; project, target and scheme `TwinPanes`; package `TwinPanesKit`; core module `TwinPanesCore`; bundle ID per D11. |
 | D26 | **Piece tree = persistent AVL with join/split** (M3a, 2026-11-22) | Immutable `final class` nodes caching height, length and piece count; every edit is split + join, copying O(log n) nodes, so a snapshot or undo entry is an old root. Adjacent pieces that continue each other in one source merge. Chosen over a treap (random shape, harder to replay) and a B-tree (more code). See §4.2. |
-| D27 | **The add buffer is a file from M3a on** | An append-only temp file with the open partial page and an LRU of full pages in memory; bytes never change once written, so snapshots read it from any thread. M3b moves it into the session folder. See §4.2. |
+| D27 | **The add buffer is a file from M3a on** | An append-only temp file with the open partial page and an LRU of full pages in memory; bytes never change once written, so snapshots read it from any thread. M3c moves it into the session folder. See §4.2. |
 | D28 | **Edit model in TwinPanesCore, undo held by the tab** | `EditBuffer` (original + add buffer + current tree) hands out `Sendable` `EditSnapshot`s that are `ByteReading`; the `UndoStack` sits on the editor item because entries carry its selection. Undo/Redo are ordinary `undo:`/`redo:` actions on the editor's view controller, not `NSUndoManager`. M3b's `EditorSession` wraps these. |
 | D29 | **Closing an edited tab before saving exists** | `WorkspaceItem.canSave` (default true); when false the close sheet offers only Discard Changes and Cancel. The hex editor returns false until M3b. |
 
@@ -74,7 +74,7 @@ content; the `M0` rows exist now.
 | EditorKit | `TwinPanesKit/Sources/EditorKit` | M1 | the editor item: mode switcher, find bar; hosts the mode views over one `EditorSession` |
 | BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b | the browser tab: folder listing, navigation, folder access; later (M4–M7) async listing, live updates, tabs per panel, operations queue, preview pane |
 | TextEditKit | `TwinPanesKit/Sources/TextEditKit` | M9 | plain-text and Markdown modes, large-text viewer |
-| SandboxProbe | `TwinPanesKit/Sources/SandboxProbe` | M0, M3b | Foundation-only probes for the sandbox spike (§5); only the app's Debug menu uses it. Stays until the M3b volume checks (external drives) are done, then goes away with that menu |
+| SandboxProbe | `TwinPanesKit/Sources/SandboxProbe` | M0, M3c | Foundation-only probes for the sandbox spike (§5); only the app's Debug menu uses it. Stays until the M3c volume checks (external drives) are done, then goes away with that menu |
 
 `EditorKit`, `HexViewKit` and `TextEditKit` are empty modules in M0; they exist so
 the dependency rules below are enforced by `Package.swift` from the first commit.
@@ -107,8 +107,8 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `AddBuffer` | M3a | append-only file of typed and pasted bytes, with in-memory recent pages (D27) |
 | `EditBuffer`, `EditSnapshot` | M3a | one file's original + add buffer + current tree; immutable `Sendable` snapshots that implement `ByteReading` (D28) |
 | `UndoStack` | M3a | stack of earlier piece-tree roots plus selection, with coalescing |
-| `EditorSession`, `SessionRegistry` | M3b | per-file session: dirty state, save/revert, file identity, backing generations, crash journal, security scope |
-| `Saver` | M3b | save strategy A (clone, patch, replace) and B (in place + journal) (§4.3) |
+| `EditorSession`, `SessionRegistry` | M3b, M3c | per-file session: dirty state, save/revert, file identity, security scope (M3b); backing generations, crash journal (M3c) |
+| `Saver` | M3b, M3c | save strategy A (clone, patch, replace) in M3b and B (in place + journal) in M3c (§4.3) |
 
 - **Project layout (D20):**
 
@@ -186,8 +186,10 @@ opening an editor from the browser) goes through a protocol or factory defined i
   size and mtime against what the save just wrote before raising anything.
 - **External changes with unsaved edits.** Pieces reference ranges of the original
   file; if another process rewrites it, unsaved edits silently sit on top of
-  different bytes. **(D16)** `clonefile(2)` the original at open (instant, no extra
-  space until it diverges) and have original-file pieces reference the clone.
+  different bytes. **(D16)** `clonefile(2)` the original at the first edit (instant, no
+  extra space until it diverges; viewing never writes, and a clean session just reloads
+  on a change; decided 2026-11-22, docs/plans/M3c.md) and have original-file pieces
+  reference the clone.
   Policy when a change is detected: clean session → reload silently; dirty session →
   sheet with Keep mine / Reload / Save As.
   - **Clone location.** Clones must be on the same volume as the original and must
@@ -200,7 +202,7 @@ opening an editor from the browser) goes through a protocol or factory defined i
       isn't possible (non-APFS, or a sandboxed app with only file-level access can't
       create anything there), fall back to detect-and-warn and journal without a
       clone.
-    - The boot volume was checked in the M0 spike. The M3b spike checks external
+    - The boot volume was checked in the M0 spike. The M3c spike checks external
       APFS, HFS+ and exFAT; SMB and other network volumes wait for M13+.
   - **Backing generations.** An immutable piece tree only freezes *references*; the
     bytes stay stable only if the files they point into stay stable. Every file a
@@ -231,10 +233,10 @@ opening an editor from the browser) goes through a protocol or factory defined i
 - **Persistent (immutable, structurally shared) tree.** Each edit produces a new root;
   taking a snapshot is O(1). Search, save and the large-text line indexer read a
   `Sendable` snapshot while the user keeps editing. Decide and prototype before M3a.
-- **Add buffer is always a file** (from M3b), in the session's directory, read
-  through the same page cache as the original. Pasting or inserting a 1 GB blob never
-  lives in RAM, and the same file is what crash recovery replays against. No
-  in-memory phase, no spill threshold.
+- **Add buffer is always a file**, in the session's directory from M3c, read through
+  the same page cache as the original. Pasting or inserting a 1 GB blob never lives in
+  RAM, and the same file is what crash recovery replays against. No in-memory phase,
+  no spill threshold.
 - **Piece-count bound.** Replace All with millions of matches would create millions of
   pieces and break the memory target. Coalesce adjacent pieces, and above a
   threshold apply bulk replaces as a streaming rewrite into a new add-buffer region
@@ -282,7 +284,7 @@ opening an editor from the browser) goes through a protocol or factory defined i
     intact, re-based onto the new backing generation.
   - Journals, add-buffer files and generations are released on save+close, revert or
     discard (and deleted once nothing else holds them).
-  - **Fault-injection tests are an M3b gate** (§7): kill and simulated power loss at
+  - **Fault-injection tests are an M3c gate** (§7): kill and simulated power loss at
     every write/fsync/rename point of save and journal, external rewrites during
     edit and save, typing during save, volume disappearing mid-save.
 
@@ -824,7 +826,7 @@ opacity and glass), and check the icon at 16 and 32 px in Finder list view.
   Twin Panes can make before the editor is built around them.
   - **Browsing:** grant the home folder and an external volume, then list, preview,
     copy into and trash in Desktop/Documents/Downloads, ~/Library and iCloud Drive;
-    record which prompts appear and what fails. USB volumes come with the M3b spike,
+    record which prompts appear and what fails. USB volumes come with the M3c spike,
     SMB shares with M13+.
   - **Write path:** for a *file-only* grant (open panel on one file) and a *folder*
     grant: create a clone (`clonefile`), create a staging file next to the original
@@ -834,7 +836,7 @@ opacity and glass), and check the icon at 16 and 32 px in Finder list view.
   - **Bookmarks:** app-scoped bookmark entitlement; resolve after relaunch; stale
     bookmark refresh; behaviour after the file is moved or renamed.
   - **Volumes:** boot APFS in M0. External APFS, HFS+ and exFAT, and unplug/unmount
-    mid-operation, are deferred to the M3b spike; SMB and other network protocols
+    mid-operation, are deferred to the M3c spike; SMB and other network protocols
     (AFP, NFS, WebDAV, SFTP mounts) to M13+, with remote connections.
   - **Output: a capability matrix** by volume type × grant type (clone? staging?
     replace? in place? Trash? bookmark survives relaunch?). It drives the save
@@ -863,12 +865,13 @@ starts; this table stays the summary.
 
 | # | Milestone | Scope | Done when |
 |---|---|---|---|
-| M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.twinpanes`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15, 26 and 27 (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5, by hand): what a sandboxed browser may do, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15, 26 and 27; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix for the boot volume written up and its save/recovery policy decided from it (other volumes: M3b and M13+) |
-| M1 | Read-only hex viewer | Virtual scroller first, then thread-safe ByteSource + cache with async prefetch and placeholders, HexView, selection, copy as hex/text (capped), Go to offset, view options (offset base, grouping, ASCII/Latin-1 text column), non-regular files refused, `SecurityScope` tokens, open via File › Open / drag-drop / Finder "Open With" (document types per §4, no NSDocument) — each opens a **tab in the main frame**, Open Recent via bookmarks | 4 GB file opens in < 100 ms, scrolls at 120 Hz (also from a USB volume, with placeholders instead of stalls; USB in M3b, SMB in M13+), memory < 100 MB; all measured on real hardware, also while a search runs |
+| M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.twinpanes`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15, 26 and 27 (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5, by hand): what a sandboxed browser may do, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15, 26 and 27; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix for the boot volume written up and its save/recovery policy decided from it (other volumes: M3c and M13+) |
+| M1 | Read-only hex viewer | Virtual scroller first, then thread-safe ByteSource + cache with async prefetch and placeholders, HexView, selection, copy as hex/text (capped), Go to offset, view options (offset base, grouping, ASCII/Latin-1 text column), non-regular files refused, `SecurityScope` tokens, open via File › Open / drag-drop / Finder "Open With" (document types per §4, no NSDocument) — each opens a **tab in the main frame**, Open Recent via bookmarks | 4 GB file opens in < 100 ms, scrolls at 120 Hz (also from a USB volume, with placeholders instead of stalls; USB in M3c, SMB in M13+), memory < 100 MB; all measured on real hardware, also while a search runs |
 | M1b | Basic browser | `BrowserKit`: one panel listing a real folder (name, size, date, kind; folders first; hidden files off), Enter/double-click/⌘↓ into folders, ⌘↑/Backspace to the parent, F3/F4/Enter on a file opens it in the hex editor, path field for Go to Folder (⇧⌘G), type-to-select. Folder access: starts at the real home folder, asks once for access when the sandbox refuses a folder, keeps that as an app-scoped bookmark, and the browser tab holds the folder's `SecurityScope`. Replaces the M0 placeholder browser | Navigate from home to any granted folder and open a file in the hex editor without File › Open; access survives a relaunch |
 | M2 | Inspect & search | Inspector panel, `Searcher` over a byte-reading protocol with the uncached `F_NOCACHE` read path, find next/previous/all (hex + text, capped results), status bar (offset, selection length, file size) | Full search of a 4 GB file with progress + cancel, without evicting the view's pages |
 | M3a | Overwrite editing | Persistent PieceTable (snapshots), undo as a stack of roots with coalescing, overwrite in hex and text columns (encoding rules per §4.4), dirty-byte highlight, Searcher over snapshots | Fuzz tests pass; edits don't stall concurrent search |
-| M3b | Saving & sessions → **first usable hex version** | `EditorSession` + `SessionRegistry`, dirty state, read-only mode, add buffer as a file, save strategies A (clone-stage-replace) and B (in place + journal + commit record) chosen per the M0 capability matrix, backing generations, recovery guarantee per volume (+ private copy or narrowed mode), external-change policy with own-write suppression, operation journal + crash restore, save race handling, unsaved-changes sheets, Undo/Redo menu wired to the session | Edit + save on 4 GB is near-instant; undo after save restores original bytes; killing the app mid-edit or mid-save loses nothing, and power loss loses at most the last ~1 s of edits; typing during a save keeps the new edits and their journal; saving never triggers the external-change sheet; external modification never corrupts unsaved edits; **the fault-injection suite (§7) passes** |
+| M3b | Sessions & saving → **first usable hex version** | `EditorSession` + `SessionRegistry`, dirty state, read-only mode, save strategy A (clone-stage-replace) per the M0 capability matrix with a range-patch save plan, save race handling, Save / Save As / Revert, unsaved-changes sheets with Save, Undo/Redo menu wired to the session. Hard-linked files offer Save As until M3c | Edit + save on 4 GB is near-instant; undo after save restores original bytes; typing during a save keeps the new edits; a failed save leaves the old file intact; read-only files refuse edits but Save As works |
+| M3c | Protecting unsaved edits & crash recovery | Session folder + clone at the first edit (backing generation), strategy B (in place + journal + commit record) for hard-linked files, recovery guarantee per volume (narrowed mode where no clone), external-change policy with own-write suppression, iCloud dataless files, operation journal + crash restore, the fault-injection suite | Killing the app mid-edit or mid-save loses nothing, and power loss loses at most the last ~1 s of edits; typing during a save keeps the new edits and their journal; saving never triggers the external-change sheet; external modification never corrupts unsaved edits; **the fault-injection suite (§7) passes** |
 | M4 | Browser foundation | Builds on M1b: async listing that never blocks the UI, back/forward history, sorting by column, hidden-files toggle, live updates (FSEvents), per-volume access flow informed by the M0 spike | Browse a 100k-file folder without UI stalls |
 | M5 | Dual panels + tabs | Second panel, active-panel focus, per-panel tab bar, tab restore on relaunch via AppKit restoration (D23), collapsible sidebar (Favorites, Locations) | Daily navigation possible without Finder |
 | M6 | NC keys + file operations | Function-key bar, F2–F8 actions with ⌘ equivalents, operations queue (copy/move/trash/new folder/rename) with progress and conflict handling, cross-volume move with per-item failure reporting | Copy/move large trees reliably with cancel and conflicts |
@@ -895,7 +898,7 @@ byte histogram.
   references it), Searcher across chunk boundaries, Inspector decoding against known
   vectors, lossless decode/encode of invalid bytes, sparse line index (UTF-8 and
   UTF-16, checkpoints across chunk boundaries).
-- **Fault injection (M3b gate):** a test harness that wraps Saver/journal file
+- **Fault injection (M3c gate):** a test harness that wraps Saver/journal file
   calls and can fail or kill the process at every write, `F_FULLFSYNC`, rename and
   `replaceItemAt` point; simulated power loss (discard unsynced writes in a fake
   file layer). Cases: crash at each step of strategies A and B; external rewrite of
@@ -942,6 +945,9 @@ byte histogram.
    limit (proposed 1 GB) and narrow the guarantee above it, or always narrow?
    **Decide from the M0 capability matrix**, once it shows which volumes actually
    lack clones.
+   For now (decided 2026-11-22, M3b review): narrowed mode on every volume where the
+   clone fails, the private copy deferred until the external-volume spike has run
+   (docs/plans/M3c.md).
 
 **Deferred** (decided to revisit later)
 - **Shortcut conflicts:** settle by M10 at the latest; the command registry (§4.11)
@@ -966,12 +972,13 @@ byte histogram.
   - *Asking for access again* when a saved bookmark no longer resolves: today a dead
     recent file just drops out of the menu. Belongs to the M4 per-volume access flow.
   - *`SF_DATALESS` at open* (§4.1): not testable in CI (needs an iCloud-evicted file);
-    lands with the M3b recovery clone, which must wait for the download anyway.
+    lands with the M3c recovery clone, which must wait for the download anyway.
 - **From the M3a review (2026-11-22):**
   - *Lazy `AddBuffer` creation*: open the backing file on first edit instead of at tab
-    open; lands in M3b when `AddBuffer` moves into the `EditorSession` directory.
+    open; lands in M3c when `AddBuffer` moves into the session folder (created on the
+    first edit, docs/plans/M3c.md).
   - *`UndoStack`, multi-view observation, and `EditBuffer` actor isolation*: move
     `UndoStack` from `HexEditorItem` onto `EditorSession` (with observer fan-out for
     sibling views and enforced isolation on `EditBuffer`) in M3b.
   - *Chunked `readSequential` for fragmented piece trees*: coalesce dense `.original`
-    spans into chunked reads instead of one `F_NOCACHE` `pread` per piece in M3b / M8.
+    spans into chunked reads instead of one `F_NOCACHE` `pread` per piece in M8.
