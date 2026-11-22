@@ -5,20 +5,24 @@ import Synchronization
 import TwinPanesCore
 import WorkspaceKit
 
-/// `Twin Panes --smoke-test`: drives the real app (signed, sandboxed) through the M0 checks
-/// and exits 0 on success, 1 on failure. Run by CI on each supported macOS.
-///
-/// Checks: two independent main windows; the browser listing and navigating a real
-/// folder and opening a file; F3 resolving to different commands in a browser and an
-/// editor; Tab bound only in the file list; zoom; the close workflow prompting once per
-/// session across windows; the hex editor; 4 GiB timing.
+/// `Twin Panes --smoke-test`: drives the real app (signed, sandboxed) through the M0–M2
+/// integration checks with its real window layout and exits 0 on success, 1 on failure.
+/// Pass `--bench` to also run the slow 480-frame scroll and 256 MiB random-data search
+/// throughput benchmarks (PLAN.md §7).
 @MainActor
 struct SmokeTest {
     let app: AppDelegate
+    var includeBenchmarks = false
 
     func run() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
-            print("SMOKE FAIL: timed out")
+        // A guard against hangs, not a performance gate: the full run takes about 10 s on
+        // the dev Mac and over 30 s on a hosted macOS 27 runner.
+        let started = ContinuousClock.now
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) {
+            print("SMOKE FAIL: timed out after 120 s")
+            if ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true" {
+                print("::error title=Smoke test::timed out after 120 s")
+            }
             exit(1)
         }
         Task { @MainActor in
@@ -32,6 +36,7 @@ struct SmokeTest {
                 if !condition { failures.append(message) }
             }
             await body(check)
+            print("  info the smoke test took \(ContinuousClock.now - started)")
             print(failures.isEmpty ? "SMOKE OK" : "SMOKE FAIL: \(failures.count) check(s)")
             exit(failures.isEmpty ? 0 : 1)
         }
@@ -81,7 +86,6 @@ struct SmokeTest {
             "file list is innermost scope (\(chain))")
         check(resolve(.function(3), chain) == .browserView, "F3 in browser → browser.view")
         check(resolve(.function(4), chain) == .browserEdit, "F4 in browser → browser.edit")
-        check(resolve(.tab, chain) == .browserSwitchPanel, "Tab in file list → browser.switchPanel")
         check(dispatch(.returnKey, in: window), "Return opens the selected folder")
         check(browser.folder.lastPathComponent == "sub", "now inside sub")
         check(dispatch(KeyChord("\u{7f}"), in: window), "Backspace goes to the parent")
@@ -95,6 +99,22 @@ struct SmokeTest {
             "F4 opens the file in a hex editor tab")
         for item in opened { first.layout.remove(item.id) }
         first.layout.select(browser.id)
+
+        // Dropping a folder onto the second window opens a browser tab in that window
+        // (and MainWindow conforms to NSDraggingDestination for AppKit).
+        check(
+            second.window is NSDraggingDestination,
+            "MainWindow conforms to NSDraggingDestination")
+        app.openDropped([folder], in: second)
+        check(
+            second.layout.allItems.contains {
+                ($0 as? BrowserItem)?.folder == folder.standardizedFileURL
+            },
+            "dropping a folder opens a browser tab in the target window")
+        for item in second.layout.allItems
+        where (item as? BrowserItem)?.folder == folder.standardizedFileURL {
+            second.layout.remove(item.id)
+        }
 
         // The path field inside the browser: Tab must fall through to the key-view loop.
         if let path = Self.view(in: browser.viewController.view, id: "browserPath") {
@@ -156,14 +176,12 @@ struct SmokeTest {
             "quit prompts once per dirty session")
         session.setDirty(false)
 
-        // Menu shows the binding for the current focus.
+        // Menu automatically refreshes on focus change and shows ⌘G as primary on Find Next.
         let viewMenu = NSApp.mainMenu?.item(withTitle: "View")?.submenu
         if let viewMenu {
             window.makeFirstResponder(editor.preferredFirstResponder)
-            app.menuUpdater.refresh(viewMenu, for: window)
             let findMenu = NSApp.mainMenu?.item(withTitle: "Edit")?.submenu?
                 .item(withTitle: "Find")?.submenu
-            if let findMenu { app.menuUpdater.refresh(findMenu, for: window) }
             let findNext = findMenu?.items.first {
                 $0.action == #selector(HexEditorActions.editorFindNext(_:))
             }
@@ -171,8 +189,8 @@ struct SmokeTest {
                 $0.action == #selector(BrowserActions.browserView(_:))
             }
             check(
-                findNext?.keyEquivalent == KeyChord.function(3).key,
-                "menu shows F3 on Find Next in editor")
+                findNext?.keyEquivalent == "g" && findNext?.keyEquivalentModifierMask == .command,
+                "menu automatically shows ⌘G on Find Next in editor")
             check(browserView?.keyEquivalent == "", "menu shows no key on View in editor")
         } else {
             check(false, "View menu exists")
@@ -250,6 +268,11 @@ struct SmokeTest {
         let chain = FocusChain.scopes(in: window)
         check(
             resolve(KeyChord("l", .command), chain) == .goToOffset, "⌘L in hex view → go to offset")
+        // Wide layout (32 bytes/row) renders cleanly in the real window layout.
+        hex.hexView.options.bytesPerRow = .fixed(32)
+        hex.hexView.display()
+        hex.hexView.options.bytesPerRow = .fixed(16)
+
         await find(check, hex: hex, window: window)
         await truncation(check, hex: hex, url: url)
         check(app.openFile(dir) == nil, "a folder is refused")
@@ -321,6 +344,17 @@ struct SmokeTest {
             check(
                 table.rows(in: table.visibleRect).length > 5,
                 "inspector rows are visible: \(table.visibleRect)")
+            // Jump to an uncached page while the inspector is open and verify it decodes.
+            hex.hexView.go(to: 0x18041)
+            hex.hexView.display()
+            for _ in 0..<50 where hex.source.cachedBytes(0x18041..<0x18049) == nil {
+                await settle(milliseconds: 20)
+            }
+            await settle(milliseconds: 20)
+            let uint8Cell = table.view(atColumn: 1, row: 2, makeIfNecessary: true) as? NSTextField
+            check(
+                uint8Cell?.stringValue == "65",
+                "inspector decodes uncached jump: \(uint8Cell?.stringValue ?? "nil")")
         }
         _ = dispatch(KeyChord("i", [.command, .option]), in: window)
         root.layoutSubtreeIfNeeded()
@@ -359,25 +393,27 @@ struct SmokeTest {
             return
         }
         print("  info opening it in a tab took \(open)")
-        let view = item.hexView
-        view.frame = NSRect(x: 0, y: 0, width: 900, height: 1000)
-        Self.printFrames(await scrollThroughFile(item), "")
+        // Use the real window layout (AGENTS.md: never force view frames in smoke tests).
+        item.viewController.view.window?.layoutIfNeeded()
+        item.hexView.display()
         let after = Self.residentMegabytes()
         print("  info resident memory \(after) MB, \(after - before) MB more than before opening")
-
-        // §4.4: the same while a full-file search runs (review, plan gaps).
-        let searcher = Searcher(source: item.source)
-        let search = Task {
-            try await Searcher.run { token in
-                try searcher.all(try SearchPattern.hex("FF"), cancellation: token)
-            }
-        }
-        Self.printFrames(await scrollThroughFile(item), " while searching")
-        search.cancel()
-        _ = try? await search.value
-        print("  info resident memory while searching \(Self.residentMegabytes()) MB")
         await fullSearch(check, item: item)
-        await realDataSearch(check)
+
+        if includeBenchmarks {
+            Self.printFrames(await scrollThroughFile(item), "")
+            let searcher = Searcher(source: item.source)
+            let search = Task {
+                try await Searcher.run { token in
+                    try searcher.all(try SearchPattern.hex("FF"), cancellation: token)
+                }
+            }
+            Self.printFrames(await scrollThroughFile(item), " while searching")
+            search.cancel()
+            _ = try? await search.value
+            print("  info resident memory while searching \(Self.residentMegabytes()) MB")
+            await realDataSearch(check)
+        }
     }
 
     /// Jumps through the whole file in 240 steps, letting prefetches land, and times one

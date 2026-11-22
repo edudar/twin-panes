@@ -25,7 +25,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenu.build(updater: menuUpdater, recentFiles: recentFiles)
         if CommandLine.arguments.contains("--smoke-test") {
-            SmokeTest(app: self).run()
+            SmokeTest(app: self, includeBenchmarks: CommandLine.arguments.contains("--bench")).run()
+            return
+        }
+        if CommandLine.arguments.contains("--bench") {
+            SmokeTest(app: self, includeBenchmarks: true).run()
             return
         }
         // Files from Finder's Open With may already have opened a window.
@@ -75,8 +79,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self?.windowControllers.removeAll { $0 === closed }
         }
         windowControllers.append(controller)
-        (controller.window as? MainWindow)?.onDropFiles = { [weak self] urls in
-            for url in urls { self?.openFile(url) }
+        if let mainWindow = controller.window as? MainWindow {
+            mainWindow.onDropFiles = { [weak self, weak controller] urls in
+                guard let self, let controller else { return }
+                self.openDropped(urls, in: controller)
+            }
+            mainWindow.onFocusChange = { [weak self] window in
+                if let menu = NSApp.mainMenu { self?.menuUpdater.refresh(menu, for: window) }
+            }
         }
         layout.insert(makeBrowser())
         if let frame = NSApp.keyWindow?.frame {
@@ -115,9 +125,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         windowControllers.first { $0.layout.item(id) != nil }
     }
 
-    /// Adds an item to the active window, opening one if needed.
-    func show(_ item: any WorkspaceItem) {
-        let controller = activeController ?? openMainWindow()
+    /// Adds an item to `target` (or the active window, opening one if needed).
+    func show(_ item: any WorkspaceItem, in target: MainWindowController? = nil) {
+        let controller = target ?? activeController ?? openMainWindow()
         controller.layout.insert(item)
         controller.window?.makeKeyAndOrderFront(nil)
     }
@@ -128,18 +138,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: Opening files
 
-    /// Opens `url` as a hex editor tab in the active window. `scope` keeps sandbox
-    /// access when the URL came from a bookmark; panel, drop and Finder URLs carry
+    /// Handles items dropped onto `controller`: folders open in a browser tab (and save
+    /// their grant); regular files open in a hex editor tab.
+    func openDropped(_ urls: [URL], in controller: MainWindowController) {
+        for url in urls {
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+            if values?.isDirectory == true, values?.isPackage != true {
+                try? folderGrants.add(url)
+                show(makeBrowser(at: url), in: controller)
+            } else {
+                openFile(url, in: controller)
+            }
+        }
+    }
+
+    /// Opens `url` as a hex editor tab in `target` (or the active window). `scope` keeps
+    /// sandbox access when the URL came from a bookmark; panel, drop and Finder URLs carry
     /// their own access for this run.
     @discardableResult
-    func openFile(_ url: URL, scope: SecurityScope? = nil) -> HexEditorItem? {
+    func openFile(
+        _ url: URL, scope: SecurityScope? = nil, in target: MainWindowController? = nil
+    ) -> HexEditorItem? {
         do {
             let item = try HexEditorItem(url: url, scope: scope)
-            show(item)
+            show(item, in: target)
             recentFiles.note(url)
             return item
         } catch {
-            presentOpenError(error, url: url)
+            presentOpenError(error, url: url, in: target)
             return nil
         }
     }
@@ -168,14 +194,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSDocumentController.shared.clearRecentDocuments(nil)
     }
 
-    private func presentOpenError(_ error: Error, url: URL) {
+    private func presentOpenError(
+        _ error: Error, url: URL, in target: MainWindowController? = nil
+    ) {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "“\(url.lastPathComponent)” can’t be opened"
         alert.informativeText =
             (error as? ByteSourceError)?.description
             ?? error.localizedDescription
-        if let window = activeController?.window {
+        if let window = (target ?? activeController)?.window {
             alert.beginSheetModal(for: window)
         } else {
             alert.runModal()

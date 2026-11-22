@@ -13,7 +13,6 @@ import WorkspaceKit
     @objc optional func newBrowserTab(_ sender: Any?)
     @objc optional func newEditorTab(_ sender: Any?)
     @objc optional func newEditorView(_ sender: Any?)
-    @objc optional func browserSwitchPanel(_ sender: Any?)
     @objc optional func showTestSheet(_ sender: Any?)
     @objc optional func probeFile(_ sender: Any?)
     @objc optional func probeFolder(_ sender: Any?)
@@ -44,7 +43,6 @@ extension CommandID {
     static let browserOpen: CommandID = "browser.open"
     static let browserParent: CommandID = "browser.parent"
     static let browserGoToFolder: CommandID = "browser.goToFolder"
-    static let browserSwitchPanel: CommandID = "browser.switchPanel"
     static let editorFind: CommandID = "editor.find"
     static let editorFindNext: CommandID = "editor.findNext"
     static let editorFindPrevious: CommandID = "editor.findPrevious"
@@ -96,7 +94,6 @@ enum DefaultCommands {
         add(.browserOpen, "Open", #selector(BrowserActions.browserOpen(_:)))
         add(.browserParent, "Enclosing Folder", #selector(BrowserActions.browserParent(_:)))
         add(.browserGoToFolder, "Go to Folder…", #selector(BrowserActions.browserGoToFolder(_:)))
-        add(.browserSwitchPanel, "Switch Panel", #selector(AppActions.browserSwitchPanel(_:)))
         add(.editorFind, "Find…", #selector(HexEditorActions.editorFind(_:)))
         add(.editorFindNext, "Find Next", #selector(HexEditorActions.editorFindNext(_:)))
         add(
@@ -146,13 +143,13 @@ enum DefaultCommands {
             KeyChord(Self.arrow(NSUpArrowFunctionKey), .command), to: .browserParent, in: browser)
         registry.bind(KeyChord("\u{7f}"), to: .browserParent, in: fileList)
         registry.bind(KeyChord("g", [.command, .shift]), to: .browserGoToFolder, in: browser)
-        registry.bind(.tab, to: .browserSwitchPanel, in: fileList)
+        registry.bind(KeyChord("f", .command), to: .editorFind, in: editor)
+        // Primary menu shortcuts (⌘G / ⇧⌘G) are bound before secondary F3 / ⇧F3.
+        registry.bind(KeyChord("g", .command), to: .editorFindNext, in: editor)
+        registry.bind(KeyChord("g", [.command, .shift]), to: .editorFindPrevious, in: editor)
         registry.bind(.function(3), to: .editorFindNext, in: editor)
         registry.bind(
             KeyChord(KeyChord.function(3).key, .shift), to: .editorFindPrevious, in: editor)
-        registry.bind(KeyChord("f", .command), to: .editorFind, in: editor)
-        registry.bind(KeyChord("g", .command), to: .editorFindNext, in: editor)
-        registry.bind(KeyChord("g", [.command, .shift]), to: .editorFindPrevious, in: editor)
         registry.bind(KeyChord("e", .command), to: .editorUseSelectionForFind, in: editor)
         registry.bind(KeyChord("i", [.command, .option]), to: .toggleInspector, in: editor)
         registry.bind(.escape, to: .editorCloseFind, in: findBar)
