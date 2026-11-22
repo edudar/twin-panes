@@ -77,8 +77,4 @@ import Testing
                 == grants.folders.first { $0.lastPathComponent == dir.lastPathComponent }?.path)
         #expect(grants.scope(covering: URL(fileURLWithPath: "/usr")) == nil)
     }
-
-    @Test func realHomeIsNotTheContainer() {
-        #expect(!DirectoryReader.realHomeDirectory.path.contains("/Library/Containers/"))
-    }
 }

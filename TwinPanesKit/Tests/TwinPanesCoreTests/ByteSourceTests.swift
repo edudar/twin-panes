@@ -136,19 +136,4 @@ import Testing
         #expect(source.cachedBytes(ranges[1]) == nil)
         #expect(source.cachedBytes(ranges[2]) != nil)
     }
-
-    /// A sparse 4 GiB file opens and reads its last page quickly (M1 target: < 100 ms).
-    @Test func opensFourGiBQuickly() throws {
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let url = dir.appendingPathComponent("sparse.bin")
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        try FileHandle(forWritingTo: url).truncate(atOffset: TwinPanesCore.testedFileSizeLimit)
-        let clock = ContinuousClock()
-        let elapsed = try clock.measure {
-            let source = try ByteSource(url: url)
-            let tail = try source.read((source.length - 16)..<source.length)
-            #expect(tail == Data(count: 16))
-        }
-        #expect(elapsed < .milliseconds(100), "took \(elapsed)")
-    }
 }

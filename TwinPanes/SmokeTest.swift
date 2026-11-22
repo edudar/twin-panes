@@ -60,6 +60,11 @@ struct SmokeTest {
         }
         print(
             "  info browser starts at \(browser.folder.path), needs access: \(browser.needsAccess)")
+        // Sandboxed, FileManager's home is the container; the browser must not start there.
+        check(
+            NSHomeDirectory().contains("/Library/Containers/")
+                && !browser.folder.path.contains("/Library/Containers/"),
+            "browser starts in the real home folder, not the app's container")
         guard let folder = makeSampleFolder() else {
             check(false, "create a sample folder")
             return
