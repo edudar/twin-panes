@@ -31,7 +31,7 @@ import Testing
         let item = try item(bytes: 0)
         #expect(item.offset(for: "0", cursor: 0) == 0)
         #expect(item.offset(for: "1", cursor: 0) == nil)
-        #expect(item.statusText.hasSuffix("empty file · Read-only"))
+        #expect(item.statusText.hasSuffix("empty file"))
     }
 
     @Test func statusShowsCursorSelectionAndSize() throws {
@@ -40,7 +40,7 @@ import Testing
         _ = item.viewController.view
         item.hexView.go(to: 0x10)
         #expect(item.statusText.hasPrefix("Offset 0x10 (16) · Size "))
-        #expect(item.statusText.hasSuffix("(4,096 bytes) · Read-only"))
+        #expect(item.statusText.hasSuffix("(4,096 bytes)"))
         item.hexView.select(0x10..<0x14)
         #expect(item.statusText.contains("Selected 4 bytes (0x10…0x13)"))
     }

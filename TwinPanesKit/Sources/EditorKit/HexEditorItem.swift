@@ -23,6 +23,16 @@ public final class HexEditorItem: WorkspaceItem {
     public weak var host: WorkspaceHost?
     public var onChange: (() -> Void)?
 
+    /// Undo history; entries carry this tab's selection (docs/plans/M3a.md, D-c).
+    var undoStack = UndoStack()
+    /// The last typed byte, for coalescing a typing burst into one undo step.
+    var lastTyping: Typing?
+    struct Typing {
+        let column: HexLayout.Column
+        let cursorAfter: UInt64
+        let time: ContinuousClock.Instant
+    }
+
     /// Keeps sandbox access for as long as the tab is open (PLAN.md §5).
     let scope: SecurityScope?
     lazy var controller = HexEditorViewController(item: self)
@@ -47,7 +57,7 @@ public final class HexEditorItem: WorkspaceItem {
 
     /// Status line text for the current cursor and selection.
     public var statusText: String {
-        guard length > 0 else { return "\(title) · empty file · Read-only" }
+        guard length > 0 else { return "\(title) · empty file" }
         let cursor = hexView.selection.cursor
         let range = hexView.selection.range
         var parts = ["Offset \(Self.hex(cursor)) (\(cursor))"]
@@ -56,7 +66,7 @@ public final class HexEditorItem: WorkspaceItem {
             parts.append("Selected \(range.count) bytes (\(Self.hex(range.lowerBound))…\(last))")
         }
         parts.append("Size \(Self.byteCount(length))")
-        parts.append("Read-only")
+        if isDirty { parts.append("Modified (saving comes in M3b)") }
         return parts.joined(separator: " · ")
     }
 

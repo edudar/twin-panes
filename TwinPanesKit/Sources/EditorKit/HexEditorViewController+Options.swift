@@ -46,6 +46,8 @@ extension HexEditorViewController: NSMenuItemValidation {
             #selector(editorFindNext(_:)), #selector(editorFindPrevious(_:)),
             #selector(editorFindAll(_:)), #selector(editorUseSelectionForFind(_:)):
             return (item?.length ?? 0) > 0
+        case #selector(undo(_:)): return item?.canUndo ?? false
+        case #selector(redo(_:)): return item?.canRedo ?? false
         case #selector(editorCloseFind(_:)):
             return !findBar.isHidden
         case #selector(toggleInspector(_:)):
