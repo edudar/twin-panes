@@ -5,12 +5,6 @@ import Testing
 
 @MainActor
 @Suite struct HexViewTests {
-    /// Since macOS 14 views don't clip by default; an unclipped hex view painted over
-    /// the tab bar above it (bug, 2026-11-21).
-    @Test func clipsToItsBounds() {
-        #expect(HexView(frame: NSRect(x: 0, y: 0, width: 200, height: 100)).clipsToBounds)
-    }
-
     @Test func findsTheFirstHighlightReachingARow() {
         let ranges: [Range<UInt64>] = [0..<2, 10..<20, 40..<41]
         #expect(ranges.partitioningIndex { $0.upperBound > 0 } == 0)

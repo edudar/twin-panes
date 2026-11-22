@@ -1,12 +1,13 @@
 import AppKit
 
 /// Where a hex view gets its bytes. `cachedBytes` must never block (it's called while
-/// drawing); `prefetch` loads in the background and calls back on the main actor.
+/// drawing) and returns all of `range` or nil; `prefetch` loads in the background and
+/// calls back on the main actor with the error, if any.
 @MainActor
 public protocol HexViewDataSource: AnyObject {
     var length: UInt64 { get }
     func cachedBytes(_ range: Range<UInt64>) -> Data?
-    func prefetch(_ range: Range<UInt64>, completion: @escaping @MainActor () -> Void)
+    func prefetch(_ range: Range<UInt64>, completion: @escaping @MainActor (Error?) -> Void)
     /// Blocking read, used for copying a selection.
     func read(_ range: Range<UInt64>) throws -> Data
 }
@@ -16,6 +17,13 @@ public protocol HexViewDelegate: AnyObject {
     func hexViewSelectionDidChange(_ view: HexView)
     /// A copy was refused because the selection exceeds `HexCopy.maxBytes`.
     func hexView(_ view: HexView, selectionTooLargeToCopy range: Range<UInt64>)
+    /// Loading the bytes to show failed. Called once per failed range; the view shows
+    /// placeholders and doesn't retry that range until it scrolls or reloads.
+    func hexView(_ view: HexView, didFailToRead error: Error)
+}
+
+extension HexViewDelegate {
+    public func hexView(_ view: HexView, didFailToRead error: Error) {}
 }
 
 /// Virtualized hex/text view (PLAN.md §4.4). The view is window-sized and draws only
@@ -52,6 +60,9 @@ public final class HexView: NSView {
     let inset = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 4)
     let scroller = NSScroller()
     var pendingPrefetch: Range<UInt64>?
+    /// The last prefetch range that failed; not asked for again until the view needs a
+    /// different range or reloads, so a persistent read error can't loop.
+    var failedPrefetch: Range<UInt64>?
 
     public override init(frame: NSRect) {
         super.init(frame: frame)
@@ -80,6 +91,7 @@ public final class HexView: NSView {
     public func reloadData() {
         selection = HexSelection(length: length)
         pendingPrefetch = nil
+        failedPrefetch = nil
         relayout(keepingRow: false)
         delegate?.hexViewSelectionDidChange(self)
     }

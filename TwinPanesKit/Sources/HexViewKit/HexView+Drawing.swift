@@ -126,13 +126,21 @@ extension HexView {
         let from = rows.lowerBound >= margin ? rows.lowerBound - margin : 0
         let to = min(layout.rowCount, rows.upperBound + margin)
         let range = layout.rowStart(from)..<min(layout.length, layout.rowStart(to))
-        guard !range.isEmpty, pendingPrefetch.map({ !$0.contains(range.lowerBound) }) ?? true
+        guard !range.isEmpty, range != failedPrefetch,
+            pendingPrefetch.map({ !$0.contains(range.lowerBound) }) ?? true
         else { return }
         pendingPrefetch = range
-        dataSource.prefetch(range) { [weak self] in
+        dataSource.prefetch(range) { [weak self] error in
             guard let self else { return }
             if self.pendingPrefetch == range { self.pendingPrefetch = nil }
-            self.needsDisplay = true
+            if let error {
+                // Placeholders stay; no redraw, which would only ask again.
+                self.failedPrefetch = range
+                self.delegate?.hexView(self, didFailToRead: error)
+            } else {
+                self.failedPrefetch = nil
+                self.needsDisplay = true
+            }
         }
     }
 }

@@ -126,7 +126,7 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         let cursor = hexView.selection.cursor
         let range = cursor..<min(item.length, cursor + UInt64(Inspector.byteCount))
         if let bytes = item.cachedBytes(range) { return inspector.show(bytes) }
-        item.prefetch(range) { [weak self] in
+        item.prefetch(range) { [weak self] _ in
             guard let self, self.hexView.selection.cursor == cursor else { return }
             self.inspector.show(self.item.cachedBytes(range) ?? Data())
         }
@@ -136,6 +136,10 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         inspector.isHidden.toggle()
         applyVisibility()
         updateInspector()
+    }
+
+    func hexView(_ view: HexView, didFailToRead error: Error) {
+        item.host?.showStatus("\(error)")
     }
 
     func hexView(_ view: HexView, selectionTooLargeToCopy range: Range<UInt64>) {

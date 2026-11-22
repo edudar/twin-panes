@@ -69,11 +69,10 @@ extension HexEditorItem: HexViewDataSource {
 
     public func cachedBytes(_ range: Range<UInt64>) -> Data? { source.cachedBytes(range) }
 
-    public func prefetch(_ range: Range<UInt64>, completion: @escaping @MainActor () -> Void) {
-        source.prefetch(range) { [weak self] error in
-            if let error { self?.host?.showStatus(error.description) }
-            completion()
-        }
+    public func prefetch(
+        _ range: Range<UInt64>, completion: @escaping @MainActor (Error?) -> Void
+    ) {
+        source.prefetch(range) { error in completion(error) }
     }
 
     public func read(_ range: Range<UInt64>) throws -> Data { try source.read(range) }
