@@ -31,6 +31,8 @@ public final class AddBuffer: Sendable {
     /// Serializes `pwrite` calls without holding `state` across blocking disk I/O.
     private let writeLock = Mutex(())
     private let state: Mutex<State>
+    private let ioQueue = DispatchQueue(label: "AddBuffer.io", qos: .userInitiated)
+    private let latestPrefetch = Mutex<UInt64>(0)
 
     private struct State {
         var length: UInt64 = 0
@@ -166,6 +168,46 @@ public final class AddBuffer: Sendable {
             }
         }
         return data
+    }
+
+    /// Claims the next superseding prefetch ticket, or nil for non-superseding reads.
+    func nextPrefetchTicket(supersede: Bool) -> UInt64? {
+        guard supersede else { return nil }
+        return latestPrefetch.withLock { latest -> UInt64 in
+            latest += 1
+            return latest
+        }
+    }
+
+    /// Loads evicted pages covering `ranges` on a background serial queue, stopping early
+    /// if a newer superseding ticket superseded `ticket`.
+    func prefetch(
+        _ ranges: [Range<UInt64>],
+        ticket: UInt64?,
+        completion: @escaping @MainActor @Sendable (ByteSourceError?) -> Void
+    ) {
+        if let ticket, latestPrefetch.withLock({ $0 }) != ticket {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        let missing = ranges.filter { !$0.isEmpty && cachedBytes($0) == nil }
+        guard !missing.isEmpty else {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        ioQueue.async { [self] in
+            var failure: ByteSourceError?
+            for range in missing {
+                if let ticket, latestPrefetch.withLock({ $0 }) != ticket { break }
+                do {
+                    _ = try read(range)
+                } catch {
+                    failure = error as? ByteSourceError ?? .readFailed(offset: 0, errno: EIO)
+                    break
+                }
+            }
+            DispatchQueue.main.async { completion(failure) }
+        }
     }
 
     // MARK: Internals

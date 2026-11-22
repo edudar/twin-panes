@@ -85,4 +85,34 @@ struct EditBufferTests {
         #expect(await prefetched(buffer.snapshot(), 0..<5000) == nil)
         #expect(buffer.snapshot().cachedBytes(0..<5000) == Data(model))
     }
+
+    @Test func prefetchesEvictedAddPagesAndSkipsLargeOverwrittenGaps() async throws {
+        defer { cleanUp() }
+        let page = Int(ByteSource.pageSize)
+        let url = try makeFile(Array(repeating: 0x11, count: page * 5))
+        let original = try ByteSource(url: url)
+        let buffer = try EditBuffer(original: original, addDirectory: folder, addPageCapacity: 2)
+        // Empty overwrite is a no-op and leaves the buffer unmodified.
+        #expect(try buffer.overwrite(at: 0, with: Data()) == 0..<0)
+        #expect(!buffer.isModified)
+
+        // Overwrite pages 1, 2, 3 (3 pages > addPageCapacity 2, so page 1's add bytes get evicted).
+        let edited = Data(repeating: 0xAA, count: page * 3)
+        try buffer.overwrite(at: UInt64(page), with: edited)
+        let snap = buffer.snapshot()
+        #expect(snap.cachedBytes(UInt64(page)..<UInt64(page + 16)) == nil)
+
+        // Prefetching a 100%-overwritten range (originals empty) reloads the evicted add page.
+        #expect(await prefetched(snap, UInt64(page)..<UInt64(page + 16)) == nil)
+        #expect(
+            snap.cachedBytes(UInt64(page)..<UInt64(page + 16)) == Data(repeating: 0xAA, count: 16))
+
+        // Prefetching across pages 0..5 must not load original page 2, which is fully overwritten.
+        #expect(await prefetched(snap, 0..<UInt64(page * 5)) == nil)
+        #expect(original.cachedBytes(UInt64(page * 2)..<UInt64(page * 2 + 16)) == nil)
+        #expect(snap.cachedBytes(0..<16) == Data(repeating: 0x11, count: 16))
+        #expect(
+            snap.cachedBytes(UInt64(page * 4)..<UInt64(page * 4 + 16))
+                == Data(repeating: 0x11, count: 16))
+    }
 }

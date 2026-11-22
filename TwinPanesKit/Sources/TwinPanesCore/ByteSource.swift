@@ -139,11 +139,17 @@ public final class ByteSource: ByteReading {
         supersede: Bool = true,
         completion: @escaping @MainActor @Sendable (ByteSourceError?) -> Void
     ) {
-        let range = clamp(range)
-        if range.isEmpty {
-            DispatchQueue.main.async { completion(nil) }
-            return
-        }
+        prefetch([range], supersede: supersede, completion: completion)
+    }
+
+    /// Prefetches a sequence of ranges in one pass, still bumping the superseding counter
+    /// even when `ranges` is empty so older viewport prefetches stop early.
+    func prefetch(
+        _ ranges: [Range<UInt64>],
+        supersede: Bool = true,
+        completion: @escaping @MainActor @Sendable (ByteSourceError?) -> Void
+    ) {
+        let clamped = ranges.map(clamp).filter { !$0.isEmpty }
         let request: UInt64? =
             supersede
             ? latestPrefetch.withLock { latest -> UInt64 in
@@ -151,22 +157,28 @@ public final class ByteSource: ByteReading {
                 return latest
             }
             : nil
+        if clamped.isEmpty {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
         ioQueue.async { [self] in
             var failure: ByteSourceError?
-            for page in Self.pages(covering: range) {
-                // A newer superseding request (the view scrolled on) makes this one moot.
-                if let request, latestPrefetch.withLock({ $0 }) != request { break }
-                do {
-                    let data = try loadPage(page)
-                    // The page came back shorter than the part of `range` it should hold.
-                    let available = page * Self.pageSize + UInt64(data.count)
-                    if available < min(range.upperBound, (page + 1) * Self.pageSize) {
-                        failure = .truncated(expected: range.upperBound, available: available)
-                        break
+            outer: for range in clamped {
+                for page in Self.pages(covering: range) {
+                    // A newer superseding request (the view scrolled on) makes this one moot.
+                    if let request, latestPrefetch.withLock({ $0 }) != request { break outer }
+                    do {
+                        let data = try loadPage(page)
+                        // The page came back shorter than the part of `range` it should hold.
+                        let available = page * Self.pageSize + UInt64(data.count)
+                        if available < min(range.upperBound, (page + 1) * Self.pageSize) {
+                            failure = .truncated(expected: range.upperBound, available: available)
+                            break outer
+                        }
+                    } catch {
+                        failure = error as? ByteSourceError
+                        break outer
                     }
-                } catch {
-                    failure = error as? ByteSourceError
-                    break
                 }
             }
             DispatchQueue.main.async { completion(failure) }

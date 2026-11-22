@@ -18,7 +18,7 @@ public struct EditSnapshot: ByteReading {
 
     /// Reads `range`, blocking on I/O if needed.
     public func read(_ range: Range<UInt64>) throws -> Data {
-        var out = Data()
+        var out = Data(capacity: clampedCount(range))
         for (_, piece) in spans(range) {
             let range = piece.offset..<(piece.offset + piece.length)
             out.append(try piece.source == .original ? original.read(range) : add.read(range))
@@ -26,9 +26,9 @@ public struct EditSnapshot: ByteReading {
         return out
     }
 
-    /// Reads `range` for a one-pass scan, bypassing the original's page cache.
+    /// Reads `range` for a one-pass scan, bypassing both sources' page caches.
     public func readSequential(_ range: Range<UInt64>) throws -> Data {
-        var out = Data()
+        var out = Data(capacity: clampedCount(range))
         for (_, piece) in spans(range) {
             let range = piece.offset..<(piece.offset + piece.length)
             let data =
@@ -43,7 +43,7 @@ public struct EditSnapshot: ByteReading {
 
     /// All of `range` if every byte is in memory, else nil; never blocks.
     public func cachedBytes(_ range: Range<UInt64>) -> Data? {
-        var out = Data()
+        var out = Data(capacity: clampedCount(range))
         for (_, piece) in spans(range) {
             let range = piece.offset..<(piece.offset + piece.length)
             let data =
@@ -61,33 +61,19 @@ public struct EditSnapshot: ByteReading {
         completion: @escaping @MainActor @Sendable (ByteSourceError?) -> Void
     ) {
         let pieces = spans(range).map(\.piece)
-        let originals = pieces.filter { $0.source == .original }
-        let adds = pieces.filter { $0.source == .add }
-        let loadAdds: @MainActor @Sendable () -> Void = { [add] in
-            let missing = adds.filter {
-                add.cachedBytes($0.offset..<($0.offset + $0.length)) == nil
-            }
-            guard !missing.isEmpty else { return completion(nil) }
-            DispatchQueue.global(qos: .userInitiated).async {
-                var failure: ByteSourceError?
-                do {
-                    for piece in missing {
-                        _ = try add.read(piece.offset..<(piece.offset + piece.length))
-                    }
-                } catch {
-                    failure = error as? ByteSourceError ?? .readFailed(offset: 0, errno: EIO)
-                }
-                DispatchQueue.main.async { completion(failure) }
-            }
+        let originalRanges = Self.coalesce(
+            pieces.filter { $0.source == .original }.map { $0.offset..<($0.offset + $0.length) },
+            maxGap: ByteSource.pageSize)
+        let addRanges = pieces.filter { $0.source == .add }.map {
+            $0.offset..<($0.offset + $0.length)
         }
-        guard let first = originals.first, let last = originals.last else {
-            DispatchQueue.main.async { loadAdds() }
-            return
-        }
-        // With overwrite only, original offsets equal file offsets, so one range covers them.
-        original.prefetch(first.offset..<(last.offset + last.length), supersede: supersede) {
-            error in
-            if let error { completion(error) } else { loadAdds() }
+        let addTicket = add.nextPrefetchTicket(supersede: supersede)
+        original.prefetch(originalRanges, supersede: supersede) { [add] error in
+            if let error {
+                completion(error)
+            } else {
+                add.prefetch(addRanges, ticket: addTicket, completion: completion)
+            }
         }
     }
 
@@ -113,6 +99,29 @@ public struct EditSnapshot: ByteReading {
             return (position, piece)
         }
     }
+
+    private func clampedCount(_ range: Range<UInt64>) -> Int {
+        let lower = min(range.lowerBound, length), upper = min(range.upperBound, length)
+        return Int(min(upper - lower, UInt64(Int.max)))
+    }
+
+    /// Merges adjacent ascending ranges separated by at most `maxGap`, so small scattered
+    /// edits share one read while large deleted or overwritten spans are skipped.
+    private static func coalesce(
+        _ ranges: [Range<UInt64>], maxGap: UInt64
+    ) -> [Range<UInt64>] {
+        var merged: [Range<UInt64>] = []
+        for range in ranges where !range.isEmpty {
+            if let last = merged.last, range.lowerBound >= last.upperBound,
+                range.lowerBound - last.upperBound <= maxGap
+            {
+                merged[merged.count - 1] = last.lowerBound..<max(last.upperBound, range.upperBound)
+            } else {
+                merged.append(range)
+            }
+        }
+        return merged
+    }
 }
 
 /// The edit model of one open file: the original, the add buffer and the current tree.
@@ -128,6 +137,13 @@ public final class EditBuffer {
     public init(original: ByteSource, addDirectory: URL? = nil) throws {
         self.original = original
         add = try AddBuffer(directory: addDirectory)
+        tree = PieceTree(originalLength: original.length)
+        openedTree = tree
+    }
+
+    init(original: ByteSource, addDirectory: URL? = nil, addPageCapacity: Int) throws {
+        self.original = original
+        add = try AddBuffer(directory: addDirectory, pageCapacity: addPageCapacity)
         tree = PieceTree(originalLength: original.length)
         openedTree = tree
     }
