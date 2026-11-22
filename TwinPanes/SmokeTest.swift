@@ -120,6 +120,19 @@ struct SmokeTest {
             status(of: first).contains("editor.findNext"), "editor handled F3: \(status(of: first))"
         )
 
+        // M0: while a sheet is up, the registry intercepts nothing, so keys reach the sheet.
+        let sheet = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 120), styleMask: [.titled],
+            backing: .buffered, defer: true)
+        window.beginSheet(sheet) { _ in }
+        await settle()
+        check(window.attachedSheet === sheet, "a sheet is attached")
+        check(!dispatch(.function(3), in: window), "F3 isn't dispatched while a sheet is up")
+        check(!dispatch(KeyChord("w", .command), in: window), "⌘W isn't dispatched under a sheet")
+        window.endSheet(sheet)
+        await settle()
+        check(window.attachedSheet == nil, "the sheet is gone")
+
         // Zoom.
         check(dispatch(KeyChord("\r", [.command, .shift]), in: window), "⇧⌘↩ dispatched")
         check(first.layout.zoomedItemID == editor.id, "editor zoomed")
