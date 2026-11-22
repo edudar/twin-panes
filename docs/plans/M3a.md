@@ -53,8 +53,10 @@ first section below.
 
 ### D-c: the edit model lives in TwinPanesCore, undo wiring in EditorKit
 
-- `EditBuffer` (Core) holds the `ByteSource`, the `AddBuffer`, the current root and an
-  `UndoStack`.
+- `EditBuffer` (Core) holds the `ByteSource`, the `AddBuffer` and the current root.
+  The `UndoStack` (also Core) is held by the editor item next to it, because each entry
+  also stores the selection, which only the editor knows. _Changed while building:
+  the plan first put the stack inside `EditBuffer`._
 - A `snapshot()` is a `Sendable` struct that conforms to `ByteReading`, so `Searcher`
   and save code can use it directly.
 - In M3b, `EditorSession` will wrap `EditBuffer` rather than replace it.
