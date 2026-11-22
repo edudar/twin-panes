@@ -32,7 +32,8 @@ public struct EditSnapshot: ByteReading {
         for (_, piece) in spans(range) {
             let range = piece.offset..<(piece.offset + piece.length)
             let data =
-                try piece.source == .original ? original.readSequential(range) : add.read(range)
+                try piece.source == .original
+                ? original.readSequential(range) : add.readSequential(range)
             out.append(data)
             // The original got shorter: later bytes would land at the wrong offsets.
             if data.count < range.count { break }

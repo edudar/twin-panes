@@ -1,9 +1,18 @@
 import Foundation
 import Synchronization
 
-public enum AddBufferError: Error, Equatable {
+public enum AddBufferError: Error, Equatable, CustomStringConvertible {
     case createFailed(path: String, errno: Int32)
     case writeFailed(offset: UInt64, errno: Int32)
+
+    public var description: String {
+        switch self {
+        case .createFailed(let path, let code):
+            return "Can't create \(path): \(String(cString: strerror(code)))"
+        case .writeFailed(let offset, let code):
+            return "Write failed at offset \(offset): \(String(cString: strerror(code)))"
+        }
+    }
 }
 
 /// The append-only file holding every byte typed or pasted into an edit (decision D-b,
@@ -19,6 +28,8 @@ public final class AddBuffer: Sendable {
 
     private let folder: URL
     private let fd: Int32
+    /// Serializes `pwrite` calls without holding `state` across blocking disk I/O.
+    private let writeLock = Mutex(())
     private let state: Mutex<State>
 
     private struct State {
@@ -37,7 +48,10 @@ public final class AddBuffer: Sendable {
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         } catch {
-            throw AddBufferError.createFailed(path: folder.path, errno: EACCES)
+            let nsError = error as NSError
+            let underlying = (nsError.userInfo[NSUnderlyingErrorKey] as? NSError) ?? nsError
+            let code = underlying.domain == NSPOSIXErrorDomain ? Int32(underlying.code) : EIO
+            throw AddBufferError.createFailed(path: folder.path, errno: code)
         }
         fd = open(url.path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
         guard fd >= 0 else {
@@ -58,8 +72,9 @@ public final class AddBuffer: Sendable {
 
     /// Appends `data` and returns the range it now occupies.
     public func append(_ data: Data) throws -> Range<UInt64> {
-        try state.withLock { state in
-            let start = state.length
+        try writeLock.withLock { _ in
+            let start = state.withLock { $0.length }
+            guard !data.isEmpty else { return start..<start }
             try data.withUnsafeBytes { buffer in
                 var done = 0
                 while done < buffer.count {
@@ -70,23 +85,28 @@ public final class AddBuffer: Sendable {
                         if errno == EINTR { continue }
                         throw AddBufferError.writeFailed(offset: start + UInt64(done), errno: errno)
                     }
+                    if n == 0 {
+                        throw AddBufferError.writeFailed(offset: start + UInt64(done), errno: EIO)
+                    }
                     done += n
                 }
             }
-            var position = start
-            var rest = data[...]
-            while !rest.isEmpty {
-                let chunk = rest.prefix(Int(Self.pageSize) - state.tail.count)
-                state.tail.append(contentsOf: chunk)
-                rest = rest.dropFirst(chunk.count)
-                position += UInt64(chunk.count)
-                if position % Self.pageSize == 0 {
-                    state.cache.insert(position / Self.pageSize - 1, state.tail)
-                    state.tail = Data()
+            return state.withLock { state in
+                var position = start
+                var rest = data[...]
+                while !rest.isEmpty {
+                    let chunk = rest.prefix(Int(Self.pageSize) - state.tail.count)
+                    state.tail.append(contentsOf: chunk)
+                    rest = rest.dropFirst(chunk.count)
+                    position += UInt64(chunk.count)
+                    if position % Self.pageSize == 0 {
+                        state.cache.insert(position / Self.pageSize - 1, state.tail)
+                        state.tail = Data()
+                    }
                 }
+                state.length = position
+                return start..<position
             }
-            state.length = position
-            return start..<position
         }
     }
 
@@ -96,7 +116,7 @@ public final class AddBuffer: Sendable {
             guard range.upperBound <= state.length else { return nil }
             if range.isEmpty { return Data() }
             var out = Data(capacity: Int(range.count))
-            for page in ByteSource.pages(covering: range) {
+            for page in Self.pages(covering: range) {
                 guard let data = Self.page(page, in: &state) else { return nil }
                 Self.append(data, page: page, clippedTo: range, to: &out)
             }
@@ -112,14 +132,47 @@ public final class AddBuffer: Sendable {
         }
         if range.isEmpty { return Data() }
         var out = Data(capacity: Int(range.count))
-        for page in ByteSource.pages(covering: range) {
+        for page in Self.pages(covering: range) {
             let data = try state.withLock { Self.page(page, in: &$0) } ?? loadPage(page)
             Self.append(data, page: page, clippedTo: range, to: &out)
         }
         return out
     }
 
+    /// Reads `range` straight from the backing file without touching the page cache.
+    public func readSequential(_ range: Range<UInt64>) throws -> Data {
+        let written = length
+        guard range.upperBound <= written else {
+            throw ByteSourceError.truncated(expected: range.upperBound, available: written)
+        }
+        if range.isEmpty { return Data() }
+        var data = Data(count: Int(range.count))
+        try data.withUnsafeMutableBytes { buffer in
+            var done = 0
+            while done < buffer.count {
+                let n = pread(
+                    fd, buffer.baseAddress! + done, buffer.count - done,
+                    off_t(range.lowerBound) + off_t(done))
+                if n < 0 {
+                    if errno == EINTR { continue }
+                    throw ByteSourceError.readFailed(
+                        offset: range.lowerBound + UInt64(done), errno: errno)
+                }
+                if n == 0 {
+                    throw ByteSourceError.truncated(
+                        expected: range.upperBound, available: range.lowerBound + UInt64(done))
+                }
+                done += n
+            }
+        }
+        return data
+    }
+
     // MARK: Internals
+
+    private static func pages(covering range: Range<UInt64>) -> ClosedRange<UInt64> {
+        (range.lowerBound / pageSize)...((range.upperBound - 1) / pageSize)
+    }
 
     private static func page(_ page: UInt64, in state: inout State) -> Data? {
         if page == state.length / pageSize { return state.tail }
