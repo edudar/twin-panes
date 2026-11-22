@@ -46,8 +46,10 @@ extension HexView {
             let rowEnd = min(layout.length, start + UInt64(layout.bytesPerRow))
             let bytes: Data?
             if let visible {
-                let from = Int(start - first), to = Int(rowEnd - first)
-                bytes = from <= to ? visible.subdata(in: from..<to) : Data()
+                // Relative to `startIndex`: a data source may answer with a slice.
+                let from = visible.startIndex + Int(start - first)
+                let to = visible.startIndex + Int(rowEnd - first)
+                bytes = from <= to ? visible[from..<to] : Data()
             } else {
                 bytes =
                     start < rowEnd

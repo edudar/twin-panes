@@ -60,4 +60,18 @@ import Testing
         #expect(try inkedPixels(in: hex, appearance: appearance) > 20, "hex column")
         #expect(try inkedPixels(in: text, appearance: appearance) > 10, "text column")
     }
+
+    /// A data source may answer with a `Data` slice whose indices start at the range's
+    /// offset (the fake does). Drawing a view scrolled past row 0 cut rows out of it as if
+    /// it started at 0 and trapped.
+    @Test func drawsScrolledRowsFromDataSlices() throws {
+        view.go(to: 0x200)
+        #expect(view.position.topRow > 0)
+        #expect(source.cachedBytes(0x100..<0x110)?.startIndex == 0x100)
+        let top = view.inset.top + 2, height = view.rowHeight - 4
+        let hex = NSRect(
+            x: view.inset.left + Double(view.layout.hexCell(0)) * view.charWidth, y: top,
+            width: 8 * view.charWidth, height: height)
+        #expect(try inkedPixels(in: hex, appearance: .aqua) > 20)
+    }
 }
