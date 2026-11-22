@@ -229,8 +229,8 @@ struct SmokeTest {
         return app.dispatcher.handle(event, in: window)
     }
 
-    /// The ".." row: drawn first in the list, Return on it and a real double-click on it
-    /// go up a folder.
+    /// The ".." row: drawn first in the list, Return on it and the list's double-click
+    /// action on it go up a folder.
     private func parentRow(
         _ check: (Bool, String) -> Void, browser: BrowserItem, table: NSTableView,
         folder: URL, window: NSWindow
@@ -251,21 +251,13 @@ struct SmokeTest {
         check(table.selectedRow == 1, "and selects the folder you came from")
 
         await enterSub()
-        let rect = table.rect(ofRow: 0)
-        let point = table.convert(NSPoint(x: rect.minX + 30, y: rect.midY), to: nil)
-        for clicks in 1...2 {
-            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                guard
-                    let event = NSEvent.mouseEvent(
-                        with: type, location: point, modifierFlags: [],
-                        timestamp: ProcessInfo.processInfo.systemUptime,
-                        windowNumber: window.windowNumber, context: nil, eventNumber: 0,
-                        clickCount: clicks, pressure: type == .leftMouseDown ? 1 : 0)
-                else { return check(false, "make a mouse event") }
-                NSApp.postEvent(event, atStart: false)
-            }
-        }
-        await settle()
+        // What AppKit does once it has recognised a double-click on a row: send the table's
+        // doubleAction to its target with that row selected. Synthetic mouse events don't
+        // get that far reliably: on macOS 15 and 26 CI the posted clicks never reached the
+        // table (27 delivered them), and sent from here they skip its tracking loop.
+        table.selectRowIndexes([0], byExtendingSelection: false)
+        let sent = table.doubleAction.map { table.sendAction($0, to: table.target) } ?? false
+        check(sent, "the list's double-click action is wired up")
         check(browser.folder == sample, "double-clicking \"..\" goes to the parent")
     }
 
