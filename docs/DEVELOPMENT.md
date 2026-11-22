@@ -56,7 +56,7 @@ Manual checks, such as the sandbox spike, are in
 | `TwinPanes/` | App sources: entry point, menus, command bindings, recent files, the smoke test, and `AppIcon.icon`, the Icon Composer app icon. |
 | `Config/` | Build settings (`.xcconfig`), `Info.plist` additions and entitlements. |
 | `TwinPanesKit/` | One Swift package with every library module and its tests. |
-| `docs/` | The plan, runbooks and images. |
+| `docs/` | The plan, runbooks and images. `docs/plans/` holds one plan per milestone, written and reviewed before the work starts. |
 
 Modules in `TwinPanesKit/Sources/` are sibling folders, and their dependencies
 point one way only, enforced by `Package.swift`:

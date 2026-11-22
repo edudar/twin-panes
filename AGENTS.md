@@ -17,7 +17,11 @@ milestones). Read the relevant parts of PLAN.md before changing behaviour.
    then start the next. Order fixes so each commit is safe on its own (a fix that surfaces
    new errors lands after the fix that handles them).
 3. **Plan before big work.** For multi-part work (a milestone, a review's fix list),
-   write a plan with severity or priority, get it reviewed, then implement.
+   write a plan with severity or priority, get it reviewed, then implement. Every
+   milestone starts with its plan saved as `docs/plans/<milestone>.md` (for example
+   `docs/plans/M3a.md`): context, decisions, behaviour, the commit sequence and how
+   it's verified. Keep that file true while the milestone is in progress (status line,
+   changed steps); once it's done, PLAN.md's "As built" notes are the record.
 4. **Prove it in the real app.** A feature isn't done because unit tests pass: the smoke
    test (`--smoke-test`) must exercise it in the running, sandboxed app with its real
    layout (never by forcing view frames). Milestones must deliver something usable end to

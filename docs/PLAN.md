@@ -818,6 +818,10 @@ opacity and glass), and check the icon at 16 and 32 px in Finder list view.
 Order (D10): read-only hex viewer → basic browser → hex editor to first usable
 version → file-manager core → hex polish → the rest.
 
+From M3a on, each milestone's detailed plan (decisions, commit sequence,
+verification) is in `docs/plans/<milestone>.md`, written and reviewed before work
+starts; this table stays the summary.
+
 | # | Milestone | Scope | Done when |
 |---|---|---|---|
 | M0 | Skeleton + main frame | Git repo, Swift package with library targets in the §4 dependency graph + thin Xcode app target, bundle ID `io.github.edudar.twinpanes`, sandbox entitlements, swift-format, GitHub Actions (arm64 macOS) running `swift test`, ad-hoc signing on CI, app-scoped bookmark entitlement, CI on macOS 15, 26 and 27 (§7). Main window with `MainFrameLayout`, one panel tab slot, placeholder item, zoom toggle, the single close workflow (tab/window/quit). **Command registry** (§4.11) as a catalog over responder-chain actions, including the key-interception prototype. Two-window smoke test. **Sandbox spike** (§5, by hand): what a sandboxed browser may do, signed clone-stage-replace and in-place write feasibility, bookmarks, volumes | CI green on macOS 15, 26 and 27; items open, close and zoom inside the single window; a context-dependent key resolves differently in two items, and focus behaves in browser, search field, editor and sheet; capability matrix for the boot volume written up and its save/recovery policy decided from it (other volumes: M3b and M13+) |
