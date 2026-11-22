@@ -3,17 +3,36 @@ import AppKit
 /// The main window. Offers every key-down to the command dispatcher before the main
 /// menu and the responder chain see it (PLAN.md §4.11).
 @MainActor
-public final class MainWindow: NSWindow {
+public final class MainWindow: NSWindow, NSDraggingDestination {
     public var dispatcher: CommandDispatcher?
+    /// Called whenever this window becomes key or its first responder changes, so menus
+    /// can refresh focus-dependent key equivalents (PLAN.md §4.11).
+    public var onFocusChange: ((NSWindow) -> Void)?
+    private var lastHandledKeyEvent: NSEvent?
+
+    public override func becomeKey() {
+        super.becomeKey()
+        onFocusChange?(self)
+    }
+
+    public override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let changed = super.makeFirstResponder(responder)
+        if changed { onFocusChange?(self) }
+        return changed
+    }
 
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if let dispatcher, dispatcher.handle(event, in: self) { return true }
+        if event !== lastHandledKeyEvent {
+            lastHandledKeyEvent = event
+            if let dispatcher, dispatcher.handle(event, in: self) { return true }
+        }
         return super.performKeyEquivalent(with: event)
     }
 
     public override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, let dispatcher, dispatcher.handle(event, in: self) {
-            return
+        if event.type == .keyDown, event !== lastHandledKeyEvent {
+            lastHandledKeyEvent = event
+            if let dispatcher, dispatcher.handle(event, in: self) { return }
         }
         super.sendEvent(event)
     }
