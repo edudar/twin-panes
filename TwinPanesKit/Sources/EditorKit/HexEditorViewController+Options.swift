@@ -44,6 +44,8 @@ extension HexEditorViewController: NSMenuItemValidation {
             menuItem.state = (value as? String) == options.textEncoding.rawValue ? .on : .off
         case #selector(copyAsHex(_:)), #selector(copyAsText(_:)), #selector(saveSelection(_:)):
             return !hexView.selection.range.isEmpty
+        case #selector(toggleInspector(_:)):
+            menuItem.title = inspector.isHidden ? "Show Inspector" : "Hide Inspector"
         default:
             break
         }
