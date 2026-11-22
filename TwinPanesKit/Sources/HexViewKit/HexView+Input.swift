@@ -112,7 +112,7 @@ extension HexView: NSMenuItemValidation {
 
     // MARK: Mouse
 
-    private func offset(at point: NSPoint) -> (UInt64, HexLayout.Column)? {
+    func offset(at point: NSPoint) -> (UInt64, HexLayout.Column)? {
         guard layout.length > 0 else { return nil }
         let cell = (Double(point.x) - inset.left) / charWidth
         guard let hit = layout.hit(cell: cell) else { return nil }

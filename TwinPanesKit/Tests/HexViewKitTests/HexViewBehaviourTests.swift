@@ -101,4 +101,72 @@ struct ReadFailed: Error {}
         view.go(to: 50_000)
         render()
     }
+
+    // MARK: Keyboard and mouse
+
+    /// A view over a file whose last row is partial: 100,003 bytes at 16 per row. Holds
+    /// the source, which the view only references weakly.
+    @MainActor final class PartialLastRow {
+        let source = FakeHexSource(count: 100_003)
+        let view = HexView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+        init() {
+            view.options.bytesPerRow = .fixed(16)
+            view.dataSource = source
+        }
+    }
+
+    @Test func keyboardStopsAtTheEnds() {
+        let fixture = PartialLastRow(), view = fixture.view
+        view.moveLeft(nil)
+        view.moveUp(nil)
+        #expect(view.selection.cursor == 0)
+        view.moveToEndOfDocument(nil)
+        #expect(view.selection.cursor == 100_002)
+        view.moveRight(nil)
+        view.moveDown(nil)
+        #expect(view.selection.cursor == 100_002)
+        #expect(view.position.visibleRows.contains(view.layout.row(of: 100_002)))
+    }
+
+    @Test func endOfLineOnAPartialLastRowStopsAtTheLastByte() {
+        let fixture = PartialLastRow(), view = fixture.view
+        view.go(to: 100_000)
+        view.moveToEndOfLine(nil)
+        #expect(view.selection.cursor == 100_002)
+        view.go(to: 99_990)
+        view.moveDown(nil)
+        #expect(view.selection.cursor == 100_002)
+    }
+
+    @Test func pageDownMovesAScreenAndKeepsTheCursorVisible() {
+        let fixture = PartialLastRow(), view = fixture.view
+        let rowsPerPage = UInt64(view.position.viewHeight / view.rowHeight) - 1
+        view.pageDown(nil)
+        #expect(view.selection.cursor == rowsPerPage * 16)
+        #expect(view.position.visibleRows.contains(view.layout.row(of: view.selection.cursor)))
+        view.go(to: 99_000)
+        for _ in 0..<100 { view.pageDown(nil) }
+        #expect(view.selection.cursor == 100_002)
+    }
+
+    @Test func clickingWhenScrolledHitsTheRowUnderThePointer() throws {
+        let fixture = PartialLastRow(), view = fixture.view
+        view.go(to: 50_000)
+        let top = view.position.topRow
+        // The first hex cell of the second visible row.
+        let x = view.inset.left + Double(view.layout.hexCell(0)) * view.charWidth + 1
+        let y = view.inset.top - view.position.topRowInset + view.rowHeight * 1.5
+        let hit = try #require(view.offset(at: NSPoint(x: x, y: y)))
+        #expect(hit.0 == view.layout.rowStart(top + 1))
+        #expect(hit.1 == .hex)
+    }
+
+    @Test func changingBytesPerRowKeepsTheTopRow() {
+        let fixture = PartialLastRow(), view = fixture.view
+        view.go(to: 64_000)
+        let topOffset = view.layout.rowStart(view.position.topRow)
+        view.options.bytesPerRow = .fixed(32)
+        let newTop = view.layout.rowStart(view.position.topRow)
+        #expect(newTop <= topOffset && topOffset < newTop + 32, "\(topOffset) → \(newTop)")
+    }
 }
