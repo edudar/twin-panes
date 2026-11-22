@@ -7,27 +7,65 @@ import TwinPanesCore
 
 @testable import EditorKit
 
-/// Deterministic `ByteReading` whose first read signals `started` and blocks until
-/// `release()` is called, so search cancellation and generation tests need neither 4 GiB
-/// sparse files nor arbitrary sleeps.
+/// Non-blocking one-shot async signal, safe to await from Swift concurrency without
+/// occupying a cooperative thread (blocking with `DispatchSemaphore` inside `Task`
+/// starves the 3-thread cooperative pool on GitHub Actions runners).
+private final class AsyncSignal: Sendable {
+    private struct State: Sendable {
+        var signaled = false
+        var waiters: [CheckedContinuation<Void, Never>] = []
+    }
+
+    private let state = Mutex(State())
+
+    func signal() {
+        let waiters = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            guard !state.signaled else { return [] }
+            state.signaled = true
+            let list = state.waiters
+            state.waiters = []
+            return list
+        }
+        for waiter in waiters { waiter.resume() }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            let already = state.withLock { state -> Bool in
+                if state.signaled { return true }
+                state.waiters.append(continuation)
+                return false
+            }
+            if already { continuation.resume() }
+        }
+    }
+}
+
+/// Deterministic `ByteReading` whose first read (on `Searcher`'s `OperationQueue`) signals
+/// `entered` and blocks until `release()` is called, so search cancellation and generation
+/// tests need neither 4 GiB sparse files nor arbitrary sleeps.
 private final class GatedBytes: ByteReading, Sendable {
     let data: Data
-    private let entered = DispatchSemaphore(value: 0)
+    private let entered = AsyncSignal()
     private let gate = DispatchSemaphore(value: 0)
-    private let exited = DispatchSemaphore(value: 0)
-    private let blockedOnce = Atomic(false)
+    private let exited = AsyncSignal()
+    private let blockedOnce = Mutex(false)
 
     init(_ data: Data) { self.data = data }
 
     var length: UInt64 { UInt64(data.count) }
 
-    func waitUntilStarted() { entered.wait() }
+    func waitUntilStarted() async { await entered.wait() }
     func release() { gate.signal() }
-    func waitUntilFinished() { exited.wait() }
+    func waitUntilFinished() async { await exited.wait() }
 
     func read(_ range: Range<UInt64>) throws -> Data {
-        if blockedOnce.compareExchange(expected: false, desired: true, ordering: .relaxed).exchanged
-        {
+        let shouldBlock = blockedOnce.withLock { blocked -> Bool in
+            if blocked { return false }
+            blocked = true
+            return true
+        }
+        if shouldBlock {
             entered.signal()
             gate.wait()
             defer { exited.signal() }
@@ -37,16 +75,8 @@ private final class GatedBytes: ByteReading, Sendable {
     }
 }
 
-private struct PlainBytes: ByteReading {
-    let data: Data
-    var length: UInt64 { UInt64(data.count) }
-    func read(_ range: Range<UInt64>) throws -> Data {
-        data[Int(range.lowerBound)..<Int(range.upperBound)]
-    }
-}
-
 @MainActor
-@Suite struct HexEditorSearchTests {
+@Suite(.serialized) struct HexEditorSearchTests {
     let url = FileManager.default.temporaryDirectory
         .appendingPathComponent("HexEditorSearchTests-\(UUID().uuidString).bin")
 
@@ -68,11 +98,11 @@ private struct PlainBytes: ByteReading {
         controller.findAll()
         #expect(controller.isSearching)
 
-        await Task.detached { gated.waitUntilStarted() }.value
+        await gated.waitUntilStarted()
         item.willClose()
         #expect(!controller.isSearching)
         gated.release()
-        await Task.detached { gated.waitUntilFinished() }.value
+        await gated.waitUntilFinished()
     }
 
     @Test func aReplacedSearchCannotOverwriteTheNewerResult() async throws {
@@ -87,7 +117,7 @@ private struct PlainBytes: ByteReading {
         controller.findBar.kind = .hex
         controller.findBar.field.stringValue = "FF"
         controller.find(.forward)
-        await Task.detached { gated.waitUntilStarted() }.value
+        await gated.waitUntilStarted()
 
         // Replace with an instant search that finds 0x41 at offset 0x41.
         controller.searchSourceOverride = nil
@@ -101,7 +131,7 @@ private struct PlainBytes: ByteReading {
 
         // Unblock the superseded search and verify it cannot clobber the newer result.
         gated.release()
-        await Task.detached { gated.waitUntilFinished() }.value
+        await gated.waitUntilFinished()
         await Task.yield()
         #expect(item.hexView.selection.range == 0x41..<0x42)
         #expect(controller.findBar.statusLabel.stringValue.hasPrefix("Found at 0x41"))
@@ -120,7 +150,7 @@ private struct PlainBytes: ByteReading {
         controller.findBar.kind = .hex
         controller.findBar.field.stringValue = "FF"
         controller.find(.forward)
-        await Task.detached { gated.waitUntilStarted() }.value
+        await gated.waitUntilStarted()
 
         // First Esc cancels the search but keeps the bar visible.
         controller.editorCloseFind(nil)
@@ -128,7 +158,7 @@ private struct PlainBytes: ByteReading {
         #expect(!controller.findBar.isHidden)
         #expect(controller.findBar.statusLabel.stringValue == "Cancelled")
         gated.release()
-        await Task.detached { gated.waitUntilFinished() }.value
+        await gated.waitUntilFinished()
 
         // Second Esc closes the bar.
         controller.editorCloseFind(nil)
