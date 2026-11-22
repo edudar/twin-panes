@@ -85,4 +85,14 @@ import Testing
         #expect(HexCopy.string(bytes, as: .hex) == "4F 2A 00 41")
         #expect(HexCopy.string(bytes, as: .text(.ascii)) == "O*.A")
     }
+
+    @Test func findsTheFirstHighlightReachingARow() {
+        let ranges: [Range<UInt64>] = [0..<2, 10..<20, 40..<41]
+        #expect(ranges.partitioningIndex { $0.upperBound > 0 } == 0)
+        #expect(ranges.partitioningIndex { $0.upperBound > 2 } == 1)
+        #expect(ranges.partitioningIndex { $0.upperBound > 19 } == 1)
+        #expect(ranges.partitioningIndex { $0.upperBound > 20 } == 2)
+        #expect(ranges.partitioningIndex { $0.upperBound > 41 } == 3)
+        #expect([Range<UInt64>]().partitioningIndex { _ in true } == 0)
+    }
 }

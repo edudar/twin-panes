@@ -18,10 +18,17 @@ import Testing
     }
 
     @Test func groupingRemovesInnerSpaces() {
-        let layout = HexLayout(options: HexViewOptions(grouping: 4), length: 64)
-        #expect(layout.hexCell(1) - layout.hexCell(0) == 2)
-        #expect(layout.hexCell(4) - layout.hexCell(3) == 3)
-        #expect(layout.hexCell(8) - layout.hexCell(7) == 4)
+        let g2 = HexLayout(options: HexViewOptions(grouping: 2), length: 64)
+        #expect(g2.hexCell(1) - g2.hexCell(0) == 2)
+        #expect(g2.hexCell(2) - g2.hexCell(1) == 3)
+        let g4 = HexLayout(options: HexViewOptions(grouping: 4), length: 64)
+        #expect(g4.hexCell(1) - g4.hexCell(0) == 2)
+        #expect(g4.hexCell(4) - g4.hexCell(3) == 3)
+        #expect(g4.hexCell(8) - g4.hexCell(7) == 4)
+        // Grouping of 8 has a single space between 8-byte groups, not a double gap.
+        let g8 = HexLayout(options: HexViewOptions(grouping: 8), length: 64)
+        #expect(g8.hexCell(7) - g8.hexCell(6) == 2)
+        #expect(g8.hexCell(8) - g8.hexCell(7) == 3)
     }
 
     @Test func offsetWidthGrowsWithFile() {
@@ -29,6 +36,9 @@ import Testing
         let huge = HexLayout(options: HexViewOptions(), length: 1 << 40)
         #expect(small.offsetLabel(255) == "000000FF")
         #expect(huge.offsetCells == 10)
+        let decimal = HexLayout(options: HexViewOptions(offsetBase: .decimal), length: 300)
+        #expect(decimal.offsetCells == 10)
+        #expect(decimal.offsetLabel(255) == "0000000255")
         let both = HexLayout(options: HexViewOptions(offsetBase: .both), length: 300)
         #expect(both.offsetLabel(255) == "000000FF 0000000255")
     }
@@ -47,10 +57,15 @@ import Testing
     @Test func hitTesting() {
         let layout = HexLayout(options: HexViewOptions(), length: 1000)
         #expect(layout.hit(cell: 2) == nil)
+        #expect(layout.hit(cell: Double(layout.hexStart - 1) - 0.1) == nil)
+        #expect(layout.hit(cell: Double(layout.hexStart - 1))! == (0, .hex))
         #expect(layout.hit(cell: Double(layout.hexCell(5)) + 1)! == (5, .hex))
         #expect(layout.hit(cell: Double(layout.hexCell(5)) + 2.5)! == (5, .hex))
+        #expect(layout.hit(cell: Double(layout.textStart - 1))! == (0, .text))
         #expect(layout.hit(cell: Double(layout.textCell(7)) + 0.5)! == (7, .text))
         #expect(layout.hit(cell: 500)! == (15, .text))
+        #expect(HexLayout(options: .init(bytesPerRow: .fixed(8)), length: 32).bytesPerRow == 8)
+        #expect(HexLayout(options: .init(bytesPerRow: .fixed(32)), length: 32).bytesPerRow == 32)
     }
 
     @Test func emptyFileHasOneRow() {

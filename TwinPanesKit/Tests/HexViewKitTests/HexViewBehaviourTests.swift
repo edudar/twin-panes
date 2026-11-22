@@ -13,7 +13,10 @@ final class FakeHexSource: HexViewDataSource {
     var prefetchError: Error?
     /// Bytes cut off every `cachedBytes` answer, to imitate a file that got shorter.
     var shortBy = 0
+    /// When true, `prefetch` records the request without completing until `flushPrefetches()`.
+    var deferPrefetch = false
     private(set) var prefetches: [Range<UInt64>] = []
+    private var pending: [@MainActor () -> Void] = []
 
     init(count: Int) { data = Data((0..<count).map { UInt8(truncatingIfNeeded: $0) }) }
 
@@ -27,8 +30,17 @@ final class FakeHexSource: HexViewDataSource {
 
     func prefetch(_ range: Range<UInt64>, completion: @escaping @MainActor (Error?) -> Void) {
         prefetches.append(range)
-        if prefetchError == nil { cached = true }
-        completion(prefetchError)
+        let finish: @MainActor () -> Void = {
+            if self.prefetchError == nil { self.cached = true }
+            completion(self.prefetchError)
+        }
+        if deferPrefetch { pending.append(finish) } else { finish() }
+    }
+
+    func flushPrefetches() {
+        let callbacks = pending
+        pending = []
+        for callback in callbacks { callback() }
     }
 
     func read(_ range: Range<UInt64>) throws -> Data {
@@ -39,9 +51,14 @@ final class FakeHexSource: HexViewDataSource {
 @MainActor
 final class DelegateSpy: HexViewDelegate {
     var errors = 0
+    var tooLargeRanges: [Range<UInt64>] = []
+    var loadedCount = 0
     func hexViewSelectionDidChange(_ view: HexView) {}
-    func hexView(_ view: HexView, selectionTooLargeToCopy range: Range<UInt64>) {}
+    func hexView(_ view: HexView, selectionTooLargeToCopy range: Range<UInt64>) {
+        tooLargeRanges.append(range)
+    }
     func hexView(_ view: HexView, didFailToRead error: Error) { errors += 1 }
+    func hexViewDidLoadBytes(_ view: HexView) { loadedCount += 1 }
 }
 
 struct ReadFailed: Error {}
@@ -67,17 +84,27 @@ struct ReadFailed: Error {}
         }
     }
 
-    /// Since macOS 14 views don't clip by default; an unclipped hex view painted over
-    /// the tab bar above it (bug, 2026-11-21).
-    @Test func clipsToItsBounds() {
-        #expect(view.clipsToBounds)
-    }
-
     @Test func asksForTheVisibleRowsOnceWhenUncached() {
         render(times: 3)
         #expect(source.prefetches.count == 1)
         let visible = view.layout.rowStart(view.position.visibleRows.lowerBound)
         #expect(source.prefetches.first?.contains(visible) == true)
+    }
+
+    /// Scrolling down past the pending prefetch's end must request the newly visible rows
+    /// even when the new margin still overlaps the pending range's start.
+    @Test func incrementalDownwardScrollRequestsUncoveredVisibleRows() {
+        source.deferPrefetch = true
+        render()
+        #expect(source.prefetches.count == 1)
+        let firstEnd = source.prefetches[0].upperBound
+        // Scroll so the visible rows extend past `firstEnd` while one screen of margin
+        // above still reaches inside `source.prefetches[0]`.
+        let rowsPerScreen = UInt64(view.position.visibleRows.count)
+        view.position.scrollToTop(row: view.layout.row(of: firstEnd) - rowsPerScreen / 2)
+        render()
+        #expect(source.prefetches.count == 2)
+        source.flushPrefetches()
     }
 
     /// Review bug 2: a read that keeps failing was requested again on every redraw.
@@ -93,13 +120,100 @@ struct ReadFailed: Error {}
     }
 
     /// Review bug 1: bytes shorter than asked for (a file truncated after open) drew past
-    /// the end of the data and trapped.
+    /// the end of the data and trapped. It must treat short reads as missing and ask the
+    /// data source to prefetch rather than trapping.
     @Test func drawsShortDataAsPlaceholders() {
         source.cached = true
         source.shortBy = 40
+        source.prefetchError = ReadFailed()
         render()
+        #expect(source.prefetches.count == 1)
+        #expect(spy.errors == 1)
         view.go(to: 50_000)
         render()
+        #expect(source.prefetches.count == 2)
+        #expect(spy.errors == 2)
+    }
+
+    @Test func rendersHighlightsAndEmptyFiles() {
+        source.cached = true
+        view.highlights = [0..<4, 14..<20]
+        render()
+        #expect(view.clipsToBounds)
+
+        let empty = FakeHexSource(count: 0)
+        view.dataSource = empty
+        render()
+        #expect(view.selection.range.isEmpty)
+        let copyItem = NSMenuItem(
+            title: "Copy", action: #selector(HexView.copy(_:)), keyEquivalent: "")
+        let selectAll = NSMenuItem(
+            title: "Select All", action: #selector(HexView.selectAll(_:)), keyEquivalent: "")
+        #expect(!view.validateMenuItem(copyItem))
+        #expect(!view.validateMenuItem(selectAll))
+    }
+
+    @Test func copyFormatsActiveColumnAndEnforcesCap() {
+        source.cached = true
+        view.select(0x41..<0x44)  // "ABC"
+        NSPasteboard.general.clearContents()
+        view.copy(nil)
+        #expect(NSPasteboard.general.string(forType: .string) == "41 42 43")
+
+        view.insertTab(nil)
+        #expect(view.activeColumn == .text)
+        view.copy(nil)
+        #expect(NSPasteboard.general.string(forType: .string) == "ABC")
+
+        final class HugeSource: HexViewDataSource {
+            var length: UInt64 { UInt64(HexCopy.maxBytes) + 10 }
+            func cachedBytes(_ range: Range<UInt64>) -> Data? { nil }
+            func prefetch(_ range: Range<UInt64>, completion: @escaping @MainActor (Error?) -> Void)
+            {
+                completion(nil)
+            }
+            func read(_ range: Range<UInt64>) throws -> Data { Data() }
+        }
+        let huge = HugeSource()
+        view.dataSource = huge
+        view.selectAll(nil)
+        view.copy(nil)
+        #expect(spy.tooLargeRanges == [0..<huge.length])
+    }
+
+    @Test func selectionModifiersAndHorizontalScrolling() throws {
+        let fixture = PartialLastRow(), view = fixture.view
+        view.go(to: 16)
+        view.moveRightAndModifySelection(nil)
+        view.moveRightAndModifySelection(nil)
+        #expect(view.selection.range == 16..<19)
+        view.moveToBeginningOfLine(nil)
+        #expect(view.selection.range == 16..<17)
+        view.moveToBeginningOfDocument(nil)
+        #expect(view.selection.cursor == 0)
+
+        // Wide layout in a 600 pt view needs horizontal scrolling; 8 bytes/row fits.
+        view.options.bytesPerRow = .fixed(8)
+        #expect(view.horizontalScroller.isHidden)
+        view.options.bytesPerRow = .fixed(32)
+        #expect(!view.horizontalScroller.isHidden)
+        #expect(view.maxHorizontalOffset > 0)
+
+        // Horizontal offset shifts hit-testing to match the scrolled columns.
+        let shift = 5.0 * view.charWidth
+        view.setHorizontalOffset(shift)
+        let x = view.inset.left + Double(view.layout.hexCell(10)) * view.charWidth - shift + 1
+        let y = view.inset.top + view.rowHeight * 0.5
+        let hit = try #require(view.offset(at: NSPoint(x: x, y: y)))
+        #expect(hit == (10, .hex))
+
+        // Selecting a match on a partially clipped bottom row reveals it fully.
+        view.options.bytesPerRow = .fixed(16)
+        view.position.setOffset(view.rowHeight / 2)
+        let lastVisible = view.position.visibleRows.upperBound - 1
+        view.select(view.layout.rowStart(lastVisible)..<(view.layout.rowStart(lastVisible) + 2))
+        let rowBottom = Double(lastVisible + 1) * view.rowHeight
+        #expect(rowBottom <= view.position.offset + view.position.viewHeight + 0.01)
     }
 
     // MARK: Keyboard and mouse
