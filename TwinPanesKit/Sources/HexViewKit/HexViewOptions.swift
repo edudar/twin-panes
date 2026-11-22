@@ -29,14 +29,14 @@ public struct HexViewOptions: Equatable, Sendable {
         }
 
         /// The byte that typing `character` writes, or nil if this encoding can't hold it.
+        /// Restricted to printable characters (matching `character(for:)`); arbitrary byte
+        /// values are typed in the hex column.
         public func byte(for character: Character) -> UInt8? {
             guard character.unicodeScalars.count == 1,
-                let value = character.unicodeScalars.first?.value
+                let value = character.unicodeScalars.first?.value, value < 0x100
             else { return nil }
-            switch self {
-            case .ascii: return value < 0x80 ? UInt8(value) : nil
-            case .latin1: return value < 0x100 ? UInt8(value) : nil
-            }
+            let byte = UInt8(value)
+            return self.character(for: byte) != nil ? byte : nil
         }
     }
 

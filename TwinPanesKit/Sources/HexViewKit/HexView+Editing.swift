@@ -28,9 +28,23 @@ extension HexView {
         var nibble: UInt64?
         switch activeColumn {
         case .hex:
-            guard character.isASCII, let digit = character.hexDigitValue.map(UInt8.init),
-                let current = dataSource.cachedBytes(offset..<(offset + 1))?.first
-            else { return false }
+            guard character.isASCII, let digit = character.hexDigitValue.map(UInt8.init) else {
+                return false
+            }
+            let current: UInt8
+            if let cached = dataSource.cachedBytes(offset..<(offset + 1))?.first {
+                current = cached
+            } else {
+                do {
+                    guard let loaded = try dataSource.read(offset..<(offset + 1)).first else {
+                        return false
+                    }
+                    current = loaded
+                } catch {
+                    delegate?.hexView(self, didFailToRead: error)
+                    return false
+                }
+            }
             if pendingNibble == offset, selection.range.count == 1 {
                 byte = current & 0xF0 | digit
                 cursorAfter = next

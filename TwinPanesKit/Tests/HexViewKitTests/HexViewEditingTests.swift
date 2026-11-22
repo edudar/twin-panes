@@ -87,6 +87,33 @@ import Testing
         #expect(source.data.count == 1000)
     }
 
+    @Test func hexTypingFallsBackToReadWhenUncachedAndReportsErrors() {
+        source.cached = false
+        view.go(to: 5)
+        view.insertText("AB")
+        #expect(byte(5) == 0xAB)
+        #expect(view.selection.cursor == 6)
+
+        source.readError = ReadFailed()
+        view.insertText("C")
+        #expect(byte(6) == 6)
+        #expect(spy.errors == 1)
+    }
+
+    @Test func textColumnRejectsControlCharacters() {
+        view.go(to: 10)
+        view.insertTab(nil)
+        view.insertText("\u{00}")
+        view.insertText("\n")
+        view.insertText("\u{7F}")
+        #expect(spy.writes.isEmpty)
+        #expect(spy.unencodable.count == 3)
+        view.options.textEncoding = .latin1
+        view.insertText("\u{85}")
+        #expect(spy.writes.isEmpty)
+        #expect(spy.unencodable.count == 4)
+    }
+
     /// Drawing the changed-bytes fill with ranges past the end and short data must not trap.
     @Test func drawsModifiedRangesEvenOnShortData() {
         source.modified = [0..<5, 990..<5000]

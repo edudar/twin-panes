@@ -13,6 +13,8 @@ final class FakeHexSource: HexViewDataSource {
     var cached = false
     /// Returned by every prefetch; nil means success (which also fills the cache).
     var prefetchError: Error?
+    /// Thrown by `read(_:)` when set.
+    var readError: Error?
     /// Bytes cut off every `cachedBytes` answer, to imitate a file that got shorter.
     var shortBy = 0
     /// When true, `prefetch` records the request without completing until `flushPrefetches()`.
@@ -46,7 +48,8 @@ final class FakeHexSource: HexViewDataSource {
     }
 
     func read(_ range: Range<UInt64>) throws -> Data {
-        data[Int(range.lowerBound)..<Int(range.upperBound)]
+        if let readError { throw readError }
+        return data[Int(range.lowerBound)..<Int(range.upperBound)]
     }
 
     func modifiedRanges(in range: Range<UInt64>) -> [Range<UInt64>] {
