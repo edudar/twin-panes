@@ -75,11 +75,17 @@ extension HexEditorViewController {
         run { token, progress in
             try searcher.next(
                 pattern, from: from, direction: direction, cancellation: token, progress: progress)
-        } done: { [weak self] match in
+        } done: { [weak self] match, stale in
             guard let self else { return }
             guard let match else {
-                self.reportFind("Not found")
+                self.reportFind(stale ? "Not found (before edit)" : "Not found")
                 return NSSound.beep()
+            }
+            if stale {
+                self.reportFind(
+                    "Found at \(HexEditorItem.hex(match.range.lowerBound)) before edit; search again"
+                )
+                return
             }
             self.select(match.range)
             let wrap = direction == .forward ? " (wrapped to the start)" : " (wrapped to the end)"
@@ -98,8 +104,18 @@ extension HexEditorViewController {
         let searcher = Searcher(source: source)
         run { token, progress in
             try searcher.all(pattern, cancellation: token, progress: progress)
-        } done: { [weak self] result in
+        } done: { [weak self] result, stale in
             guard let self else { return }
+            if stale {
+                let count = result.ranges.count
+                let suffix = result.isTruncated ? "+" : ""
+                let noun = count == 1 && !result.isTruncated ? "match" : "matches"
+                self.findBar.show(
+                    count == 0
+                        ? "Not found (before edit)"
+                        : "\(count.formatted())\(suffix) \(noun) before edit; search again")
+                return
+            }
             self.allMatches = (pattern, result)
             self.hexView.highlights = result.ranges
             guard !result.ranges.isEmpty else {
@@ -164,7 +180,7 @@ extension HexEditorViewController {
     /// on the main actor unless the search was cancelled or replaced meanwhile.
     private func run<T: Sendable>(
         _ work: @escaping @Sendable (SearchCancellation, @escaping Searcher.Progress) throws -> T,
-        done: @escaping @MainActor (T) -> Void
+        done: @escaping @MainActor (T, Bool) -> Void
     ) {
         searchTask?.cancel()
         searchGeneration += 1
@@ -192,10 +208,12 @@ extension HexEditorViewController {
             guard let self, self.searchGeneration == generation else { return }
             self.searchTask = nil
             self.findBar.setProgress(nil)
+            let stale =
+                version.map { self.item?.buffer.tree.isSameVersion(as: $0) == false } ?? false
             switch result {
             case .success(let value):
-                done(value)
-                if let version, self.item?.buffer.tree.isSameVersion(as: version) == false {
+                done(value, stale)
+                if stale {
                     self.item?.host?.showStatus(
                         "The file was edited during the search; the results are from before")
                 }

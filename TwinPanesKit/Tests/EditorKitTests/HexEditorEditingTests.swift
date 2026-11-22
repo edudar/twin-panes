@@ -106,8 +106,8 @@ import TwinPanesCore
         #expect(controller.allMatches == nil && controller.lastMatch == nil)
     }
 
-    /// Done-when for M3a: an edit doesn't wait for a running search, and the search
-    /// reports the file as it was when it started.
+    /// Done-when for M3a: an edit doesn't wait for a running search; the search reports
+    /// the pre-edit snapshot without hijacking the cursor or poisoning later Find Next.
     @Test func editsDoNotWaitForARunningSearch() async throws {
         defer { try? FileManager.default.removeItem(at: url) }
         let item = try makeItem()
@@ -122,11 +122,22 @@ import TwinPanesCore
         item.hexView.go(to: 0x30)
         item.hexView.insertText("FF")
         #expect(try byte(item, 0x30) == 0xFF)
+        #expect(item.hexView.selection.cursor == 0x31)
         #expect(controller.isSearching)
 
         gated.release()
         await gated.waitUntilFinished()
         try await waitForSearch(controller)
-        #expect(controller.allMatches?.result.ranges == [0x30..<0x32])
+        // Stale pre-edit results must not overwrite the cursor, highlights, or cache.
+        #expect(controller.allMatches == nil)
+        #expect(item.hexView.highlights.isEmpty)
+        #expect(item.hexView.selection.range == 0x31..<0x32)
+        #expect(controller.findBar.statusLabel.stringValue.contains("before edit"))
+
+        // A follow-up Find Next searches the edited snapshot (where "30 31" is now gone).
+        controller.searchSourceOverride = nil
+        controller.find(.forward)
+        try await waitForSearch(controller)
+        #expect(controller.findBar.statusLabel.stringValue == "Not found")
     }
 }
