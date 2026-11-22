@@ -1,6 +1,6 @@
 # M3a plan: overwrite editing
 
-_Status: approved 2026-11-22; built 2026-11-22. How it was actually done is in PLAN.md (D26–D29, the M3a "As built" notes in §4.2 and §4.4)._
+_Status: approved 2026-11-22; built and review-fixed 2026-11-22. How it was actually done is in PLAN.md (D26–D29, the M3a "As built" notes in §4.2 and §4.4, and §9 for deferred review items)._
 
 ## Context
 
@@ -32,9 +32,9 @@ first section below.
   of that. M8 then only has to expose insert and delete.
 - **Path copying:** each edit copies O(log n) nodes, so taking a snapshot is O(1)
   (keep the root).
-- **Coalescing:** a new piece that directly follows its left neighbour in the same
-  source merges into that neighbour, during the join. Typing a run of bytes therefore
-  stays one piece.
+- **Coalescing:** a new piece that continues its left or right neighbour in the same
+  source merges into it during the join. Typing a run of bytes therefore stays one
+  piece, and deleting an insert rejoins the original.
 - **Why not the alternatives:**
   - A treap has a random shape, which makes failures harder to reproduce.
   - A B-tree like Hex Fiend's is faster in cache but much more code.
@@ -46,8 +46,11 @@ first section below.
   temp directory, and the file is deleted when the buffer goes away.
 - Appended bytes also go into a small LRU of its pages, so drawing what you just typed
   never blocks.
-- Written ranges never change, so snapshots on other threads can read them without a
-  lock. The only shared state is the length, which a `Mutex` holds.
+- Written ranges never change, so snapshots on other threads can read them safely.
+  A dedicated `writeLock` serializes `pwrite` without holding the `state` `Mutex`
+  (which guards `length`, the open partial tail page, and the LRU cache).
+  `readSequential` reads straight from the file via `pread` without touching the cache,
+  and evicted-page `prefetch` runs on a serial `ioQueue` with superseding tickets.
 - This follows §4.2 ("no in-memory phase"). M3b only moves the file into the session's
   folder.
 
@@ -69,7 +72,8 @@ first section below.
 - `HexEditorItem.isDirty` reports unsaved edits, and the existing close workflow
   (`CloseCoordinator.confirmClose`) already prompts for dirty items.
 - New `WorkspaceItem.canSave` (default `true`; the hex editor returns `false` until
-  M3b). When it is false, the sheet offers only **Discard** and **Cancel**.
+  M3b). When it is false, the sheet offers only **Discard Changes** (destructive, ⌘D,
+  not bound to Return) and **Cancel** (Escape).
 
 ## Behaviour
 
@@ -77,10 +81,14 @@ first section below.
   - The first hex digit replaces the high nibble of the byte at the cursor and the
     cursor stays put, with a nibble marker.
   - The second digit replaces the low nibble and moves the cursor on.
-  - Moving the cursor or typing in the other column resets the nibble state.
+  - If the byte under the cursor is not in the cache yet, hex typing falls back to a
+    1-byte read (surfacing any read error via `didFailToRead`).
+  - Moving the cursor, switching columns (Tab), reloading, or discarding resets the
+    nibble state.
   - A key that isn't a hex digit beeps.
-- **Text column:** today the column's encodings are ASCII and Latin-1, so one
-  character overwrites one byte.
+- **Text column:** today the column's encodings are ASCII and Latin-1, so one printable
+  character overwrites one byte (control characters are rejected; arbitrary byte values
+  are typed in the hex column).
   - A character the encoding can't represent beeps and shows a status message.
   - Encoding rules for UTF-8 and UTF-16 come with those encodings in M10, following
     §4.4.
@@ -98,14 +106,15 @@ first section below.
 - **Changed bytes:** `HexViewDataSource` gains `modifiedRanges(in:)`, which defaults to
   none. The view fills those bytes with a system accent tint, below the selection and
   the find highlights.
-- **Status line:** "Modified · saving comes in M3b" replaces "Read-only" once there are
-  edits.
+- **Status line:** "Read-only" is removed while clean, and "Modified (saving comes in
+  M3b)" is appended once there are edits.
 - **Find and the inspector:**
   - Both read the current snapshot.
   - Any edit clears the Find All highlights and `lastMatch`, since offsets stay valid
     but the matches may not.
-  - A search that is running keeps its own snapshot, so the result is what the file
-    looked like when the search started.
+  - A search that is running keeps its own snapshot. If the file was edited before it
+    finishes, the find bar and status line report the pre-edit result without moving the
+    cursor, painting stale highlights, or caching stale `Find All` results for later ⌘G.
 
 ## Commits
 
@@ -139,10 +148,10 @@ failing tests → implementation.
 5. **Core: `UndoStack`.** Undo, redo, coalescing (entry replaced, not pushed), redo
    cleared on a new edit, clean state at the opening root. The fuzz test is extended
    with undo and redo, against the model's history.
-6. **HexViewKit: editing input.** A `HexViewEditing` delegate method that asks to
-   overwrite at an offset and reports whether it happened. Also nibble entry,
-   text-column typing, beeps and the modified-bytes fill. Tests in
-   `HexViewBehaviourTests` with the fake source:
+6. **HexViewKit: editing input.** `HexViewDelegate` methods that ask to overwrite at an
+   offset, report unencodable characters, and notify on column switches. Also nibble
+   entry, uncached 1-byte fallback reads, text-column typing, beeps and the
+   modified-bytes fill. Tests in `HexViewEditingTests` with the fake source:
    - two digits give one byte and advance
    - a non-hex key is refused
    - the last byte doesn't advance
@@ -185,6 +194,10 @@ failing tests → implementation.
 - the external-change policy
 - insert and delete in the UI (M8)
 - UTF-8 and UTF-16 text columns (M10)
+- M3a review deferrals logged in PLAN.md §9: lazy `AddBuffer` file creation (M3b),
+  moving `UndoStack` and multi-view observation onto `EditorSession` with enforced
+  `EditBuffer` isolation (M3b), and chunked `readSequential` for heavily fragmented
+  piece trees (M3b / M8)
 
 ## Verification
 
