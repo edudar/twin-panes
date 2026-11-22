@@ -14,7 +14,6 @@ import WorkspaceKit
     @objc optional func newEditorTab(_ sender: Any?)
     @objc optional func newEditorView(_ sender: Any?)
     @objc optional func browserSwitchPanel(_ sender: Any?)
-    @objc optional func editorFindNext(_ sender: Any?)
     @objc optional func showTestSheet(_ sender: Any?)
     @objc optional func probeFile(_ sender: Any?)
     @objc optional func probeFolder(_ sender: Any?)
@@ -46,7 +45,13 @@ extension CommandID {
     static let browserParent: CommandID = "browser.parent"
     static let browserGoToFolder: CommandID = "browser.goToFolder"
     static let browserSwitchPanel: CommandID = "browser.switchPanel"
+    static let editorFind: CommandID = "editor.find"
     static let editorFindNext: CommandID = "editor.findNext"
+    static let editorFindPrevious: CommandID = "editor.findPrevious"
+    static let editorFindAll: CommandID = "editor.findAll"
+    static let editorUseSelectionForFind: CommandID = "editor.useSelectionForFind"
+    static let editorCloseFind: CommandID = "editor.closeFind"
+    static let toggleInspector: CommandID = "editor.toggleInspector"
     static let showTestSheet: CommandID = "debug.showTestSheet"
     static let probeFile: CommandID = "debug.probeFile"
     static let probeFolder: CommandID = "debug.probeFolder"
@@ -92,7 +97,17 @@ enum DefaultCommands {
         add(.browserParent, "Enclosing Folder", #selector(BrowserActions.browserParent(_:)))
         add(.browserGoToFolder, "Go to Folder…", #selector(BrowserActions.browserGoToFolder(_:)))
         add(.browserSwitchPanel, "Switch Panel", #selector(AppActions.browserSwitchPanel(_:)))
-        add(.editorFindNext, "Find Next", #selector(AppActions.editorFindNext(_:)))
+        add(.editorFind, "Find…", #selector(HexEditorActions.editorFind(_:)))
+        add(.editorFindNext, "Find Next", #selector(HexEditorActions.editorFindNext(_:)))
+        add(
+            .editorFindPrevious, "Find Previous",
+            #selector(HexEditorActions.editorFindPrevious(_:)))
+        add(.editorFindAll, "Find All", #selector(HexEditorActions.editorFindAll(_:)))
+        add(
+            .editorUseSelectionForFind, "Use Selection for Find",
+            #selector(HexEditorActions.editorUseSelectionForFind(_:)))
+        add(.editorCloseFind, "Close Find Bar", #selector(HexEditorActions.editorCloseFind(_:)))
+        add(.toggleInspector, "Show Inspector", #selector(HexEditorActions.toggleInspector(_:)))
         add(.showTestSheet, "Show Test Sheet", #selector(AppActions.showTestSheet(_:)))
         add(.probeFile, "Probe a Test File…", #selector(AppActions.probeFile(_:)))
         add(.probeFolder, "Probe a Folder…", #selector(AppActions.probeFolder(_:)))
@@ -107,6 +122,7 @@ enum DefaultCommands {
         let browser = BindingScope.item(.browser)
         let fileList = BindingScope.item(.browser, part: "fileList")
         let editor = BindingScope.item(.editor)
+        let findBar = BindingScope.item(.editor, part: "findBar")
 
         registry.bind(KeyChord("q", .command), to: .quit)
         registry.bind(KeyChord("n", .command), to: .newWindow)
@@ -132,6 +148,14 @@ enum DefaultCommands {
         registry.bind(KeyChord("g", [.command, .shift]), to: .browserGoToFolder, in: browser)
         registry.bind(.tab, to: .browserSwitchPanel, in: fileList)
         registry.bind(.function(3), to: .editorFindNext, in: editor)
+        registry.bind(
+            KeyChord(KeyChord.function(3).key, .shift), to: .editorFindPrevious, in: editor)
+        registry.bind(KeyChord("f", .command), to: .editorFind, in: editor)
+        registry.bind(KeyChord("g", .command), to: .editorFindNext, in: editor)
+        registry.bind(KeyChord("g", [.command, .shift]), to: .editorFindPrevious, in: editor)
+        registry.bind(KeyChord("e", .command), to: .editorUseSelectionForFind, in: editor)
+        registry.bind(KeyChord("i", [.command, .option]), to: .toggleInspector, in: editor)
+        registry.bind(.escape, to: .editorCloseFind, in: findBar)
         return registry
     }
 

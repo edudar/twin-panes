@@ -1,6 +1,7 @@
 import AppKit
 import BrowserKit
 import EditorKit
+import Synchronization
 import TwinPanesCore
 import WorkspaceKit
 
@@ -142,8 +143,11 @@ struct SmokeTest {
         if let viewMenu {
             window.makeFirstResponder(editor.preferredFirstResponder)
             app.menuUpdater.refresh(viewMenu, for: window)
-            let findNext = viewMenu.items.first {
-                $0.action == #selector(AppActions.editorFindNext(_:))
+            let findMenu = NSApp.mainMenu?.item(withTitle: "Edit")?.submenu?
+                .item(withTitle: "Find")?.submenu
+            if let findMenu { app.menuUpdater.refresh(findMenu, for: window) }
+            let findNext = findMenu?.items.first {
+                $0.action == #selector(HexEditorActions.editorFindNext(_:))
             }
             let browserView = viewMenu.items.first {
                 $0.action == #selector(BrowserActions.browserView(_:))
@@ -171,12 +175,15 @@ struct SmokeTest {
 
     /// Sends a synthetic key-down through the dispatcher, as `MainWindow` would.
     private func dispatch(_ chord: KeyChord, in window: NSWindow) -> Bool {
+        // AppKit reports a shifted letter as the capital ("G" for ⇧⌘G).
+        let shifted = chord.menuKeyEquivalent.mask.contains(.shift)
+        let characters = shifted && chord.key.count == 1 ? chord.key.uppercased() : chord.key
         guard
             let event = NSEvent.keyEvent(
                 with: .keyDown, location: .zero, modifierFlags: chord.menuKeyEquivalent.mask,
                 timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: window.windowNumber, context: nil, characters: chord.key,
-                charactersIgnoringModifiers: chord.key, isARepeat: false, keyCode: 0)
+                windowNumber: window.windowNumber, context: nil, characters: characters,
+                charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0)
         else { return false }
         return app.dispatcher.handle(event, in: window)
     }
@@ -202,7 +209,21 @@ struct SmokeTest {
         }
         check(app.controller(containing: hex.id) != nil, "hex editor opens as a tab")
         check(hex.length == 200_000, "file length is read")
-        hex.hexView.frame = NSRect(x: 0, y: 0, width: 700, height: 400)
+        await settle()
+        let editorView = hex.viewController.view
+        editorView.window?.layoutIfNeeded()
+        let editor = editorView.bounds, hexFrame = hex.hexView.frame
+        check(
+            hexFrame.width >= editor.width - 320 && hexFrame.height >= editor.height - 2,
+            "hex view fills the editor beside the inspector: \(hexFrame) in \(editor)")
+        if let table = Self.view(in: editorView, id: "inspectorTable") as? NSTableView {
+            check(table.numberOfRows == 17, "inspector has a row per type: \(table.numberOfRows)")
+            check(
+                table.rows(in: table.visibleRect).length > 5,
+                "inspector rows are visible: \(table.visibleRect)")
+        } else {
+            check(false, "editor has an inspector table")
+        }
         hex.hexView.display()  // drawing asks for the visible bytes in the background
         for _ in 0..<50 where hex.source.cachedBytes(0..<256) == nil { await settle() }
         check(hex.source.cachedBytes(0..<256) != nil, "visible rows were prefetched")
@@ -218,8 +239,56 @@ struct SmokeTest {
         let chain = FocusChain.scopes(in: window)
         check(
             resolve(KeyChord("l", .command), chain) == .goToOffset, "⌘L in hex view → go to offset")
+        await find(check, hex: hex, window: window)
         check(app.openFile(dir) == nil, "a folder is refused")
         window.attachedSheet.map { window.endSheet($0) }
+    }
+
+    /// M2 find bar, driven through key dispatch. The sample repeats 00…FF, so "ABC"
+    /// starts at 0x41 + 256·k, 781 times in 200,000 bytes.
+    private func find(_ check: (Bool, String) -> Void, hex: HexEditorItem, window: NSWindow) async {
+        let root = hex.viewController.view
+        guard let field = Self.view(in: root, id: "findField") as? NSSearchField,
+            let status = Self.view(in: root, id: "findStatus") as? NSTextField
+        else { return check(false, "editor has a find bar") }
+        check(Self.view(in: root, id: "inspectorTable") != nil, "editor has an inspector")
+        window.makeFirstResponder(hex.hexView)
+        check(dispatch(KeyChord("f", .command), in: window), "⌘F opens the find bar")
+        check(window.firstResponder === field.currentEditor(), "find field has focus")
+        root.layoutSubtreeIfNeeded()
+        check(
+            hex.hexView.frame.height == root.bounds.height - 32,
+            "hex view sits below the find bar: \(hex.hexView.frame)")
+        field.stringValue = "ABC"
+        func cursor(becomes offset: UInt64) async -> Bool {
+            for _ in 0..<50 where hex.hexView.selection.range != offset..<offset + 3 {
+                await settle(milliseconds: 20)
+            }
+            return hex.hexView.selection.range == offset..<offset + 3
+        }
+        check(dispatch(KeyChord("g", .command), in: window), "⌘G dispatched from the find field")
+        check(await cursor(becomes: 0x1041), "⌘G finds the match at the cursor")
+        _ = dispatch(KeyChord("g", .command), in: window)
+        check(await cursor(becomes: 0x1141), "⌘G again finds the next match")
+        _ = dispatch(KeyChord("g", [.command, .shift]), in: window)
+        check(await cursor(becomes: 0x1041), "⇧⌘G finds the previous match")
+        if let findAll = app.registry.command(.editorFindAll) {
+            check(app.dispatcher.perform(findAll, in: window), "Find All runs")
+        }
+        for _ in 0..<50 where !status.stringValue.contains("of 781") {
+            await settle(milliseconds: 20)
+        }
+        check(status.stringValue.contains("of 781"), "Find All counts 781: \(status.stringValue)")
+        check(dispatch(.escape, in: window), "Esc in the find field is handled")
+        check(field.superview?.superview?.isHidden == true, "Esc closes the find bar")
+        check(hex.hexView.highlights.isEmpty, "closing the bar clears the highlights")
+        check(
+            dispatch(KeyChord("i", [.command, .option]), in: window), "⌥⌘I toggles the inspector")
+        root.layoutSubtreeIfNeeded()
+        check(
+            hex.hexView.frame.size == root.bounds.size,
+            "without bar and inspector the hex view fills the editor: \(hex.hexView.frame)")
+        _ = dispatch(KeyChord("i", [.command, .option]), in: window)
     }
 
     /// M1 targets on a sparse 4 GiB file: open < 100 ms, drawing a frame well under
@@ -270,6 +339,62 @@ struct SmokeTest {
         )
         let after = Self.residentMegabytes()
         print("  info resident memory \(after) MB, \(after - before) MB more than before opening")
+        await fullSearch(check, item: item)
+    }
+
+    /// M2 target: a full search of the 4 GiB file, with progress and cancel, without
+    /// evicting the pages the view is showing. The time is printed, not gated.
+    private func fullSearch(_ check: (Bool, String) -> Void, item: HexEditorItem) async {
+        let view = item.hexView
+        view.go(to: 2 << 30)
+        view.display()
+        let visible = view.selection.cursor..<view.selection.cursor + 4096
+        for _ in 0..<50 where item.source.cachedBytes(visible) == nil {
+            await settle(milliseconds: 20)
+        }
+        check(
+            item.source.cachedBytes(visible) != nil, "the view's pages are cached before searching")
+
+        let searcher = Searcher(source: item.source)
+        let pattern = try! SearchPattern.hex("FF")
+        let scanned = Mutex<UInt64>(0)
+        let clock = ContinuousClock()
+        var found: Searcher.Match?
+        var failure: (any Error)?
+        let elapsed = await clock.measure {
+            do {
+                found = try await Searcher.run { token in
+                    try searcher.next(
+                        pattern, from: 0, direction: .forward, wraps: false, cancellation: token
+                    ) { done, _ in scanned.withLock { $0 = done } }
+                }
+            } catch {
+                failure = error
+            }
+        }
+        check(
+            failure == nil && found == nil,
+            "full search of 4 GiB finds nothing in a zero file \(failure.map { "\($0)" } ?? "")")
+        check(scanned.withLock { $0 } == 4 << 30, "progress reached the whole file")
+        print("  info full search of 4 GiB took \(elapsed)")
+        check(item.source.cachedBytes(visible) != nil, "searching didn't evict the view's pages")
+
+        let started = Mutex(false)
+        let task = Task {
+            try await Searcher.run { token in
+                try searcher.all(pattern, cancellation: token) { _, _ in
+                    started.withLock { $0 = true }
+                }
+            }
+        }
+        for _ in 0..<100 where !started.withLock({ $0 }) { await settle(milliseconds: 5) }
+        task.cancel()
+        let cancelled = await clock.measure {
+            do { _ = try await task.value } catch is CancellationError {} catch {}
+        }
+        check(
+            task.isCancelled && cancelled < .milliseconds(500),
+            "a search cancels quickly (\(cancelled))")
     }
 
     private static func residentMegabytes() -> Int {

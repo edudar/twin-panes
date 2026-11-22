@@ -52,6 +52,15 @@ enum MainMenu {
                 .separator(), command(.saveSelection), .separator(), command(.closeTab),
                 command(.closeWindow),
             ])
+        let findMenu = NSMenu(title: "Find")
+        for id: CommandID in [
+            .editorFind, .editorFindNext, .editorFindPrevious, .editorFindAll,
+            .editorUseSelectionForFind,
+        ] {
+            findMenu.addItem(command(id))
+        }
+        let find = NSMenuItem(title: "Find", action: nil, keyEquivalent: "")
+        find.submenu = findMenu
         _ = submenu(
             "Edit",
             [
@@ -63,6 +72,8 @@ enum MainMenu {
                 command(.copyAsHex), command(.copyAsText),
                 standard("Paste", #selector(NSText.paste(_:)), "v"),
                 standard("Select All", #selector(NSText.selectAll(_:)), "a"),
+                .separator(),
+                find,
             ])
         _ = submenu(
             "View",
@@ -71,8 +82,7 @@ enum MainMenu {
                 command(.nextTab), command(.previousTab), .separator(),
                 command(.browserOpen), command(.browserView), command(.browserEdit),
                 command(.browserParent), command(.browserGoToFolder), command(.browserSwitchPanel),
-                .separator(), command(.editorFindNext),
-                .separator(), command(.goToOffset), .separator(),
+                .separator(), command(.goToOffset), command(.toggleInspector), .separator(),
                 options(
                     "Bytes per Row", #selector(HexEditorActions.setBytesPerRow(_:)),
                     [("8", 8), ("16", 16), ("32", 32), ("Fit Window", 0)]),
