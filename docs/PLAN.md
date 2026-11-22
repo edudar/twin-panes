@@ -70,7 +70,7 @@ content; the `M0` rows exist now.
 | EditorKit | `TwinPanesKit/Sources/EditorKit` | M1 | the editor item: mode switcher, find bar; hosts the mode views over one `EditorSession` |
 | BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b | the browser tab: folder listing, navigation, folder access; later (M4–M7) async listing, live updates, tabs per panel, operations queue, preview pane |
 | TextEditKit | `TwinPanesKit/Sources/TextEditKit` | M9 | plain-text and Markdown modes, large-text viewer |
-| SandboxProbe | `TwinPanesKit/Sources/SandboxProbe` | M0 only | Foundation-only probes for the sandbox spike (§5); only the app's Debug menu uses it; goes away with that menu |
+| SandboxProbe | `TwinPanesKit/Sources/SandboxProbe` | M0, M3b | Foundation-only probes for the sandbox spike (§5); only the app's Debug menu uses it. Stays until the M3b volume checks (external drives) are done, then goes away with that menu |
 
 `EditorKit`, `HexViewKit` and `TextEditKit` are empty modules in M0; they exist so
 the dependency rules below are enforced by `Package.swift` from the first commit.
@@ -85,7 +85,7 @@ the dependency rules below are enforced by `Package.swift` from the first commit
 | HexViewKit, TextEditKit, BrowserKit | WorkspaceKit, TwinPanesCore |
 | EditorKit | HexViewKit, TextEditKit, WorkspaceKit, TwinPanesCore |
 | SandboxProbe | Foundation only |
-| app target | links WorkspaceKit, EditorKit and SandboxProbe today (imports WorkspaceKit and SandboxProbe); BrowserKit from M1b |
+| app target | links WorkspaceKit, EditorKit, BrowserKit and SandboxProbe; imports those and TwinPanesCore (which comes with them) |
 
 No module imports one at its own level: HexViewKit, TextEditKit and BrowserKit never
 import each other. Anything that crosses kits (the preview pane's hex view, F4
@@ -108,7 +108,7 @@ opening an editor from the browser) goes through a protocol or factory defined i
 
   | Path | What |
   |---|---|
-  | `TwinPanes.xcodeproj` | the thin app target, scheme `TwinPanes`; links the package's `WorkspaceKit`, `EditorKit` and `SandboxProbe` products |
+  | `TwinPanes.xcodeproj` | the thin app target, scheme `TwinPanes`; links the package's `WorkspaceKit`, `EditorKit`, `BrowserKit` and `SandboxProbe` products |
   | `TwinPanes/` | app sources and `AppIcon.icon`; a synchronized folder, so new files need no project edit |
   | `Config/` | `Project.xcconfig`, `TwinPanes.xcconfig` (build settings), `TwinPanes.entitlements` |
   | `TwinPanesKit/` | the Swift package: every library target under `Sources/`, tests under `Tests/` |
@@ -135,7 +135,9 @@ opening an editor from the browser) goes through a protocol or factory defined i
   session prompts (as a sheet on the main window) exactly once, when its *last* view
   is about to close or the app quits. Quitting uses
   `applicationShouldTerminate(_:)` → `.terminateLater`, walks the dirty sessions one
-  sheet at a time, then `reply(toApplicationShouldTerminate:)`.
+  sheet at a time, then `reply(toApplicationShouldTerminate:)`. Once a tab's close is
+  agreed, or its window closes, the item gets `willClose()` to stop background work
+  (the hex editor cancels its search there).
 - **Open With without NSDocument (M1):** declare `CFBundleDocumentTypes` for
   `public.data` with `LSHandlerRank = Alternate` (so Twin Panes never becomes the default
   app for everything) and no `NSDocumentClass`; handle `application(_:open:)`.
@@ -164,6 +166,11 @@ opening an editor from the browser) goes through a protocol or factory defined i
   a descriptor with `F_NOCACHE` set and no caching on our side.
 - Not mmap by default: if another process truncates the file, touching the mapping
   raises SIGBUS and crashes the app; pread returns a short read we can handle.
+  **As built (after the M0–M2 review):** `cachedBytes` returns all of a range or nil,
+  and `prefetch` reports `.truncated`; the hex view shows placeholders, reports the
+  error once and doesn't retry that range until it scrolls or reloads (the same for any
+  persistent read error). A newer prefetch makes queued older ones stop, so on slow
+  volumes the visible rows don't wait behind rows already scrolled past.
 - Watch the file through the session's `NSFilePresenter` (plus
   `DispatchSource.makeFileSystemObjectSource` as a fallback) to detect external
   modification/deletion.
@@ -364,7 +371,7 @@ volume/grant capability matrix (M0 spike, §5).
   `readSequential` (uncached for `ByteSource`, a plain read by default). 4 MB chunks,
   `memchr` on the first exact byte, then verify; case-insensitive text folds ASCII
   letters only. Calls are synchronous with a `SearchCancellation` token and a progress
-  callback per chunk; `Searcher.run` runs one on a single serial queue and cancels it
+  callback per chunk; `Searcher.run` runs one on an app-wide pool of two and cancels it
   with the calling task. Find next/previous wraps once and says so; Find All keeps
   non-overlapping matches up to 100,000 and highlights them, and next/previous then
   step through that list without rescanning. Pattern kinds: hex, UTF-8, UTF-16 LE/BE
@@ -893,3 +900,10 @@ byte histogram.
 - **Accessibility and localization** — out of scope for now (D19), including the
   proposed baseline VoiceOver support for the hex viewport in M1.
 - **Block devices, privileged save** — not planned (D14).
+- **From the M0–M2 review (2026-11-22):**
+  - *Bookmarks resolving after a relaunch* isn't automated: it needs two app launches.
+    Checked by hand in the spike; automate with state restoration in M5.
+  - *Asking for access again* when a saved bookmark no longer resolves: today a dead
+    recent file just drops out of the menu. Belongs to the M4 per-volume access flow.
+  - *`SF_DATALESS` at open* (§4.1): not testable in CI (needs an iCloud-evicted file);
+    lands with the M3b recovery clone, which must wait for the download anyway.
