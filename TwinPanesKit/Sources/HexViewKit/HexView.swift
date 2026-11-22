@@ -51,6 +51,9 @@ public final class HexView: NSView {
 
     public override init(frame: NSRect) {
         super.init(frame: frame)
+        // Since macOS 14 views don't clip by default; without this the background
+        // fill and partly scrolled rows paint over the tab bar above the view.
+        clipsToBounds = true
         scroller.scrollerStyle = .legacy
         scroller.knobStyle = .default
         scroller.isEnabled = true

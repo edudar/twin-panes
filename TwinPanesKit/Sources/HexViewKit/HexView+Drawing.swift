@@ -3,7 +3,7 @@ import AppKit
 extension HexView {
     public override func draw(_ dirtyRect: NSRect) {
         NSColor.textBackgroundColor.setFill()
-        dirtyRect.fill()
+        dirtyRect.intersection(bounds).fill()
 
         let rows = position.visibleRows
         let first = layout.rowStart(rows.lowerBound)
