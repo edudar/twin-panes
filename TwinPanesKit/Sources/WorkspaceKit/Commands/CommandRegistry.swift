@@ -9,6 +9,9 @@ import AppKit
 public final class CommandRegistry {
     private var commands: [CommandID: Command] = [:]
     private var bindings: [BindingScope: [KeyChord: CommandID]] = [:]
+    /// Insertion order of bindings per scope, so the first chord bound to a command is
+    /// its primary shortcut in menus.
+    private var bindingOrder: [BindingScope: [KeyChord]] = [:]
 
     public init() {}
 
@@ -29,10 +32,16 @@ public final class CommandRegistry {
     public func bind(_ chord: KeyChord, to id: CommandID, in scope: BindingScope = .app) {
         precondition(commands[id] != nil, "binding unknown command \(id)")
         bindings[scope, default: [:]][chord] = id
+        var order = bindingOrder[scope, default: []]
+        if !order.contains(chord) {
+            order.append(chord)
+            bindingOrder[scope] = order
+        }
     }
 
     public func unbind(_ chord: KeyChord, in scope: BindingScope) {
         bindings[scope]?[chord] = nil
+        bindingOrder[scope]?.removeAll { $0 == chord }
     }
 
     /// Commands `chord` could mean, most specific scope first. `chain` is ordered from
@@ -45,14 +54,13 @@ public final class CommandRegistry {
         }
     }
 
-    /// The chord that triggers `id` from this focus chain: the binding in the most
-    /// specific scope that binds `id`, unless a more specific scope has taken that chord
-    /// for a different command.
+    /// The chord that triggers `id` from this focus chain: the first-registered binding
+    /// in the most specific scope that binds `id`, unless a more specific scope has taken
+    /// that chord for a different command.
     public func binding(for id: CommandID, chain: [BindingScope]) -> KeyChord? {
         let scopes = Self.withApp(chain)
         for (index, scope) in scopes.enumerated() {
-            let chords = (bindings[scope] ?? [:]).filter { $0.value == id }.keys
-                .sorted { $0.description < $1.description }
+            let chords = (bindingOrder[scope] ?? []).filter { bindings[scope]?[$0] == id }
             for chord in chords {
                 let shadowed = scopes[..<index].contains { bindings[$0]?[chord] != nil }
                 if !shadowed { return chord }

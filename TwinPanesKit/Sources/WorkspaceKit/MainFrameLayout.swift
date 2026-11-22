@@ -81,12 +81,31 @@ public final class MainFrameLayout {
     }
 
     /// Moves an item to another slot or position without recreating it.
-    public func move(_ id: ItemID, to slot: SlotID, at index: Int? = nil) {
-        guard let item = item(id) else { return }
-        let wasZoomed = zoomedItemID == id
-        remove(id)
-        insert(item, in: slot, at: index, select: true)
-        if wasZoomed { zoomedItemID = id }
+    public func move(_ id: ItemID, to destination: SlotID, at index: Int? = nil) {
+        guard let source = slot(of: id), var sourceList = tabs[source],
+            let oldIndex = sourceList.firstIndex(where: { $0.id == id })
+        else { return }
+        let item = sourceList.remove(at: oldIndex)
+        if source == destination {
+            let target = min(max(index ?? sourceList.count, 0), sourceList.count)
+            sourceList.insert(item, at: target)
+            tabs[source] = sourceList
+        } else {
+            tabs[source] = sourceList
+            if selection[source] == id {
+                selection[source] =
+                    sourceList.isEmpty ? nil : sourceList[min(oldIndex, sourceList.count - 1)].id
+            }
+            var destList = items(in: destination)
+            let defaultIndex =
+                selection[destination].flatMap { sel in
+                    destList.firstIndex { $0.id == sel }.map { $0 + 1 }
+                } ?? destList.count
+            destList.insert(item, at: min(max(index ?? defaultIndex, 0), destList.count))
+            tabs[destination] = destList
+        }
+        selection[destination] = id
+        if destination.isPanel { activePanel = destination }
         notify()
     }
 

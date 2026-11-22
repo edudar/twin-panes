@@ -42,16 +42,23 @@ import Testing
         #expect(layout.selection[.leftPanel] == nil)
     }
 
-    @Test func moveKeepsInstanceAndZoom() {
+    @Test func moveKeepsInstanceZoomAndNotifiesOnce() {
         let layout = MainFrameLayout()
-        let a = TestItem("a"), b = TestItem("b")
-        layout.insert(a)
-        layout.insert(b)
+        let a = TestItem("a"), b = TestItem("b"), c = TestItem("c")
+        for item in [a, b, c] { layout.insert(item) }
         layout.toggleZoom(a.id)
+        var notifications = 0
+        let token = layout.observe { notifications += 1 }
         layout.move(a.id, to: .rightPanel)
+        #expect(notifications == 1)
         #expect(layout.slot(of: a.id) == .rightPanel)
         #expect(layout.item(a.id) === a)
         #expect(layout.zoomedItemID == a.id)
+        // Reordering within the same slot also notifies once.
+        layout.move(b.id, to: .leftPanel, at: 1)
+        #expect(notifications == 2)
+        #expect(layout.items(in: .leftPanel).map(\.title) == ["c", "b"])
+        _ = token
     }
 
     @Test func zoomToggles() {

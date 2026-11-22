@@ -53,12 +53,21 @@ import Testing
         #expect(registry.candidates(for: .function(1), chain: [editor]).map(\.id) == ["app.help"])
     }
 
-    @Test func menuBindingRespectsShadowing() {
+    @Test func menuBindingRespectsShadowingAndPrimaryOrder() {
         #expect(registry.binding(for: "browser.view", chain: [browser]) == .function(3))
         #expect(registry.binding(for: "browser.view", chain: [editor]) == nil)
         // An app binding shadowed by a more specific scope isn't shown.
         registry.bind(.function(3), to: "app.help")
         #expect(registry.binding(for: "app.help", chain: [editor]) == .function(1))
+        // Primary shortcut is the first bound in that scope, regardless of alphabetical order.
+        registry.unbind(.function(3), in: editor)
+        registry.bind(KeyChord("g", .command), to: "editor.findNext", in: editor)
+        registry.bind(.function(3), to: "editor.findNext", in: editor)
+        #expect(
+            registry.binding(for: "editor.findNext", chain: [editor]) == KeyChord("g", .command))
+        // Unbinding the primary falls back to the secondary.
+        registry.unbind(KeyChord("g", .command), in: editor)
+        #expect(registry.binding(for: "editor.findNext", chain: [editor]) == .function(3))
     }
 
     @Test func keyChordParsesEvents() throws {

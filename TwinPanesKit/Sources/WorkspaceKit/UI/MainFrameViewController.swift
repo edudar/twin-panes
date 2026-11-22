@@ -132,7 +132,9 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     public func closeItem(_ id: ItemID) {
         guard let item = layout.item(id) else { return }
         Task {
-            guard await closeCoordinator.confirmClose([item]) else { return }
+            guard await closeCoordinator.confirmClose([item]), layout.item(id) != nil else {
+                return
+            }
             item.willClose()
             item.host = nil
             item.onChange = nil

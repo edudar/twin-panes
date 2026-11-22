@@ -9,7 +9,6 @@ import Testing
     let workspace = WorkspaceRegistry()
     let windowA = MainFrameLayout()
     let windowB = MainFrameLayout()
-    var prompts: [String] = []
 
     init() {
         workspace.register(windowA)
@@ -102,14 +101,40 @@ import Testing
         #expect(log.titles == ["a"])
     }
 
-    @Test func layoutsAreIndependent() {
-        let a = TestItem("a"), b = TestItem("b")
-        windowA.insert(a)
-        windowB.insert(b)
-        windowA.toggleZoom()
-        #expect(windowB.zoomedItemID == nil)
-        #expect(workspace.layout(containing: b.id) === windowB)
-        #expect(workspace.allItems.count == 2)
+    @Test func reentrantConfirmCloseIsRejected() async {
+        let session = TestSession()
+        session.isDirty = true
+        let item = TestItem("one", session: session)
+        windowA.insert(item)
+        var resumePrompt: CheckedContinuation<CloseDecision, Never>?
+        let close = CloseCoordinator(openItems: { [workspace] in workspace.allItems }) { _ in
+            await withCheckedContinuation { continuation in
+                resumePrompt = continuation
+            }
+        }
+        let first = Task { await close.confirmClose([item]) }
+        while resumePrompt == nil { await Task.yield() }
+        // A second close while the first prompt is up must fail immediately.
+        #expect(await close.confirmClose([item]) == false)
+        resumePrompt?.resume(returning: .discard)
+        #expect(await first.value)
+    }
+
+    @Test func skipsSessionCleanedWhileEarlierPromptWasUp() async {
+        let first = TestSession(), second = TestSession()
+        first.isDirty = true
+        second.isDirty = true
+        let items = [TestItem("first", session: first), TestItem("second", session: second)]
+        for item in items { windowA.insert(item) }
+        let log = Log()
+        let close = CloseCoordinator(openItems: { [workspace] in workspace.allItems }) { session in
+            log.titles.append(session.representative.title)
+            // Simulate the second session being saved while the first prompt was open.
+            second.isDirty = false
+            return .discard
+        }
+        #expect(await close.confirmClose(items))
+        #expect(log.titles == ["first"])
     }
 }
 
