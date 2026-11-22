@@ -6,7 +6,7 @@ import TwinPanesCore
 import WorkspaceKit
 
 /// `Twin Panes --smoke-test`: drives the real app (signed, sandboxed) through the M0–M2
-/// integration checks with its real window layout and exits 0 on success, 1 on failure.
+/// integration checks (M3a editing included) with its real window layout and exits 0 on success, 1 on failure.
 /// Pass `--bench` to also run the slow 480-frame scroll and 256 MiB random-data search
 /// throughput benchmarks (PLAN.md §7).
 @MainActor
@@ -210,7 +210,7 @@ struct SmokeTest {
     }
 
     /// Sends a synthetic key-down through the dispatcher, as `MainWindow` would.
-    private func dispatch(_ chord: KeyChord, in window: NSWindow) -> Bool {
+    func dispatch(_ chord: KeyChord, in window: NSWindow) -> Bool {
         // AppKit reports a shifted letter as the capital ("G" for ⇧⌘G).
         let shifted = chord.menuKeyEquivalent.mask.contains(.shift)
         let characters = shifted && chord.key.count == 1 ? chord.key.uppercased() : chord.key
@@ -224,7 +224,7 @@ struct SmokeTest {
         return app.dispatcher.handle(event, in: window)
     }
 
-    private func status(of controller: MainWindowController) -> String {
+    func status(of controller: MainWindowController) -> String {
         controller.frameController.view.subviews.compactMap { $0 as? NSTextField }
             .first { $0.accessibilityIdentifier() == "statusLine" }?.stringValue ?? ""
     }
@@ -274,6 +274,7 @@ struct SmokeTest {
         hex.hexView.options.bytesPerRow = .fixed(16)
 
         await find(check, hex: hex, window: window)
+        await editing(check, hex: hex, window: window)
         await truncation(check, hex: hex, url: url)
         check(app.openFile(dir) == nil, "a folder is refused")
         window.attachedSheet.map { window.endSheet($0) }
@@ -399,6 +400,7 @@ struct SmokeTest {
         let after = Self.residentMegabytes()
         print("  info resident memory \(after) MB, \(after - before) MB more than before opening")
         await fullSearch(check, item: item)
+        await editingLargeFile(check, item: item)
 
         if includeBenchmarks {
             Self.printFrames(await scrollThroughFile(item), "")
@@ -570,7 +572,7 @@ struct SmokeTest {
         return nil
     }
 
-    private func settle(milliseconds: Int = 100) async {
+    func settle(milliseconds: Int = 100) async {
         try? await Task.sleep(for: .milliseconds(milliseconds))
     }
 }
