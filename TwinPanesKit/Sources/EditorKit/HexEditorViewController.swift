@@ -25,7 +25,7 @@ import WorkspaceKit
 
 @MainActor
 final class HexEditorViewController: NSViewController, CommandScopeProviding, HexViewDelegate {
-    unowned let item: HexEditorItem
+    weak var item: HexEditorItem?
     let hexView = HexView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
     let findBar = FindBarView(frame: NSRect(x: 0, y: 0, width: 600, height: 32))
     let inspector = InspectorView(frame: NSRect(x: 0, y: 0, width: 280, height: 400))
@@ -39,7 +39,7 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     // Find state (HexEditorViewController+Find.swift).
     /// Internal test seam so search tests can inject a deterministic `ByteReading`.
     var searchSourceOverride: (any ByteReading)?
-    var searchSource: any ByteReading { searchSourceOverride ?? item.source }
+    var searchSource: (any ByteReading)? { searchSourceOverride ?? item?.source }
     var searchTask: Task<Void, Never>?
     var searchGeneration = 0
     /// The match the last find selected; "next" starts after it.
@@ -112,14 +112,14 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        item.updateStatus()
+        item?.updateStatus()
         updateInspector()
     }
 
     // MARK: HexViewDelegate
 
     func hexViewSelectionDidChange(_ view: HexView) {
-        item.updateStatus()
+        item?.updateStatus()
         updateInspector()
     }
 
@@ -130,13 +130,15 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     /// Shows the bytes at the cursor; waits for the page if it isn't cached yet without
     /// cancelling the hex view's own viewport prefetch.
     func updateInspector() {
-        guard !inspector.isHidden else { return }
+        guard !inspector.isHidden, let item else { return }
         let cursor = hexView.selection.cursor
         let range = cursor..<min(item.length, cursor + UInt64(Inspector.byteCount))
         if let bytes = item.cachedBytes(range) { return inspector.show(bytes) }
         item.source.prefetch(range, supersede: false) { [weak self] _ in
-            guard let self, self.hexView.selection.cursor == cursor else { return }
-            self.inspector.show(self.item.cachedBytes(range) ?? Data())
+            guard let self, let item = self.item, self.hexView.selection.cursor == cursor else {
+                return
+            }
+            self.inspector.show(item.cachedBytes(range) ?? Data())
         }
     }
 
@@ -147,7 +149,7 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     }
 
     func hexView(_ view: HexView, didFailToRead error: Error) {
-        item.host?.showStatus("\(error)")
+        item?.host?.showStatus("\(error)")
     }
 
     func hexView(_ view: HexView, selectionTooLargeToCopy range: Range<UInt64>) {
@@ -179,14 +181,16 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = field
         alert.beginSheetModal(for: window) { [weak self] response in
-            guard let self, response == .alertFirstButtonReturn else { return }
-            if let offset = self.item.offset(
+            guard let self, let item = self.item, response == .alertFirstButtonReturn else {
+                return
+            }
+            if let offset = item.offset(
                 for: field.stringValue, cursor: self.hexView.selection.cursor)
             {
                 self.hexView.go(to: offset)
             } else {
                 NSSound.beep()
-                self.item.host?.showStatus("“\(field.stringValue)” isn't an offset in this file")
+                item.host?.showStatus("“\(field.stringValue)” isn't an offset in this file")
             }
         }
     }
@@ -198,7 +202,7 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     }
 
     @objc func saveSelection(_ sender: Any?) {
-        guard let window = view.window else { return }
+        guard let item, let window = view.window else { return }
         let range = hexView.selection.range
         guard !range.isEmpty else { return }
         let panel = NSSavePanel()
@@ -206,16 +210,17 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
             item.url.deletingPathExtension().lastPathComponent
             + "-\(range.lowerBound)-\(range.count).bin"
         panel.beginSheetModal(for: window) { [weak self] response in
-            guard let self, response == .OK, let destination = panel.url else { return }
-            self.item.host?.showStatus("Saving \(range.count.formatted()) bytes…")
-            let source = self.item.source
-            let scope = self.item.scope
+            guard let self, let item = self.item, response == .OK, let destination = panel.url
+            else { return }
+            item.host?.showStatus("Saving \(range.count.formatted()) bytes…")
+            let source = item.source
+            let scope = item.scope
             Task.detached(priority: .userInitiated) {
                 let error = withExtendedLifetime(scope) {
                     Self.write(source, range: range, to: destination)
                 }
                 await MainActor.run { [weak self] in
-                    self?.item.host?.showStatus(
+                    self?.item?.host?.showStatus(
                         error.map {
                             "Saving failed: \(($0 as? ByteSourceError)?.description ?? $0.localizedDescription)"
                         }

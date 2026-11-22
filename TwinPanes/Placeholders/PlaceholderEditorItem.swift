@@ -75,7 +75,7 @@ final class PlaceholderEditorItem: WorkspaceItem {
 
 @MainActor
 final class PlaceholderEditorViewController: NSViewController, CommandScopeProviding {
-    private unowned let item: PlaceholderEditorItem
+    private weak var item: PlaceholderEditorItem?
     private(set) var textView: NSTextView!
 
     init(item: PlaceholderEditorItem) {
@@ -91,7 +91,7 @@ final class PlaceholderEditorViewController: NSViewController, CommandScopeProvi
     override func loadView() {
         // Each view gets its own layout manager over the session's shared storage.
         let layoutManager = NSLayoutManager()
-        item.session.textStorage.addLayoutManager(layoutManager)
+        item?.session.textStorage.addLayoutManager(layoutManager)
         let container = NSTextContainer(
             size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true
@@ -111,6 +111,6 @@ final class PlaceholderEditorViewController: NSViewController, CommandScopeProvi
     }
 
     @objc func editorFindNext(_ sender: Any?) {
-        item.host?.showStatus("F3 in editor → editor.findNext")
+        item?.host?.showStatus("F3 in editor → editor.findNext")
     }
 }

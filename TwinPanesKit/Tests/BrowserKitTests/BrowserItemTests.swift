@@ -166,4 +166,23 @@ import TwinPanesCore
             keyEquivalent: "")
         #expect(!item.controller.validateMenuItem(openItem))
     }
+
+    @Test func viewControllerSurvivesAfterItemDeallocates() {
+        defer { cleanUp() }
+        var item: BrowserItem? = browser(at: root)
+        let controller = item!.controller
+        _ = controller.view
+        #expect(controller.numberOfRows(in: controller.tableView) == 2)
+
+        // Closing a tab releases BrowserItem while AppKit may still invoke callbacks
+        // on the view controller during the current run-loop turn.
+        item = nil
+        controller.viewDidAppear()
+        #expect(controller.numberOfRows(in: controller.tableView) == 0)
+        #expect(controller.selectedEntry == nil)
+        let openItem = NSMenuItem(
+            title: "Open", action: #selector(BrowserViewController.browserOpen(_:)),
+            keyEquivalent: "")
+        #expect(!controller.validateMenuItem(openItem))
+    }
 }

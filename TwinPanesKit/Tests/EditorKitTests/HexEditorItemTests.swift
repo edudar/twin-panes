@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -61,5 +62,24 @@ import Testing
         let error = HexEditorViewController.write(item.source, range: 0..<2000, to: out)
         #expect(error != nil)
         #expect(!FileManager.default.fileExists(atPath: out.path))
+    }
+
+    @Test func viewControllerSurvivesAfterItemDeallocates() throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        var editor: HexEditorItem? = try item(bytes: 4096)
+        let controller = editor!.controller
+        _ = controller.view
+        controller.toggleInspector(nil)
+
+        // Closing a tab releases HexEditorItem while AppKit may still invoke callbacks
+        // on the view controller before draining the autorelease pool.
+        editor = nil
+        controller.viewDidAppear()
+        controller.hexViewSelectionDidChange(controller.hexView)
+        controller.updateInspector()
+        let copyItem = NSMenuItem(
+            title: "Copy as Hex", action: #selector(HexEditorViewController.copyAsHex(_:)),
+            keyEquivalent: "")
+        #expect(!controller.validateMenuItem(copyItem))
     }
 }

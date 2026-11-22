@@ -32,7 +32,7 @@ extension HexEditorViewController {
         let range = hexView.selection.range
         let limit = range.lowerBound + UInt64(SearchPattern.maxLength)
         let capped = range.lowerBound..<min(range.upperBound, limit)
-        guard let bytes = try? item.read(capped) else { return NSSound.beep() }
+        guard let item, let bytes = try? item.read(capped) else { return NSSound.beep() }
         findBar.kind = .hex
         findBar.field.stringValue = HexCopy.string(bytes, as: .hex)
         patternChanged()
@@ -70,7 +70,8 @@ extension HexEditorViewController {
             return step(through: all.result.ranges, direction, from: selected)
         }
         let from = FindStepper.searchStart(direction, selected: selected, lastMatch: lastMatch)
-        let searcher = Searcher(source: searchSource)
+        guard let source = searchSource else { return }
+        let searcher = Searcher(source: source)
         run { token, progress in
             try searcher.next(
                 pattern, from: from, direction: direction, cancellation: token, progress: progress)
@@ -93,8 +94,8 @@ extension HexEditorViewController {
             findBar.isHidden = false
             applyVisibility()
         }
-        guard let pattern = currentPattern() else { return }
-        let searcher = Searcher(source: searchSource)
+        guard let pattern = currentPattern(), let source = searchSource else { return }
+        let searcher = Searcher(source: source)
         run { token, progress in
             try searcher.all(pattern, cancellation: token, progress: progress)
         } done: { [weak self] result in
@@ -118,7 +119,7 @@ extension HexEditorViewController {
 
     private func reportFind(_ message: String) {
         findBar.show(message)
-        if findBar.isHidden { item.host?.showStatus(message) }
+        if findBar.isHidden { item?.host?.showStatus(message) }
     }
 
     /// Moves to the next or previous range in `ranges` (sorted) relative to `selected`.

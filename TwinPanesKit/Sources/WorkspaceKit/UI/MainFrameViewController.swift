@@ -182,7 +182,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
 @MainActor
 final class SlotViewController: NSViewController, CommandScopeProviding {
     let slot: SlotID
-    private unowned let frame: MainFrameViewController
+    private weak var frame: MainFrameViewController?
     private let tabBar = TabBarView()
     private let host = ItemHostViewController()
 
@@ -214,15 +214,15 @@ final class SlotViewController: NSViewController, CommandScopeProviding {
             host.view.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             root.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
         ])
-        tabBar.onSelect = { [weak self] id in self?.frame.layout.select(id) }
-        tabBar.onClose = { [weak self] id in self?.frame.closeItem(id) }
+        tabBar.onSelect = { [weak self] id in self?.frame?.layout.select(id) }
+        tabBar.onClose = { [weak self] id in self?.frame?.closeItem(id) }
         view = root
     }
 
     func update(items: [any WorkspaceItem], showing: (any WorkspaceItem)?, isActive: Bool) {
         _ = view
         tabBar.update(
-            items: items, selected: frame.layout.selection[slot], isActivePanel: isActive)
+            items: items, selected: frame?.layout.selection[slot], isActivePanel: isActive)
         host.display(showing)
     }
 }

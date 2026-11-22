@@ -6,7 +6,7 @@ import WorkspaceKit
 /// place of the list when the sandbox refuses the folder.
 @MainActor
 final class BrowserViewController: NSViewController, CommandScopeProviding, NSMenuItemValidation {
-    unowned let item: BrowserItem
+    weak var item: BrowserItem?
     let tableView = FileListTableView()
     let pathField = NSTextField()
     private let scrollView = NSScrollView()
@@ -68,17 +68,18 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        guard let item else { return }
         if !item.hasListed { item.go() } else { reload(selecting: nil) }
     }
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        item.updateStatus()
+        item?.updateStatus()
     }
 
     /// Shows the item's current listing; selects `name` if given, else the first row.
     func reload(selecting name: String?) {
-        guard isViewLoaded else { return }
+        guard isViewLoaded, let item else { return }
         pathField.stringValue = item.folder.path
         tableView.reloadData()
         scrollView.isHidden = item.needsAccess
@@ -96,19 +97,19 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     }
 
     var selectedEntry: DirectoryEntry? {
-        item.entries.indices.contains(tableView.selectedRow)
-            ? item.entries[tableView.selectedRow] : nil
+        guard let item, item.entries.indices.contains(tableView.selectedRow) else { return nil }
+        return item.entries[tableView.selectedRow]
     }
 
     // MARK: Commands
 
     @objc func browserOpen(_ sender: Any?) {
-        if let entry = selectedEntry { item.open(entry) } else { NSSound.beep() }
+        if let entry = selectedEntry { item?.open(entry) } else { NSSound.beep() }
     }
 
     @objc func browserView(_ sender: Any?) { browserOpen(sender) }
     @objc func browserEdit(_ sender: Any?) { browserOpen(sender) }
-    @objc func browserParent(_ sender: Any?) { item.goToParent() }
+    @objc func browserParent(_ sender: Any?) { item?.goToParent() }
 
     @objc func browserGoToFolder(_ sender: Any?) {
         view.window?.makeFirstResponder(pathField)
@@ -116,6 +117,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     }
 
     @objc func pathEntered(_ sender: NSTextField) {
+        guard let item else { return }
         var text = sender.stringValue.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else {
             sender.stringValue = item.folder.path
@@ -132,20 +134,21 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     }
 
     @objc func browserGrantAccess(_ sender: Any?) {
+        guard let item, let window = view.window else { return }
         let panel = NSOpenPanel()
         panel.message = "Choose a folder to let Twin Panes browse it and everything inside it."
         panel.prompt = "Grant Access"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.directoryURL = item.folder
-        guard let window = view.window else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
-            self?.item.granted(url)
+            self?.item?.granted(url)
         }
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard let item else { return false }
         switch menuItem.action {
         case #selector(browserOpen(_:)), #selector(browserView(_:)), #selector(browserEdit(_:)):
             return selectedEntry != nil

@@ -40,14 +40,15 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         tableView.setAccessibilityIdentifier("fileList")
     }
 
-    func numberOfRows(in tableView: NSTableView) -> Int { item.entries.count }
+    func numberOfRows(in tableView: NSTableView) -> Int { item?.entries.count ?? 0 }
 
     func tableView(
         _ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int
     )
         -> NSView?
     {
-        guard let id = tableColumn?.identifier.rawValue, let column = Column(rawValue: id)
+        guard let item, item.entries.indices.contains(row),
+            let id = tableColumn?.identifier.rawValue, let column = Column(rawValue: id)
         else { return nil }
         let entry = item.entries[row]
         let label = NSTextField(labelWithString: text(for: entry, column))
@@ -84,10 +85,12 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
     )
         -> String?
     {
-        item.entries[row].name
+        guard let item, item.entries.indices.contains(row) else { return nil }
+        return item.entries[row].name
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        guard let item else { return }
         guard let entry = selectedEntry else { return item.updateStatus() }
         let size = entry.size.map { " · \($0.formatted()) bytes" } ?? ""
         item.host?.showStatus("\(entry.url.path)\(size)")
