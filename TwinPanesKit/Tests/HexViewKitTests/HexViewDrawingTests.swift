@@ -61,6 +61,20 @@ import Testing
         #expect(try inkedPixels(in: text, appearance: appearance) > 10, "text column")
     }
 
+    /// An `NSScroller` takes its orientation from the frame it's created with; one made
+    /// with a zero frame stays vertical, and the bar under a too-narrow view showed a
+    /// small vertical knob instead of a horizontal one.
+    @Test func horizontalScrollerIsHorizontal() {
+        view.options.bytesPerRow = .fixed(32)
+        #expect(!view.horizontalScroller.isHidden)
+        let bar = view.horizontalScroller.frame
+        #expect(bar.width > bar.height)
+        let knob = view.horizontalScroller.rect(for: .knob)
+        #expect(knob.width > knob.height, "knob \(knob) in bar \(bar)")
+        let track = view.horizontalScroller.rect(for: .knobSlot)
+        #expect(track.width > bar.width / 2, "track \(track) in bar \(bar)")
+    }
+
     /// A data source may answer with a `Data` slice whose indices start at the range's
     /// offset (the fake does). Drawing a view scrolled past row 0 cut rows out of it as if
     /// it started at 0 and trapped.

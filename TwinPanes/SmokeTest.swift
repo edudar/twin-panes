@@ -275,6 +275,14 @@ struct SmokeTest {
         // Wide layout (32 bytes/row) renders cleanly in the real window layout.
         hex.hexView.options.bytesPerRow = .fixed(32)
         hex.hexView.display()
+        // Too wide for the window: the bar along the bottom is a horizontal scroller (one
+        // created with a zero frame stayed vertical and showed a tall knob there).
+        let bars = hex.hexView.subviews.compactMap { $0 as? NSScroller }.filter { !$0.isHidden }
+        let bottom = bars.first { $0.frame.width > $0.frame.height }
+        let knob = bottom?.rect(for: .knob) ?? .zero
+        check(
+            bottom != nil && knob.width > knob.height,
+            "a too-wide layout gets a horizontal scroller (knob \(knob))")
         hex.hexView.options.bytesPerRow = .fixed(16)
 
         await find(check, hex: hex, window: window)

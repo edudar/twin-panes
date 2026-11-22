@@ -95,8 +95,10 @@ public final class HexView: NSView {
     var charWidth: Double = 8
     var rowHeight: Double = 16
     let inset = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 4)
-    let scroller = NSScroller()
-    let horizontalScroller = NSScroller()
+    // An NSScroller takes its orientation from the frame it's created with and keeps it,
+    // so each starts with a frame of the right shape; `layoutScrollers` sizes them.
+    let scroller = NSScroller(frame: NSRect(x: 0, y: 0, width: 15, height: 100))
+    let horizontalScroller = NSScroller(frame: NSRect(x: 0, y: 0, width: 100, height: 15))
     var pendingPrefetch: Range<UInt64>?
     /// The last prefetch range that failed; not asked for again until the view needs a
     /// different range or reloads, so a persistent read error can't loop.
