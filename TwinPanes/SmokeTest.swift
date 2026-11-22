@@ -1,13 +1,15 @@
 import AppKit
+import BrowserKit
 import EditorKit
 import WorkspaceKit
 
 /// `Twin Panes --smoke-test`: drives the real app (signed, sandboxed) through the M0 checks
 /// and exits 0 on success, 1 on failure. Run by CI on each supported macOS.
 ///
-/// Checks: two independent main windows; F3 resolving to different commands in a
-/// browser and an editor, and actually reaching the right responder; Tab bound only in
-/// the file list; zoom; the close workflow prompting once per session across windows.
+/// Checks: two independent main windows; the browser listing and navigating a real
+/// folder and opening a file; F3 resolving to different commands in a browser and an
+/// editor; Tab bound only in the file list; zoom; the close workflow prompting once per
+/// session across windows; the hex editor; 4 GiB timing.
 @MainActor
 struct SmokeTest {
     let app: AppDelegate
@@ -43,30 +45,54 @@ struct SmokeTest {
         check(first.layout !== second.layout, "each window has its own layout")
         await settle()
 
-        // Browser focus: F3 → browser.view, Tab → browser.switchPanel.
+        // Browser (M1b): list a real folder, navigate with keys, open a file.
         guard let window = first.window,
-            let browser = first.layout.focusedPanelItem as? PlaceholderBrowserItem
+            let browser = first.layout.focusedPanelItem as? BrowserItem
         else {
             check(false, "first window shows a browser")
             return
         }
+        print(
+            "  info browser starts at \(browser.folder.path), needs access: \(browser.needsAccess)")
+        guard let folder = makeSampleFolder() else {
+            check(false, "create a sample folder")
+            return
+        }
+        defer { try? FileManager.default.removeItem(at: folder) }
+        check(browser.go(to: folder), "browser lists a real folder")
+        check(
+            browser.entries.map(\.name) == ["sub", "data.bin"],
+            "folders first: \(browser.entries.map(\.name))")
         window.makeFirstResponder(browser.preferredFirstResponder)
         var chain = FocusChain.scopes(in: window)
         check(
             chain.first == .item(.browser, part: "fileList"),
             "file list is innermost scope (\(chain))")
         check(resolve(.function(3), chain) == .browserView, "F3 in browser → browser.view")
+        check(resolve(.function(4), chain) == .browserEdit, "F4 in browser → browser.edit")
         check(resolve(.tab, chain) == .browserSwitchPanel, "Tab in file list → browser.switchPanel")
-        check(dispatch(.function(3), in: window), "F3 dispatched in browser")
+        check(dispatch(.returnKey, in: window), "Return opens the selected folder")
+        check(browser.folder.lastPathComponent == "sub", "now inside sub")
+        check(dispatch(KeyChord("\u{7f}"), in: window), "Backspace goes to the parent")
+        check(browser.folder == folder.standardizedFileURL, "back in the sample folder")
+        (browser.preferredFirstResponder as? NSTableView)?
+            .selectRowIndexes([1], byExtendingSelection: false)
+        check(dispatch(.function(4), in: window), "F4 dispatched on a file")
+        let opened = app.workspace.allItems.compactMap { $0 as? HexEditorItem }
         check(
-            status(of: first).contains("browser.view"), "browser handled F3: \(status(of: first))")
+            opened.contains { $0.url.lastPathComponent == "data.bin" },
+            "F4 opens the file in a hex editor tab")
+        for item in opened { first.layout.remove(item.id) }
+        first.layout.select(browser.id)
 
-        // Search field inside the browser: Tab must fall through to the key-view loop.
-        if let search = (browser.viewController as? PlaceholderBrowserViewController)?.searchField {
-            window.makeFirstResponder(search)
+        // The path field inside the browser: Tab must fall through to the key-view loop.
+        if let path = Self.view(in: browser.viewController.view, id: "browserPath") {
+            window.makeFirstResponder(path)
             chain = FocusChain.scopes(in: window)
-            check(resolve(.tab, chain) == nil, "Tab in search field is not intercepted")
-            check(resolve(.function(3), chain) == .browserView, "F3 in search field → browser.view")
+            check(resolve(.tab, chain) == nil, "Tab in path field is not intercepted")
+            check(resolve(.function(3), chain) == .browserView, "F3 in path field → browser.view")
+        } else {
+            check(false, "browser has a path field")
         }
 
         // Editor focus: same key, different command.
@@ -115,7 +141,7 @@ struct SmokeTest {
                 $0.action == #selector(AppActions.editorFindNext(_:))
             }
             let browserView = viewMenu.items.first {
-                $0.action == #selector(AppActions.browserView(_:))
+                $0.action == #selector(BrowserActions.browserView(_:))
             }
             check(
                 findNext?.keyEquivalent == KeyChord.function(3).key,
@@ -241,6 +267,28 @@ struct SmokeTest {
             }
         }
         return result == KERN_SUCCESS ? Int(info.resident_size / 1_048_576) : -1
+    }
+
+    /// A folder in the container's temp dir with one subfolder and one file.
+    private func makeSampleFolder() -> URL? {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("smoke-folder-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: folder.appendingPathComponent("sub"), withIntermediateDirectories: true)
+            try Data("hello".utf8).write(to: folder.appendingPathComponent("data.bin"))
+            return folder
+        } catch {
+            return nil
+        }
+    }
+
+    private static func view(in root: NSView, id: String) -> NSView? {
+        if root.accessibilityIdentifier() == id { return root }
+        for child in root.subviews {
+            if let found = view(in: child, id: id) { return found }
+        }
+        return nil
     }
 
     private func settle(milliseconds: Int = 100) async {
