@@ -4,6 +4,14 @@ import Testing
 
 @testable import TwinPanesCore
 
+/// A flag tasks share. A class, so closures capture a Sendable reference: Xcode 16 and
+/// 26 reject closures that capture an `Atomic` local directly.
+final class Flag: Sendable {
+    private let value = Atomic(false)
+    func set() { value.store(true, ordering: .relaxed) }
+    var isSet: Bool { value.load(ordering: .relaxed) }
+}
+
 @Suite struct SearcherTests {
     func text(_ s: String) throws -> SearchPattern { try .text(s, encoding: .utf8) }
 
@@ -68,26 +76,26 @@ import Testing
     /// Review bug 3: every search shared one serial queue, so a long search in one tab
     /// held up every other tab's search. Searches now run on a small pool.
     @Test func aLongSearchDoesNotBlockAnother() async throws {
-        let started = Atomic(false)
-        let release = Atomic(false)
+        let started = Flag()
+        let release = Flag()
         let long = Task {
             try await Searcher.run { _ in
-                started.store(true, ordering: .relaxed)
-                while !release.load(ordering: .relaxed) { usleep(1000) }
+                started.set()
+                while !release.isSet { usleep(1000) }
                 return 1
             }
         }
-        while !started.load(ordering: .relaxed) { await Task.yield() }
+        while !started.isSet { await Task.yield() }
         let short = Task { try await Searcher.run { _ in 2 } }
         let shortFinishedFirst = await withTaskGroup(of: Bool.self) { group in
             group.addTask { (try? await short.value) == 2 }
             group.addTask {
                 try? await Task.sleep(for: .seconds(2))
-                release.store(true, ordering: .relaxed)
+                release.set()
                 return false
             }
             let first = await group.next() ?? false
-            release.store(true, ordering: .relaxed)
+            release.set()
             group.cancelAll()
             return first
         }
@@ -96,15 +104,15 @@ import Testing
     }
 
     @Test func runCancelsWithItsTask() async throws {
-        let started = Atomic(false)
+        let started = Flag()
         let task = Task {
             try await Searcher.run { token in
-                started.store(true, ordering: .relaxed)
+                started.set()
                 while !token.isCancelled { usleep(1000) }
                 throw CancellationError()
             }
         }
-        while !started.load(ordering: .relaxed) { await Task.yield() }
+        while !started.isSet { await Task.yield() }
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
     }
