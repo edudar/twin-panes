@@ -9,6 +9,12 @@ import WorkspaceKit
     @objc optional func copyAsHex(_ sender: Any?)
     @objc optional func copyAsText(_ sender: Any?)
     @objc optional func saveSelection(_ sender: Any?)
+    @objc optional func editorFind(_ sender: Any?)
+    @objc optional func editorFindNext(_ sender: Any?)
+    @objc optional func editorFindPrevious(_ sender: Any?)
+    @objc optional func editorFindAll(_ sender: Any?)
+    @objc optional func editorUseSelectionForFind(_ sender: Any?)
+    @objc optional func editorCloseFind(_ sender: Any?)
     @objc optional func toggleInspector(_ sender: Any?)
     /// View options; the menu item's `representedObject` carries the value.
     @objc optional func setBytesPerRow(_ sender: Any?)
@@ -21,11 +27,22 @@ import WorkspaceKit
 final class HexEditorViewController: NSViewController, CommandScopeProviding, HexViewDelegate {
     unowned let item: HexEditorItem
     let hexView = HexView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    let findBar = FindBarView(frame: NSRect(x: 0, y: 0, width: 600, height: 32))
     let inspector = InspectorView(frame: NSRect(x: 0, y: 0, width: 280, height: 400))
     private let divider = NSBox()
-    /// Switched by `applyVisibility()` as the inspector comes and goes.
+    /// Switched by `applyVisibility()` as the find bar and inspector come and go.
+    private var hexBelowTop: NSLayoutConstraint?
+    private var hexBelowFindBar: NSLayoutConstraint?
     private var hexToEdge: NSLayoutConstraint?
     private var hexToInspector: NSLayoutConstraint?
+
+    // Find state (HexEditorViewController+Find.swift).
+    var searchTask: Task<Void, Never>?
+    var searchGeneration = 0
+    /// The match the last find selected; "next" starts after it.
+    var lastMatch: Range<UInt64>?
+    /// The result of the last Find All, while its pattern is still the bar's pattern.
+    var allMatches: (pattern: SearchPattern, result: Searcher.AllMatches)?
 
     init(item: HexEditorItem) {
         self.item = item
@@ -41,19 +58,25 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         hexView.delegate = self
         hexView.dataSource = item
         hexView.setAccessibilityIdentifier("hexView")
+        findBar.isHidden = true
+        configureFindBar()
         divider.boxType = .separator
 
         // Plain constraints: the hex view has no intrinsic size, so it takes whatever
-        // the inspector (right) leaves.
+        // the find bar (top) and inspector (right) leave.
         let root = NSView()
-        for child in [hexView, divider, inspector] as [NSView] {
+        for child in [findBar, hexView, divider, inspector] as [NSView] {
             child.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(child)
         }
+        hexBelowTop = hexView.topAnchor.constraint(equalTo: root.topAnchor)
+        hexBelowFindBar = hexView.topAnchor.constraint(equalTo: findBar.bottomAnchor)
         hexToEdge = hexView.trailingAnchor.constraint(equalTo: root.trailingAnchor)
         hexToInspector = hexView.trailingAnchor.constraint(equalTo: divider.leadingAnchor)
         NSLayoutConstraint.activate([
-            hexView.topAnchor.constraint(equalTo: root.topAnchor),
+            findBar.topAnchor.constraint(equalTo: root.topAnchor),
+            findBar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            findBar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             hexView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             hexView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             divider.topAnchor.constraint(equalTo: hexView.topAnchor),
@@ -69,11 +92,12 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         applyVisibility()
     }
 
-    /// Puts the hex view left of the inspector when it shows.
+    /// Puts the hex view below the find bar and left of the inspector when they show.
     func applyVisibility() {
         divider.isHidden = inspector.isHidden
         let pairs = [
-            (hexToEdge, hexToInspector, inspector.isHidden)
+            (hexBelowTop, hexBelowFindBar, findBar.isHidden),
+            (hexToEdge, hexToInspector, inspector.isHidden),
         ]
         for (whenHidden, whenShown, hidden) in pairs {
             (hidden ? whenShown : whenHidden)?.isActive = false
