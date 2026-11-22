@@ -7,53 +7,29 @@ import TwinPanesCore
 @MainActor
 final class RecentFiles: NSObject, NSMenuDelegate {
     static let limit = 10
-    private static let defaultsKey = "RecentFiles.bookmarks"
-    private let defaults: UserDefaults
+    private let store: BookmarkStore
 
     init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
-
-    private var bookmarks: [Data] {
-        get { defaults.array(forKey: Self.defaultsKey) as? [Data] ?? [] }
-        set { defaults.set(Array(newValue.prefix(Self.limit)), forKey: Self.defaultsKey) }
+        store = BookmarkStore(defaults: defaults, key: "RecentFiles.bookmarks", limit: Self.limit)
     }
 
     /// Records `url` at the top of the list. Call while access to it is active.
     func note(_ url: URL) {
-        guard
-            let data = try? url.bookmarkData(
-                options: [.withSecurityScope], includingResourceValuesForKeys: nil,
-                relativeTo: nil)
-        else { return }
-        let path = url.standardizedFileURL.path
-        bookmarks = [data] + bookmarks.filter { Self.resolve($0)?.url.path != path }
+        guard (try? store.add(url)) != nil else { return }
         NSDocumentController.shared.noteNewRecentDocumentURL(url)
     }
 
-    func clear() { bookmarks = [] }
+    func clear() { store.removeAll() }
 
     /// The entries that still resolve, newest first.
-    var entries: [(url: URL, data: Data)] {
-        bookmarks.compactMap { data in Self.resolve(data).map { ($0.url, data) } }
-    }
-
-    private static func resolve(_ data: Data) -> (url: URL, stale: Bool)? {
-        var stale = false
-        guard
-            let url = try? URL(
-                resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI],
-                relativeTo: nil, bookmarkDataIsStale: &stale)
-        else { return nil }
-        return (url, stale)
-    }
+    var entries: [(url: URL, data: Data)] { store.entries.map { ($0.url, $0.data) } }
 
     /// Resolves a bookmark from the menu, starts access, refreshes it if stale, and
     /// returns the URL with its scope token; nil if the file can't be reached any more.
     func open(_ data: Data) -> (URL, SecurityScope)? {
-        guard let (url, stale) = Self.resolve(data) else { return nil }
+        guard let (url, stale) = BookmarkStore.resolve(data) else { return nil }
         let scope = SecurityScope(url: url)
-        if stale { note(url) }
+        if stale { try? store.refresh(url) }
         return (url, scope)
     }
 
