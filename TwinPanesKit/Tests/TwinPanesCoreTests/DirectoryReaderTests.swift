@@ -64,7 +64,10 @@ import Testing
 
     @Test func grantsPickTheMostSpecificFolder() throws {
         defer { try? FileManager.default.removeItem(at: dir) }
-        let defaults = try #require(UserDefaults(suiteName: "FolderGrantsTests-\(UUID())"))
+        // An absolute-path suite keeps the plist in `dir`, which the test removes; a named
+        // suite would leave a file in ~/Library/Preferences on every run.
+        let defaults = try #require(
+            UserDefaults(suiteName: dir.appendingPathComponent("defaults").path))
         let grants = FolderGrants(defaults: defaults)
         #expect(grants.scope(covering: dir) == nil)
         try grants.add(dir)
