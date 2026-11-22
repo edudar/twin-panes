@@ -8,7 +8,8 @@ extension HexView {
 
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let contentRect = NSRect(
-            x: 0, y: 0, width: max(0, bounds.width - scrollerWidth), height: bounds.height)
+            x: 0, y: 0, width: max(0, bounds.width - scrollerWidth),
+            height: max(0, bounds.height - horizontalScrollerHeight))
         context.saveGState()
         context.clip(to: contentRect)
         defer { context.restoreGState() }
@@ -61,7 +62,7 @@ extension HexView {
         }
     }
 
-    private func x(cell: Int) -> Double { inset.left + Double(cell) * charWidth }
+    private func x(cell: Int) -> Double { inset.left + Double(cell) * charWidth - horizontalOffset }
 
     private func drawSelection(row: UInt64, y: Double, focused: Bool) {
         guard layout.length > 0 else { return }

@@ -69,11 +69,13 @@ public final class HexView: NSView {
     public internal(set) var activeColumn: HexLayout.Column = .hex
 
     var position = HexScrollPosition(rowCount: 1, rowHeight: 16, viewHeight: 0)
+    var horizontalOffset: Double = 0
     var glyphTable = HexGlyphTable(font: .monospacedSystemFont(ofSize: 13, weight: .regular))
     var charWidth: Double = 8
     var rowHeight: Double = 16
     let inset = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 4)
     let scroller = NSScroller()
+    let horizontalScroller = NSScroller()
     var pendingPrefetch: Range<UInt64>?
     /// The last prefetch range that failed; not asked for again until the view needs a
     /// different range or reloads, so a persistent read error can't loop.
@@ -84,12 +86,15 @@ public final class HexView: NSView {
         // Since macOS 14 views don't clip by default; without this the background
         // fill and partly scrolled rows paint over the tab bar above the view.
         clipsToBounds = true
-        scroller.scrollerStyle = .legacy
-        scroller.knobStyle = .default
-        scroller.isEnabled = true
-        scroller.target = self
+        for bar in [scroller, horizontalScroller] {
+            bar.scrollerStyle = .legacy
+            bar.knobStyle = .default
+            bar.isEnabled = true
+            bar.target = self
+            addSubview(bar)
+        }
         scroller.action = #selector(scrollerMoved(_:))
-        addSubview(scroller)
+        horizontalScroller.action = #selector(horizontalScrollerMoved(_:))
         setAccessibilityRole(.textArea)
         relayout(keepingRow: false)
     }
@@ -107,16 +112,29 @@ public final class HexView: NSView {
         selection = HexSelection(length: length)
         pendingPrefetch = nil
         failedPrefetch = nil
+        horizontalOffset = 0
         relayout(keepingRow: false)
         delegate?.hexViewSelectionDidChange(self)
     }
 
     // MARK: Geometry
 
-    var contentHeight: Double { max(0, Double(bounds.height) - inset.top - inset.bottom) }
-
     var scrollerWidth: CGFloat {
         NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+    }
+
+    var viewportWidth: Double { max(0, Double(bounds.width - scrollerWidth)) }
+
+    var contentWidth: Double {
+        Double(layout.totalCells) * charWidth + inset.left + inset.right
+    }
+
+    var maxHorizontalOffset: Double { max(0, contentWidth - viewportWidth) }
+
+    var horizontalScrollerHeight: CGFloat { maxHorizontalOffset > 0 ? scrollerWidth : 0 }
+
+    var contentHeight: Double {
+        max(0, Double(bounds.height - horizontalScrollerHeight) - inset.top - inset.bottom)
     }
 
     func relayout(keepingRow: Bool) {
@@ -124,7 +142,7 @@ public final class HexView: NSView {
         let ascent = Double(font.ascender), descent = Double(-font.descender)
         charWidth = glyphTable.advance
         rowHeight = (ascent + descent + Double(font.leading)).rounded(.up) + 3
-        let textWidth = Double(bounds.width - scrollerWidth) - inset.left - inset.right
+        let textWidth = viewportWidth - inset.left - inset.right
         let topOffset = keepingRow ? layout.rowStart(position.topRow) : 0
         layout = HexLayout(
             options: options, length: length,
@@ -132,17 +150,30 @@ public final class HexView: NSView {
         position = HexScrollPosition(
             rowCount: layout.rowCount, rowHeight: rowHeight, viewHeight: contentHeight)
         if keepingRow { position.scrollToTop(row: layout.row(of: topOffset)) }
+        horizontalOffset = min(horizontalOffset, maxHorizontalOffset)
+        layoutScrollers()
         updateScroller()
         needsDisplay = true
     }
 
+    func layoutScrollers() {
+        let hHeight = horizontalScrollerHeight
+        scroller.frame = NSRect(
+            x: bounds.width - scrollerWidth, y: 0, width: scrollerWidth,
+            height: max(0, bounds.height - hHeight))
+        horizontalScroller.isHidden = hHeight == 0
+        horizontalScroller.frame = NSRect(
+            x: 0, y: bounds.height - scrollerWidth, width: max(0, bounds.width - scrollerWidth),
+            height: scrollerWidth)
+    }
+
     public override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
-        scroller.frame = NSRect(
-            x: bounds.width - scrollerWidth, y: 0, width: scrollerWidth, height: bounds.height)
         if case .autoFit = options.bytesPerRow, oldSize.width != bounds.width {
             relayout(keepingRow: true)
         } else {
+            horizontalOffset = min(horizontalOffset, maxHorizontalOffset)
+            layoutScrollers()
             position.setViewHeight(contentHeight)
             updateScroller()
         }
@@ -154,6 +185,15 @@ public final class HexView: NSView {
         scroller.knobProportion = CGFloat(position.knobProportion)
         scroller.doubleValue = position.knobValue
         scroller.isEnabled = position.maxOffset > 0
+        let maxH = maxHorizontalOffset
+        horizontalScroller.knobProportion =
+            contentWidth > 0 ? CGFloat(min(1, viewportWidth / contentWidth)) : 1
+        horizontalScroller.doubleValue = maxH > 0 ? horizontalOffset / maxH : 0
+        horizontalScroller.isEnabled = maxH > 0
+    }
+
+    func setHorizontalOffset(_ value: Double) {
+        horizontalOffset = min(max(0, value), maxHorizontalOffset)
     }
 
     @objc func scrollerMoved(_ sender: NSScroller) {
@@ -165,12 +205,27 @@ public final class HexView: NSView {
         didScroll()
     }
 
+    @objc func horizontalScrollerMoved(_ sender: NSScroller) {
+        switch sender.hitPart {
+        case .decrementPage: setHorizontalOffset(horizontalOffset - viewportWidth)
+        case .incrementPage: setHorizontalOffset(horizontalOffset + viewportWidth)
+        default:
+            setHorizontalOffset(
+                (min(max(0, sender.doubleValue), 1) * maxHorizontalOffset).rounded())
+        }
+        didScroll()
+    }
+
     public override func scrollWheel(with event: NSEvent) {
-        let delta =
+        let dy =
             event.hasPreciseScrollingDeltas
             ? Double(event.scrollingDeltaY) : Double(event.scrollingDeltaY) * rowHeight * 3
-        guard delta != 0 else { return super.scrollWheel(with: event) }
-        position.scroll(by: -delta)
+        let dx =
+            event.hasPreciseScrollingDeltas
+            ? Double(event.scrollingDeltaX) : Double(event.scrollingDeltaX) * charWidth * 3
+        guard dy != 0 || dx != 0 else { return super.scrollWheel(with: event) }
+        if dy != 0 { position.scroll(by: -dy) }
+        if dx != 0 { setHorizontalOffset(horizontalOffset - dx) }
         didScroll()
     }
 
@@ -203,8 +258,26 @@ public final class HexView: NSView {
     }
 
     func selectionChanged(reveal: Bool) {
-        if reveal { position.reveal(row: layout.row(of: selection.cursor)) }
+        if reveal {
+            position.reveal(row: layout.row(of: selection.cursor))
+            revealCursorHorizontally()
+        }
         didScroll()
         delegate?.hexViewSelectionDidChange(self)
+    }
+
+    private func revealCursorHorizontally() {
+        guard maxHorizontalOffset > 0, layout.length > 0 else { return }
+        let rowStart = layout.rowStart(layout.row(of: selection.cursor))
+        let colIndex = Int(selection.cursor - rowStart)
+        let leftCell = activeColumn == .hex ? layout.hexCell(colIndex) : layout.textCell(colIndex)
+        let widthCells = activeColumn == .hex ? 2 : 1
+        let leftX = inset.left + Double(leftCell) * charWidth
+        let rightX = inset.left + Double(leftCell + widthCells) * charWidth + 4
+        if leftX < horizontalOffset {
+            setHorizontalOffset(leftX - inset.left)
+        } else if rightX > horizontalOffset + viewportWidth {
+            setHorizontalOffset(rightX - viewportWidth)
+        }
     }
 }

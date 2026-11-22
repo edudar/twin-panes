@@ -114,7 +114,7 @@ extension HexView: NSMenuItemValidation {
 
     func offset(at point: NSPoint) -> (UInt64, HexLayout.Column)? {
         guard layout.length > 0 else { return nil }
-        let cell = (Double(point.x) - inset.left) / charWidth
+        let cell = (Double(point.x) + horizontalOffset - inset.left) / charWidth
         guard let hit = layout.hit(cell: cell) else { return nil }
         let y = Double(point.y) - inset.top + position.offset
         let row = min(UInt64(max(0, y) / rowHeight), layout.rowCount - 1)
