@@ -24,7 +24,14 @@ final class SandboxSpike {
         panel.prompt = "Probe File"
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        run(panel) { probe, url in probe.probeFile(url) }
+        let grants = app.folderGrants.folders
+        run(panel) { probe, url in
+            let parts = url.standardizedFileURL.pathComponents
+            let covering = grants.first {
+                parts.starts(with: $0.standardizedFileURL.pathComponents)
+            }
+            return probe.probeFile(url, coveringFolder: covering)
+        }
     }
 
     func probeFolder() {

@@ -6,12 +6,23 @@ import Foundation
 extension SandboxProbe {
     // MARK: File grant
 
-    public func probeFile(_ url: URL) -> ProbeReport {
+    /// `coveringFolder` is a folder grant the app already holds over `url`, if any. With
+    /// one, the sibling and replace rows show folder access, not the file grant alone.
+    public func probeFile(_ url: URL, coveringFolder: URL? = nil) -> ProbeReport {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         var steps = Steps()
         steps.record("security scope", scoped ? .ok("started") : .skipped("not a scoped URL"))
+        steps.record(
+            "covering folder grant",
+            coveringFolder.map { .skipped("\($0.path): rows include folder access") }
+                ?? .ok("none: rows show the file grant alone"))
 
+        // Before the read, which downloads an evicted iCloud file.
+        steps.run("dataless (evicted)") {
+            (try Self.stat(url).st_flags & UInt32(SF_DATALESS)) != 0
+                ? "yes: content is in the cloud" : "no: content is local"
+        }
         steps.run("read") { try Self.readHead(url) }
         let bookmark = steps.bookmark(for: url)
         steps.run("fullfsync") { try Self.fullFsync(url) }
@@ -75,11 +86,6 @@ extension SandboxProbe {
         steps.run("in-place write") { try Self.rewriteFirstByte(file) }
         steps.run("xattr set+get") { try Self.setAndCheckXattr(file) }
         steps.run("finder tag") { try Self.addTag(file) }
-        let link = scratch.appendingPathComponent("hardlink.bin")
-        steps.run("hard link") {
-            try FileManager.default.linkItem(at: file, to: link)
-            return "nlink \(try Self.stat(file).st_nlink)"
-        }
         steps.run("clone → sibling") {
             try Self.clone(file, to: scratch.appendingPathComponent("clone.bin"), cleanUp: false)
         }
@@ -91,7 +97,15 @@ extension SandboxProbe {
             defer { try? FileManager.default.removeItem(at: dir) }
             return try Self.clone(file, to: dir.appendingPathComponent("clone"), cleanUp: true)
         }
+        // Replace a file with one link first, then a hard-linked one, so a failure
+        // on the second can't be mistaken for a folder-grant limit.
         steps.run("clone-stage-replace") { try stageAndReplace(file) }
+        let link = scratch.appendingPathComponent("hardlink.bin")
+        steps.run("hard link") {
+            try FileManager.default.linkItem(at: file, to: link)
+            return "nlink \(try Self.stat(file).st_nlink)"
+        }
+        steps.run("clone-stage-replace (hard-linked)") { try stageAndReplace(file) }
         steps.run("hard link after replace") {
             let fileInode = try Self.stat(file).st_ino
             let linkInode = try Self.stat(link).st_ino

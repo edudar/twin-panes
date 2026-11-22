@@ -39,6 +39,22 @@ import Testing
         // The scratch folder is removed afterwards.
         #expect(try FileManager.default.contentsOfDirectory(atPath: granted.path).isEmpty)
         #expect(report.markdown.contains("| clone-stage-replace | ✅ |"))
+        let names = report.results.map(\.name)
+        #expect(
+            try #require(names.firstIndex(of: "clone-stage-replace"))
+                < #require(names.firstIndex(of: "hard link")))
+        #expect(names.contains("clone-stage-replace (hard-linked)"))
+    }
+
+    @Test func fileProbeNotesACoveringFolderGrant() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("covered.bin")
+        try Data("x".utf8).write(to: file)
+        #expect(probe.probeFile(file).outcome(of: "covering folder grant")?.isFailure == false)
+        let covered = probe.probeFile(file, coveringFolder: root)
+        #expect(
+            covered.outcome(of: "covering folder grant")
+                == .skipped("\(root.path): rows include folder access"))
     }
 
     @Test func fileProbeKeepsContent() throws {
@@ -51,6 +67,7 @@ import Testing
 
         #expect(report.grant == .file)
         #expect(report.outcome(of: "read")?.isFailure == false)
+        #expect(report.outcome(of: "dataless (evicted)") == .ok("no: content is local"))
         #expect(report.outcome(of: "clone-stage-replace")?.isFailure == false)
         #expect(try Data(contentsOf: file) == content)
         #expect(
