@@ -32,9 +32,14 @@ public struct HexViewOptions: Equatable, Sendable {
     public static let allowedBytesPerRow = [8, 16, 32]
     public static let allowedGrouping = [1, 2, 4, 8]
 
-    public var bytesPerRow: BytesPerRow
-    /// Bytes per group in the hex column: 1, 2, 4 or 8.
-    public var grouping: Int
+    /// 8, 16 or 32, or fit to the width; anything else falls back to 16.
+    public var bytesPerRow: BytesPerRow {
+        didSet { bytesPerRow = Self.valid(bytesPerRow) }
+    }
+    /// Bytes per group in the hex column: 1, 2, 4 or 8; anything else falls back to 1.
+    public var grouping: Int {
+        didSet { grouping = Self.valid(grouping: grouping) }
+    }
     public var offsetBase: OffsetBase
     public var textEncoding: TextEncoding
 
@@ -42,9 +47,18 @@ public struct HexViewOptions: Equatable, Sendable {
         bytesPerRow: BytesPerRow = .fixed(16), grouping: Int = 1, offsetBase: OffsetBase = .hex,
         textEncoding: TextEncoding = .ascii
     ) {
-        self.bytesPerRow = bytesPerRow
-        self.grouping = Self.allowedGrouping.contains(grouping) ? grouping : 1
+        self.bytesPerRow = Self.valid(bytesPerRow)
+        self.grouping = Self.valid(grouping: grouping)
         self.offsetBase = offsetBase
         self.textEncoding = textEncoding
+    }
+
+    private static func valid(_ value: BytesPerRow) -> BytesPerRow {
+        if case .fixed(let count) = value, !allowedBytesPerRow.contains(count) { return .fixed(16) }
+        return value
+    }
+
+    private static func valid(grouping: Int) -> Int {
+        allowedGrouping.contains(grouping) ? grouping : 1
     }
 }

@@ -63,4 +63,17 @@ import Testing
         #expect(HexViewOptions.TextEncoding.latin1.character(for: 0xE9) == "é")
         #expect(HexViewOptions.TextEncoding.latin1.character(for: 0x85) == nil)
     }
+
+    /// Review minor issue: setting an option directly skipped the init's validation; a
+    /// grouping of 0 would divide by zero in the layout.
+    @Test func optionsStayValidWhenSetDirectly() {
+        var options = HexViewOptions()
+        options.grouping = 0
+        #expect(options.grouping == 1)
+        options.grouping = 4
+        #expect(options.grouping == 4)
+        options.bytesPerRow = .fixed(0)
+        #expect(options.bytesPerRow == .fixed(16))
+        _ = HexLayout(options: options, length: 1000)
+    }
 }
