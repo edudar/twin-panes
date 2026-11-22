@@ -1,7 +1,7 @@
 # M3b plan: sessions and saving
 
-_Status: approved 2026-11-22; in progress, commit 1 of 11 done (`FileIdentity`,
-`AccessMode`). Split from the original M3b on review: this part is sessions
+_Status: approved 2026-11-22; in progress, commits 1–2 of 11 done (`FileIdentity`,
+`AccessMode`, `EditorSession`). Split from the original M3b on review: this part is sessions
 and saving; the clone, external changes, crash recovery and the fault-injection suite
 are M3c (docs/plans/M3c.md)._
 
@@ -41,8 +41,9 @@ What already exists and is reused:
   - the file's `URL`, its `SecurityScope` and its `FileIdentity` (device, inode, size,
     mtime, link count)
   - the access mode (D-b)
-- **Undo entries** keep the selection of the view that made the edit, and also the
-  range they changed (M3c's journal needs it).
+- **Undo entries** keep the selection of the view that made the edit. The range each
+  entry changed, which only M3c's journal needs, is added in M3c (changed while
+  building step 2).
 - **`SessionRegistry`**, one per app, is keyed by `FileIdentity`, and re-keyed when a
   save gives the file a new inode.
   - Opening a file that is already open focuses its tab. A second view on the same
@@ -145,9 +146,11 @@ failing tests → implementation. I stop for "commit" after each one.
 1. **Core: `FileIdentity` and access mode.** Device, inode, size, mtime and link count,
    plus detecting write permission, `uchg` and read-only volumes. Tests on temp files
    with chmod and chflags (cleared again afterwards).
-2. **Core: `EditorSession` with the undo stack.** Move `UndoStack` (plus the changed
-   range) into the session, keep `savedTree`, notify observers, and Revert. Tests: the
-   M3a undo tests move here, plus dirty versus saved.
+2. **Core: `EditorSession` with the undo stack.** The session owns the `EditBuffer`, the
+   `UndoStack` and `savedTree`, refuses edits when read-only, notifies observers, and
+   reverts. Tests: dirty versus saved, coalescing, refused edits leaving no trace, weak
+   observers. The tab still has its own stack until step 3 moves it, with the M3a undo
+   tests.
 3. **EditorKit: `HexEditorItem` on a session.** The item reads and writes through the
    session, `sessionKey` is the session's ID, and read-only typing refuses with the
    reason. Tests in EditorKit, including every event that should update the tab from
