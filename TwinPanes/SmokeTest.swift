@@ -348,14 +348,16 @@ struct SmokeTest {
             // Jump to an uncached page while the inspector is open and verify it decodes.
             hex.hexView.go(to: 0x18041)
             hex.hexView.display()
-            for _ in 0..<50 where hex.source.cachedBytes(0x18041..<0x18049) == nil {
+            func inspectorUInt8() -> String? {
+                (table.view(atColumn: 1, row: 2, makeIfNecessary: true) as? NSTextField)?
+                    .stringValue
+            }
+            for _ in 0..<50 where inspectorUInt8() != "65" {
                 await settle(milliseconds: 20)
             }
-            await settle(milliseconds: 20)
-            let uint8Cell = table.view(atColumn: 1, row: 2, makeIfNecessary: true) as? NSTextField
             check(
-                uint8Cell?.stringValue == "65",
-                "inspector decodes uncached jump: \(uint8Cell?.stringValue ?? "nil")")
+                inspectorUInt8() == "65",
+                "inspector decodes uncached jump: \(inspectorUInt8() ?? "nil")")
         }
         _ = dispatch(KeyChord("i", [.command, .option]), in: window)
         root.layoutSubtreeIfNeeded()

@@ -71,6 +71,8 @@ public struct EditSnapshot: ByteReading {
         original.prefetch(originalRanges, supersede: supersede) { [add] error in
             if let error {
                 completion(error)
+            } else if addRanges.isEmpty {
+                completion(nil)
             } else {
                 add.prefetch(addRanges, ticket: addTicket, completion: completion)
             }
