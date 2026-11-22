@@ -64,8 +64,8 @@ enum MainMenu {
         _ = submenu(
             "Edit",
             [
-                standard("Undo", Selector(("undo:")), "z"),
-                standard("Redo", Selector(("redo:")), "z", [.command, .shift]),
+                standard("Undo", #selector(HexEditorActions.undo(_:)), "z"),
+                standard("Redo", #selector(HexEditorActions.redo(_:)), "z", [.command, .shift]),
                 .separator(),
                 standard("Cut", #selector(NSText.cut(_:)), "x"),
                 standard("Copy", #selector(NSText.copy(_:)), "c"),

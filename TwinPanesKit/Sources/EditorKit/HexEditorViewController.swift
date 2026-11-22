@@ -5,6 +5,8 @@ import WorkspaceKit
 
 /// Action selectors of the hex editor, so menus and the command catalog can name them.
 @objc public protocol HexEditorActions {
+    @objc optional func undo(_ sender: Any?)
+    @objc optional func redo(_ sender: Any?)
     @objc optional func goToOffset(_ sender: Any?)
     @objc optional func copyAsHex(_ sender: Any?)
     @objc optional func copyAsText(_ sender: Any?)

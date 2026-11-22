@@ -174,6 +174,8 @@ private final class StatusSpy: WorkspaceHost {
     @Test func inspectorFindAndUnencodableStatusTrackEdits() async throws {
         defer { try? FileManager.default.removeItem(at: url) }
         let item = try makeItem()
+        // Warm page 0 in cache so synchronous inspector checks don't race async prefetch.
+        _ = try item.read(0..<256)
         let controller = item.controller
         let host = StatusSpy()
         item.host = host
