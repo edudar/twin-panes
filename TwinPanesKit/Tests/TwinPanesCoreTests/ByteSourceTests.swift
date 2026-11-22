@@ -85,6 +85,25 @@ import Testing
         #expect(source.cachedBytes(150_000..<150_100) == data[150_000..<150_100])
     }
 
+    func prefetch(_ source: ByteSource, _ range: Range<UInt64>) async -> ByteSourceError? {
+        await withCheckedContinuation { done in
+            source.prefetch(range) { done.resume(returning: $0) }
+        }
+    }
+
+    /// A file that got shorter after opening: the cache never hands out fewer bytes than
+    /// asked for (the view would index past the end), and prefetch reports it (review bug 1).
+    @Test func cachedBytesAndPrefetchAfterTruncation() async throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (url, data) = try makeFile(1000)
+        let source = try ByteSource(url: url)
+        try FileHandle(forWritingTo: url).truncate(atOffset: 100)
+        #expect(await prefetch(source, 0..<1000) == .truncated(expected: 1000, available: 100))
+        #expect(source.cachedBytes(0..<1000) == nil)
+        #expect(source.cachedBytes(0..<50) == data[0..<50])
+        #expect(await prefetch(source, 0..<50) == nil)
+    }
+
     /// A sparse 4 GiB file opens and reads its last page quickly (M1 target: < 100 ms).
     @Test func opensFourGiBQuickly() throws {
         defer { try? FileManager.default.removeItem(at: dir) }

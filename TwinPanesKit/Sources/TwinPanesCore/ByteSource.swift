@@ -105,7 +105,9 @@ public final class ByteSource: ByteReading {
                 guard let data = cache.lookup(page) else { return nil }
                 Self.append(data, page: page, clippedTo: range, to: &out)
             }
-            return out
+            // A page cached after the file got shorter holds less than asked for; callers
+            // rely on getting all of `range` or nothing.
+            return out.count == range.count ? out : nil
         }
     }
 
@@ -126,7 +128,8 @@ public final class ByteSource: ByteReading {
     }
 
     /// Loads the pages covering `range` on a background queue, then calls `completion`
-    /// on the main queue with any error.
+    /// on the main queue with any error: `.truncated` if the file is now shorter than
+    /// `range`.
     public func prefetch(
         _ range: Range<UInt64>,
         completion: @escaping @MainActor @Sendable (ByteSourceError?) -> Void
@@ -135,7 +138,15 @@ public final class ByteSource: ByteReading {
         ioQueue.async { [self] in
             var failure: ByteSourceError?
             for page in Self.pages(covering: range) {
-                do { _ = try loadPage(page) } catch {
+                do {
+                    let data = try loadPage(page)
+                    // The page came back shorter than the part of `range` it should hold.
+                    let available = page * Self.pageSize + UInt64(data.count)
+                    if available < min(range.upperBound, (page + 1) * Self.pageSize) {
+                        failure = .truncated(expected: range.upperBound, available: available)
+                        break
+                    }
+                } catch {
                     failure = error as? ByteSourceError
                     break
                 }

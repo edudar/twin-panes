@@ -8,8 +8,14 @@ extension HexView {
         let rows = position.visibleRows
         let first = layout.rowStart(rows.lowerBound)
         let end = min(layout.length, layout.rowStart(rows.upperBound))
-        // Only cache hits here: drawing never waits on disk (§4.1).
-        let visible = first < end ? dataSource?.cachedBytes(first..<end) : Data()
+        // Only cache hits here: drawing never waits on disk (§4.1). Anything shorter
+        // than asked for (a file that got shorter) counts as not there.
+        let visible =
+            first < end
+            ? dataSource?.cachedBytes(first..<end).flatMap {
+                $0.count == Int(end - first) ? $0 : nil
+            }
+            : Data()
         if visible == nil { requestPrefetch(rows) }
 
         let isFocused = window?.firstResponder === self && window?.isKeyWindow == true
@@ -22,7 +28,11 @@ extension HexView {
                 let from = Int(start - first), to = Int(rowEnd - first)
                 bytes = from <= to ? visible.subdata(in: from..<to) : Data()
             } else {
-                bytes = start < rowEnd ? dataSource?.cachedBytes(start..<rowEnd) : Data()
+                bytes =
+                    start < rowEnd
+                    ? dataSource?.cachedBytes(start..<rowEnd).flatMap {
+                        $0.count == Int(rowEnd - start) ? $0 : nil
+                    } : Data()
             }
             drawSelection(row: row, y: y, focused: isFocused)
             drawRow(row: row, bytes: bytes, count: Int(rowEnd - start), y: y)

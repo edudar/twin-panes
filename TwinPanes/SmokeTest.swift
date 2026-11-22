@@ -233,8 +233,24 @@ struct SmokeTest {
         check(
             resolve(KeyChord("l", .command), chain) == .goToOffset, "⌘L in hex view → go to offset")
         await find(check, hex: hex, window: window)
+        await truncation(check, hex: hex, url: url)
         check(app.openFile(dir) == nil, "a folder is refused")
         window.attachedSheet.map { window.endSheet($0) }
+    }
+
+    /// Review bug 1: the file gets shorter while it's open. Scrolling past the new end
+    /// must draw placeholders and report the problem, not trap.
+    private func truncation(_ check: (Bool, String) -> Void, hex: HexEditorItem, url: URL) async {
+        do { try FileHandle(forWritingTo: url).truncate(atOffset: 1000) } catch {
+            return check(false, "truncate the sample file: \(error)")
+        }
+        hex.hexView.go(to: 150_000)
+        for _ in 0..<5 {
+            hex.hexView.display()
+            await settle(milliseconds: 20)
+        }
+        let status = app.controller(containing: hex.id).map { self.status(of: $0) } ?? ""
+        check(status.contains("shorter"), "a truncated file is reported: \(status)")
     }
 
     /// M2 find bar, driven through key dispatch. The sample repeats 00…FF, so "ABC"

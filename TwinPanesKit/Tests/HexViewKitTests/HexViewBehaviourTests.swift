@@ -3,7 +3,7 @@ import Testing
 
 @testable import HexViewKit
 
-/// A data source whose cache and prefetch results the test controls.
+/// A data source whose cache, prefetch results and short reads the test controls.
 @MainActor
 final class FakeHexSource: HexViewDataSource {
     let data: Data
@@ -11,6 +11,8 @@ final class FakeHexSource: HexViewDataSource {
     var cached = false
     /// Returned by every prefetch; nil means success (which also fills the cache).
     var prefetchError: Error?
+    /// Bytes cut off every `cachedBytes` answer, to imitate a file that got shorter.
+    var shortBy = 0
     private(set) var prefetches: [Range<UInt64>] = []
 
     init(count: Int) { data = Data((0..<count).map { UInt8(truncatingIfNeeded: $0) }) }
@@ -19,7 +21,8 @@ final class FakeHexSource: HexViewDataSource {
 
     func cachedBytes(_ range: Range<UInt64>) -> Data? {
         guard cached else { return nil }
-        return data[Int(range.lowerBound)..<Int(range.upperBound)]
+        let end = max(Int(range.lowerBound), Int(range.upperBound) - shortBy)
+        return data[Int(range.lowerBound)..<end]
     }
 
     func prefetch(_ range: Range<UInt64>, completion: @escaping @MainActor (Error?) -> Void) {
@@ -87,5 +90,15 @@ struct ReadFailed: Error {}
         render(times: 10)
         #expect(source.prefetches.count == 2)
         #expect(spy.errors == 2)
+    }
+
+    /// Review bug 1: bytes shorter than asked for (a file truncated after open) drew past
+    /// the end of the data and trapped.
+    @Test func drawsShortDataAsPlaceholders() {
+        source.cached = true
+        source.shortBy = 40
+        render()
+        view.go(to: 50_000)
+        render()
     }
 }
