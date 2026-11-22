@@ -104,6 +104,39 @@ import Testing
         #expect(await prefetch(source, 0..<50) == nil)
     }
 
+    @Test func sequentialReadsSkipTheCache() throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (url, _) = try makeFile(300_000)
+        let source = try ByteSource(url: url)
+        _ = try source.readSequential(0..<300_000)
+        #expect(source.cachedPageCount == 0)
+    }
+
+    /// Fast scrolling queues prefetches; only the newest one loads (review bug 5).
+    @MainActor @Test func newerPrefetchSupersedesQueuedOnes() async throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let page = ByteSource.pageSize
+        let (url, _) = try makeFile(Int(page) * 30)
+        let source = try ByteSource(url: url)
+        let ranges: [Range<UInt64>] = [0..<page * 4, page * 10..<page * 14, page * 20..<page * 24]
+        final class Results { var errors: [ByteSourceError?] = [] }
+        let results = Results()
+        source.holdIOForTesting()
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            for range in ranges {
+                source.prefetch(range) { error in
+                    results.errors.append(error)
+                    if results.errors.count == ranges.count { done.resume() }
+                }
+            }
+            source.releaseIOForTesting()
+        }
+        #expect(results.errors.allSatisfy { $0 == nil })
+        #expect(source.cachedBytes(ranges[0]) == nil)
+        #expect(source.cachedBytes(ranges[1]) == nil)
+        #expect(source.cachedBytes(ranges[2]) != nil)
+    }
+
     /// A sparse 4 GiB file opens and reads its last page quickly (M1 target: < 100 ms).
     @Test func opensFourGiBQuickly() throws {
         defer { try? FileManager.default.removeItem(at: dir) }

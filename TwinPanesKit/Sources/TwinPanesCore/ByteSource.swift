@@ -61,6 +61,8 @@ public final class ByteSource: ByteReading {
     private let sequentialFD: Int32
     private let cache: Mutex<PageCache>
     private let ioQueue = DispatchQueue(label: "ByteSource.io", qos: .userInitiated)
+    /// Counts prefetch requests; only the newest one keeps loading pages.
+    private let latestPrefetch = Mutex<UInt64>(0)
 
     public init(url: URL, pageCapacity: Int = ByteSource.defaultPageCapacity) throws {
         let path = url.path
@@ -129,15 +131,21 @@ public final class ByteSource: ByteReading {
 
     /// Loads the pages covering `range` on a background queue, then calls `completion`
     /// on the main queue with any error: `.truncated` if the file is now shorter than
-    /// `range`.
+    /// `range`. A newer `prefetch` makes a queued one stop early and complete with nil.
     public func prefetch(
         _ range: Range<UInt64>,
         completion: @escaping @MainActor @Sendable (ByteSourceError?) -> Void
     ) {
         let range = clamp(range)
+        let request = latestPrefetch.withLock { latest -> UInt64 in
+            latest += 1
+            return latest
+        }
         ioQueue.async { [self] in
             var failure: ByteSourceError?
             for page in Self.pages(covering: range) {
+                // A newer request (the view scrolled on) makes this one moot.
+                if latestPrefetch.withLock({ $0 }) != request { break }
                 do {
                     let data = try loadPage(page)
                     // The page came back shorter than the part of `range` it should hold.
@@ -167,6 +175,15 @@ public final class ByteSource: ByteReading {
         data.count = got
         return data
     }
+
+    // MARK: Test hooks
+
+    /// Pages currently in the cache.
+    var cachedPageCount: Int { cache.withLock { $0.count } }
+
+    /// Stops the prefetch queue so tests can queue several requests before any runs.
+    func holdIOForTesting() { ioQueue.suspend() }
+    func releaseIOForTesting() { ioQueue.resume() }
 
     // MARK: Internals
 
