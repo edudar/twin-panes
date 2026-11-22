@@ -117,4 +117,53 @@ import TwinPanesCore
         #expect(item.folder.path == root.appendingPathComponent("sub").path)
         #expect(opened.files.isEmpty)
     }
+
+    @Test func pathFieldRevertsEmptyAndBadTildeAndNavigatesValidPath() {
+        defer { cleanUp() }
+        let item = browser(at: root)
+        _ = item.viewController.view
+        let field = item.controller.pathField
+
+        // Empty/whitespace input stays put and restores the current path.
+        field.stringValue = "   "
+        item.controller.pathEntered(field)
+        #expect(item.folder.path == root.path)
+        #expect(field.stringValue == root.path)
+
+        // `~other` must not be expanded as `<home>other`.
+        field.stringValue = "~definitely-not-a-user-\(UUID().uuidString)"
+        item.controller.pathEntered(field)
+        #expect(item.folder.path == root.path)
+        #expect(field.stringValue == root.path)
+
+        // Valid subfolder path navigates there.
+        let sub = root.appendingPathComponent("sub").path
+        field.stringValue = sub
+        item.controller.pathEntered(field)
+        #expect(item.folder.path == sub)
+    }
+
+    @Test func menuValidationAndGrantedFolder() throws {
+        defer { cleanUp() }
+        let item = browser(at: URL(fileURLWithPath: "/"))
+        _ = item.viewController.view
+        let parentItem = NSMenuItem(
+            title: "Parent", action: #selector(BrowserViewController.browserParent(_:)),
+            keyEquivalent: "")
+        #expect(!item.controller.validateMenuItem(parentItem))
+
+        // Granting `root` saves it in FolderGrants and lists it.
+        item.granted(root)
+        #expect(item.folder.path == root.path)
+        #expect(grants.scope(covering: root.appendingPathComponent("sub")) != nil)
+        #expect(item.controller.validateMenuItem(parentItem))
+
+        // Empty folder disables open/view/edit.
+        let empty = root.appendingPathComponent("sub/inner")
+        item.go(to: empty)
+        let openItem = NSMenuItem(
+            title: "Open", action: #selector(BrowserViewController.browserOpen(_:)),
+            keyEquivalent: "")
+        #expect(!item.controller.validateMenuItem(openItem))
+    }
 }

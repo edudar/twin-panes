@@ -117,7 +117,11 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
 
     @objc func pathEntered(_ sender: NSTextField) {
         var text = sender.stringValue.trimmingCharacters(in: .whitespaces)
-        if text.hasPrefix("~") {
+        guard !text.isEmpty else {
+            sender.stringValue = item.folder.path
+            return
+        }
+        if text == "~" || text.hasPrefix("~/") {
             text = DirectoryReader.realHomeDirectory.path + text.dropFirst()
         }
         if item.go(to: URL(fileURLWithPath: text, isDirectory: true)) {
