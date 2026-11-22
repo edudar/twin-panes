@@ -36,6 +36,13 @@ public struct HexSelection: Equatable, Sendable {
         move(to: target, extending: extending)
     }
 
+    /// Selects `range` (clamped to the file), with the cursor on its last byte.
+    public mutating func select(_ range: Range<UInt64>) {
+        guard !range.isEmpty else { return move(to: range.lowerBound) }
+        anchor = min(range.lowerBound, lastOffset)
+        cursor = min(range.upperBound - 1, lastOffset)
+    }
+
     public mutating func selectAll() {
         anchor = 0
         cursor = lastOffset

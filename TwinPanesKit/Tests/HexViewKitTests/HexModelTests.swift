@@ -62,6 +62,17 @@ import Testing
         #expect(selection.range == 0..<100)
     }
 
+    @Test func selectsARange() {
+        var selection = HexSelection(length: 100)
+        selection.select(10..<14)
+        #expect(selection.range == 10..<14)
+        #expect(selection.cursor == 13)
+        selection.select(98..<120)
+        #expect(selection.range == 98..<100)
+        selection.select(5..<5)
+        #expect(selection.range == 5..<6)
+    }
+
     @Test func emptyFile() {
         var selection = HexSelection(length: 0)
         selection.move(by: 5)

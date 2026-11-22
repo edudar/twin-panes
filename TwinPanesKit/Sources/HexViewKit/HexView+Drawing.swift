@@ -34,25 +34,18 @@ extension HexView {
     private func drawSelection(row: UInt64, y: Double, focused: Bool) {
         guard layout.length > 0 else { return }
         let rowRange = layout.rowStart(row)..<(layout.rowStart(row) + UInt64(layout.bytesPerRow))
-        let selected = selection.range.clamped(to: rowRange)
+        NSColor.findHighlightColor.withAlphaComponent(0.6).setFill()
+        var match = highlights.partitioningIndex { $0.upperBound > rowRange.lowerBound }
+        while match < highlights.count, highlights[match].lowerBound < rowRange.upperBound {
+            fill(highlights[match].clamped(to: rowRange), in: rowRange, y: y)
+            match += 1
+        }
         let fill =
             focused
             ? NSColor.selectedTextBackgroundColor
             : NSColor.unemphasizedSelectedTextBackgroundColor
-        if !selected.isEmpty {
-            fill.setFill()
-            let a = Int(selected.lowerBound - rowRange.lowerBound)
-            let b = Int(selected.upperBound - rowRange.lowerBound) - 1
-            NSRect(
-                x: x(cell: layout.hexCell(a)) - 2, y: y,
-                width: Double(layout.hexCell(b) + 2 - layout.hexCell(a)) * charWidth + 4,
-                height: rowHeight
-            ).fill()
-            NSRect(
-                x: x(cell: layout.textCell(a)), y: y,
-                width: Double(b - a + 1) * charWidth, height: rowHeight
-            ).fill()
-        }
+        fill.setFill()
+        self.fill(selection.range.clamped(to: rowRange), in: rowRange, y: y)
         // Cursor: an outline in the active column, a lighter one in the other.
         guard rowRange.contains(selection.cursor) else { return }
         let index = Int(selection.cursor - rowRange.lowerBound)
@@ -67,6 +60,22 @@ extension HexView {
             path.lineWidth = active ? 1.5 : 1
             path.stroke()
         }
+    }
+
+    /// Fills the hex and text cells of `range`, which lies within the row `rowRange`.
+    private func fill(_ range: Range<UInt64>, in rowRange: Range<UInt64>, y: Double) {
+        guard !range.isEmpty else { return }
+        let a = Int(range.lowerBound - rowRange.lowerBound)
+        let b = Int(range.upperBound - rowRange.lowerBound) - 1
+        NSRect(
+            x: x(cell: layout.hexCell(a)) - 2, y: y,
+            width: Double(layout.hexCell(b) + 2 - layout.hexCell(a)) * charWidth + 4,
+            height: rowHeight
+        ).fill()
+        NSRect(
+            x: x(cell: layout.textCell(a)), y: y,
+            width: Double(b - a + 1) * charWidth, height: rowHeight
+        ).fill()
     }
 
     private func drawRow(row: UInt64, bytes: Data?, count: Int, y: Double) {
@@ -125,5 +134,20 @@ extension HexView {
             if self.pendingPrefetch == range { self.pendingPrefetch = nil }
             self.needsDisplay = true
         }
+    }
+}
+
+extension Array where Element == Range<UInt64> {
+    /// The first index whose element satisfies `predicate`, for a predicate that is false
+    /// for a prefix of the array and true for the rest (binary search over sorted ranges,
+    /// such as `HexView.highlights`).
+    public func partitioningIndex(where predicate: (Element) -> Bool) -> Int {
+        var low = 0
+        var high = count
+        while low < high {
+            let mid = (low + high) / 2
+            if predicate(self[mid]) { high = mid } else { low = mid + 1 }
+        }
+        return low
     }
 }

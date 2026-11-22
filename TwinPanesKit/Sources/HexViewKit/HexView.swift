@@ -39,6 +39,10 @@ public final class HexView: NSView {
 
     public internal(set) var layout = HexLayout(options: HexViewOptions(), length: 0)
     public internal(set) var selection = HexSelection(length: 0)
+    /// Ranges drawn with the find highlight (all matches), sorted and non-overlapping.
+    public var highlights: [Range<UInt64>] = [] {
+        didSet { needsDisplay = true }
+    }
     /// The column the cursor and copy work in; Tab switches it.
     public internal(set) var activeColumn: HexLayout.Column = .hex
 
@@ -155,6 +159,18 @@ public final class HexView: NSView {
         let lead = UInt64(max(0, position.viewHeight / rowHeight / 3))
         position.scrollToTop(row: row >= lead ? row - lead : 0)
         selectionChanged(reveal: true)
+    }
+
+    /// Selects `range` and scrolls its start into view, a third from the top if it was
+    /// off screen.
+    public func select(_ range: Range<UInt64>) {
+        selection.select(range)
+        let row = layout.row(of: range.lowerBound)
+        if !position.visibleRows.contains(row) {
+            let lead = UInt64(max(0, position.viewHeight / rowHeight / 3))
+            position.scrollToTop(row: row >= lead ? row - lead : 0)
+        }
+        selectionChanged(reveal: false)
     }
 
     func selectionChanged(reveal: Bool) {
