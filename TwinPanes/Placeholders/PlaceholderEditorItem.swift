@@ -111,6 +111,6 @@ final class PlaceholderEditorViewController: NSViewController, CommandScopeProvi
     }
 
     @objc func editorFindNext(_ sender: Any?) {
-        item.host?.showStatus("F3 in editor → editor.findNext (find lands in M2)")
+        item.host?.showStatus("F3 in editor → editor.findNext")
     }
 }
