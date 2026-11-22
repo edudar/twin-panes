@@ -79,6 +79,21 @@ public struct PieceTree: Sendable {
         return result
     }
 
+    /// The bytes before `offset` and the bytes from `offset` on. A piece that straddles
+    /// `offset` is cut in two.
+    public func split(at offset: UInt64) -> (PieceTree, PieceTree) {
+        let (left, right) = Self.split(root, at: offset)
+        return (PieceTree(root: left), PieceTree(root: right))
+    }
+
+    /// `self` followed by `other`.
+    public func appending(_ other: PieceTree) -> PieceTree {
+        guard let otherRoot = other.root else { return self }
+        guard root != nil else { return other }
+        let (rest, first) = Self.removeFirst(otherRoot)
+        return PieceTree(root: Self.join(root, first, rest))
+    }
+
     /// `self` followed by one more piece.
     public func appending(_ piece: Piece) -> PieceTree {
         precondition(piece.length > 0, "empty piece")
@@ -110,6 +125,38 @@ public struct PieceTree: Sendable {
             let from = max(range.lowerBound, pieceEnd) - pieceEnd
             collect(node.right, from..<(range.upperBound - pieceEnd), into: &result)
         }
+    }
+
+    static func split(_ node: PieceNode?, at offset: UInt64) -> (PieceNode?, PieceNode?) {
+        guard let node else { return (nil, nil) }
+        let leftLength = node.left.length
+        let pieceEnd = leftLength + node.piece.length
+        if offset <= leftLength {
+            let (low, high) = split(node.left, at: offset)
+            return (low, join(high, node.piece, node.right))
+        }
+        if offset >= pieceEnd {
+            let (low, high) = split(node.right, at: offset - pieceEnd)
+            return (join(node.left, node.piece, low), high)
+        }
+        let cut = offset - leftLength
+        var head = node.piece, tail = node.piece
+        head.length = cut
+        tail.offset += cut
+        tail.length -= cut
+        return (join(node.left, head, nil), join(nil, tail, node.right))
+    }
+
+    static func removeFirst(_ node: PieceNode) -> (PieceNode?, Piece) {
+        guard let left = node.left else { return (node.right, node.piece) }
+        let (rest, first) = removeFirst(left)
+        return (join(rest, node.piece, node.right), first)
+    }
+
+    static func removeLast(_ node: PieceNode) -> (PieceNode?, Piece) {
+        guard let right = node.right else { return (node.left, node.piece) }
+        let (rest, last) = removeLast(right)
+        return (join(node.left, node.piece, rest), last)
     }
 
     /// `left`, then `piece`, then `right`, rebalanced. Every key of `left` comes before
