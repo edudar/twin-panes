@@ -15,15 +15,24 @@ public enum StepTiming {
 
     /// For a whole function: `let step = StepTiming.start("show"); defer { step?.end() }`.
     static func start(_ name: String) -> Running? {
-        recorder.map { Running(recorder: $0, name: name, start: .now) }
+        recorder.map { Running(recorder: $0, name: name, start: .now, cpuStart: threadCPU()) }
     }
 
     @MainActor struct Running {
         let recorder: StepRecorder
         let name: String
         let start: ContinuousClock.Instant
+        let cpuStart: Duration
 
-        func end() { recorder.record(name, from: start, to: .now) }
+        func end() {
+            recorder.record(name, from: start, to: .now, onCPU: threadCPU() - cpuStart)
+        }
+    }
+
+    /// This thread's time on the CPU so far: a step whose wall time is much longer
+    /// waited for a core, a lock or the disk rather than worked.
+    static func threadCPU() -> Duration {
+        .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)))
     }
 }
 
@@ -37,11 +46,16 @@ public final class StepRecorder {
         /// The time of these steps inside the span.
         public let total: Duration
         public let longest: Duration
+        /// The CPU time of all these steps (each one whole), and of the longest.
+        public let onCPU: Duration
+        public let longestOnCPU: Duration
     }
 
-    private var records:
-        [(name: String, start: ContinuousClock.Instant, end: ContinuousClock.Instant)] =
-            []
+    private typealias Record = (
+        name: String, start: ContinuousClock.Instant, end: ContinuousClock.Instant,
+        onCPU: Duration
+    )
+    private var records: [Record] = []
     /// Enough for a gate's worth of cell draws; older records are dropped past this.
     let limit: Int
 
@@ -50,10 +64,11 @@ public final class StepRecorder {
     public func reset() { records.removeAll(keepingCapacity: true) }
 
     func record(
-        _ name: String, from start: ContinuousClock.Instant, to end: ContinuousClock.Instant
+        _ name: String, from start: ContinuousClock.Instant, to end: ContinuousClock.Instant,
+        onCPU: Duration = .zero
     ) {
         if records.count >= limit { records.removeFirst(records.count / 2) }
-        records.append((name, start, end))
+        records.append((name, start, end, onCPU))
     }
 
     /// The steps that overlapped `start..<end`, the most time first. Nested steps
@@ -63,17 +78,23 @@ public final class StepRecorder {
     )
         -> [Step]
     {
-        var byName: [String: (count: Int, total: Duration, longest: Duration)] = [:]
+        var byName: [String: (Int, Duration, Duration, Duration, Duration)] = [:]
         for record in records where record.end > start && record.start < end {
             let inside = min(record.end, end) - max(record.start, start)
-            var step = byName[record.name] ?? (0, .zero, .zero)
-            step.count += 1
-            step.total += inside
-            step.longest = max(step.longest, record.end - record.start)
-            byName[record.name] = step
+            var (count, total, longest, onCPU, longestOnCPU) =
+                byName[record.name] ?? (0, .zero, .zero, .zero, .zero)
+            count += 1
+            total += inside
+            onCPU += record.onCPU
+            if record.end - record.start > longest {
+                (longest, longestOnCPU) = (record.end - record.start, record.onCPU)
+            }
+            byName[record.name] = (count, total, longest, onCPU, longestOnCPU)
         }
         return byName.map {
-            Step(name: $0.key, count: $0.value.0, total: $0.value.1, longest: $0.value.2)
+            Step(
+                name: $0.key, count: $0.value.0, total: $0.value.1, longest: $0.value.2,
+                onCPU: $0.value.3, longestOnCPU: $0.value.4)
         }
         .sorted { ($0.total, $1.name) > ($1.total, $0.name) }
     }

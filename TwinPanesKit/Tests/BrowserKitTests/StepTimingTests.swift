@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import BrowserKit
@@ -47,5 +48,27 @@ import Testing
         #expect(names.contains("s4") && !names.contains("s0"))
         recorder.reset()
         #expect(recorder.steps(from: at(-1), to: at(100)).isEmpty)
+    }
+
+    /// A step that waited (for a core, a lock, the disk) shows little time on the CPU.
+    @Test func stepsSayHowMuchOfTheirTimeWasOnTheCPU() {
+        let recorder = StepRecorder()
+        StepTiming.recorder = recorder
+        defer { StepTiming.recorder = nil }
+        let before = ContinuousClock.now
+        StepTiming.measure("waiting") { Thread.sleep(forTimeInterval: 0.03) }
+        StepTiming.measure("working") {
+            let end = ContinuousClock.now + .milliseconds(30)
+            var spins = 0
+            while ContinuousClock.now < end { spins &+= 1 }
+            #expect(spins > 0)
+        }
+        let steps = Dictionary(
+            uniqueKeysWithValues: recorder.steps(from: before, to: .now).map { ($0.name, $0) })
+        let waiting = steps["waiting"], working = steps["working"]
+        #expect((waiting?.longest ?? .zero) >= .milliseconds(30))
+        #expect((waiting?.longestOnCPU ?? .seconds(1)) < .milliseconds(10))
+        #expect((working?.longestOnCPU ?? .zero) > .milliseconds(15))
+        #expect((working?.onCPU ?? .zero) == working?.longestOnCPU)
     }
 }

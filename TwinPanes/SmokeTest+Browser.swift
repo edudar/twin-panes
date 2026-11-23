@@ -207,7 +207,7 @@ extension SmokeTest {
         for step in steps.prefix(8) {
             print(
                 "       in the worst gap: \(step.name) ×\(step.count), \(ms(step.total)) ms"
-                    + " (longest \(ms(step.longest)) ms)")
+                    + " (longest \(ms(step.longest)) ms, \(ms(step.longestOnCPU)) on the CPU)")
         }
     }
 
