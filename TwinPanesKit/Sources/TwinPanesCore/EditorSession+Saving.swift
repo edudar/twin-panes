@@ -52,6 +52,7 @@ extension EditorSession {
             (self.url, self.scope, self.identity) = (target, scope, written)
             self.access = AccessMode.of(target)
             self.savedTree = version
+            self.fileWasSaved()
             self.journalSaved(after: journaled)
             self.notify(.saved)
         }
@@ -90,6 +91,10 @@ extension EditorSession {
         guard savesPending == 0 else { return }
         saveTail = nil
         notify(.saving)
+        if changeArrivedWhileSaving {
+            changeArrivedWhileSaving = false
+            fileMayHaveChanged()
+        }
     }
 
     /// Saves the version current now: plans against the saved version (the whole file if
@@ -109,12 +114,17 @@ extension EditorSession {
         let (saver, url, scope, snapshot) = (saver, url, scope, buffer.snapshot())
         // In place (hard links) only when the original pieces read the clone, not the file.
         let journal = isNarrowed ? nil : folder?.file(SaveJournal.fileName)
+        let deleted = onDisk == nil
         identity = try await Self.offMain {
             try withExtendedLifetime(scope) {
-                try saver.save(snapshot, plan: plan, to: url, inPlaceJournal: journal)
+                // A file deleted meanwhile is written back whole.
+                deleted
+                    ? try saver.write(snapshot, to: url)
+                    : try saver.save(snapshot, plan: plan, to: url, inPlaceJournal: journal)
             }
         }
         savedTree = version
+        fileWasSaved()
         journalSaved(after: journaled)
         notify(.saved)
     }

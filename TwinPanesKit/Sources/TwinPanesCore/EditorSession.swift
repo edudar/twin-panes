@@ -27,6 +27,17 @@ public final class EditorSession {
         case saved
         /// `isSaving` changed.
         case saving
+        /// Another app changed or deleted the file while the session has unsaved edits
+        /// (`fileState` says which); a clean session just reloads.
+        case fileChanged
+    }
+
+    /// The file on disk compared with what the session last opened or saved.
+    public enum FileState: Equatable, Sendable {
+        case unchanged
+        /// Changed by someone else; the next save writes the whole file.
+        case changed
+        case deleted
     }
 
     public let id = UUID()
@@ -46,6 +57,14 @@ public final class EditorSession {
     public internal(set) var folder: SessionFolder?
     /// The clone failed (another volume): the original pieces read the live file.
     public internal(set) var isNarrowed = false
+    /// See `FileState`; `.unchanged` again after a save or reload.
+    public internal(set) var fileState = FileState.unchanged
+    /// Watches the file for outside changes (made at init, stopped at close).
+    var watcher: FileWatcher?
+    /// A change arrived during a save; it's looked at when the save is done.
+    var changeArrivedWhileSaving = false
+    /// The outside change last reported, so one change is reported once.
+    var lastOutsideChange: FileIdentity?
     /// Came back from a crash (its tab says so while the edits are unsaved).
     public private(set) var wasRecovered = false
     /// The operation journal in `folder`; nil before the first edit, or after it failed

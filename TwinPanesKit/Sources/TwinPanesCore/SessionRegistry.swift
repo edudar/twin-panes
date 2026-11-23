@@ -32,6 +32,7 @@ public final class SessionRegistry {
         let session = try EditorSession(
             url: url, scope: scope, addDirectory: addDirectory, sessionsRoot: sessionsRoot)
         register(session, key: session.identity.key)
+        session.startWatching()
         return (session, true)
     }
 
