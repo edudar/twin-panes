@@ -12,7 +12,9 @@ extension EditorSession {
     /// - One save runs at a time. A save asked for while one runs is queued once and
     ///   writes the version current when its turn comes; further requests join it.
     /// - On failure nothing changes on disk or in the session, and the error is thrown.
+    ///   A read-only session throws `EditorSessionError.readOnly`.
     public func save() async throws {
+        if case .readOnly(let reason) = access { throw EditorSessionError.readOnly(reason) }
         if savesPending >= 2, let queued = saveTail { return try await queued.value }
         let previous = saveTail
         savesPending += 1

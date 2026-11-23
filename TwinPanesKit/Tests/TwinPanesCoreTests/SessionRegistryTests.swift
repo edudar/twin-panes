@@ -82,4 +82,19 @@ import Testing
         #expect(registry.sessions.isEmpty)
         #expect(registry.session(for: folder.appendingPathComponent("missing.bin")) == nil)
     }
+
+    /// A save replaces the file, which gets a new inode; the registry follows it, so
+    /// opening the file again still finds the session.
+    @Test func followsASessionToItsSavedFile() async throws {
+        defer { cleanUp() }
+        let registry = SessionRegistry()
+        let a = try file("a.bin")
+        let (session, _) = try open(registry, a)
+        let before = session.identity.key
+        try session.overwrite(Data([9]), at: 0, selectionBefore: 0..<1, selectionAfter: 1..<2)
+        try await session.save()
+        #expect(try FileIdentity(url: a).key != before)
+        #expect(registry.session(for: a) === session)
+        #expect(try open(registry, a).0 === session && registry.sessions.count == 1)
+    }
 }

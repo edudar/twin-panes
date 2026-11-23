@@ -156,4 +156,14 @@ private final class GatedFileSystem: FileSystem {
         try await session.save()
         #expect(try !session.isDirty && disk(5) == 0xAA)
     }
+
+    @Test func readOnlySessionsDontSave() async throws {
+        defer { cleanUp() }
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
+        let session = try session()
+        await #expect(throws: EditorSessionError.readOnly(.noWritePermission)) {
+            try await session.save()
+        }
+        #expect(!session.isSaving)
+    }
 }

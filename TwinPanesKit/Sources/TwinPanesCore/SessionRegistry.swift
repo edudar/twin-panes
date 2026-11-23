@@ -29,6 +29,12 @@ public final class SessionRegistry {
         let session = try EditorSession(url: url, scope: scope, addDirectory: addDirectory)
         entries = entries.filter { $0.value.session != nil }
         entries[session.identity.key] = Entry(session: session)
+        // A save replaces the file, giving it a new inode: follow the session there.
+        session.observe(self) { [weak self, weak session] change in
+            guard change == .saved, let self, let session else { return }
+            self.entries = self.entries.filter { $0.value.session.map { $0 !== session } ?? false }
+            self.entries[session.identity.key] = Entry(session: session)
+        }
         return (session, true)
     }
 
