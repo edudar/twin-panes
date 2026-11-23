@@ -74,6 +74,27 @@ import UniformTypeIdentifiers
         #expect(files(down) == files(up).reversed())
     }
 
+    /// Kind is stored with the entry when it's read (docs/plans/M4.md, performance pass,
+    /// step 2): a Kind sort compares what's stored, without looking each type up again.
+    @Test func kindSortsByTheStoredDescription() {
+        let kinds = ["Zebra file", "apple file", "Mango file"]
+        let entries = kinds.enumerated().map { i, kind in
+            DirectoryEntry(
+                url: URL(fileURLWithPath: "/tmp/k\(i)"), name: "k\(i)", isDirectory: false,
+                isPackage: false, isSymbolicLink: false, isHidden: false, size: 1,
+                modified: nil, type: .plainText, kind: kind)
+        }
+        let listing = FolderListing(order: ListingOrder(column: .kind), showsHidden: false)
+            .merging(entries)
+        #expect(listing.rows.map(\.kind) == ["apple file", "Mango file", "Zebra file"])
+        #expect(entries[0].kind == "Zebra file")
+        let looked = DirectoryEntry(
+            url: URL(fileURLWithPath: "/tmp/t"), name: "t", isDirectory: false,
+            isPackage: false, isSymbolicLink: false, isHidden: false, size: 1, modified: nil,
+            type: .folder)
+        #expect(looked.kind == "Folder")
+    }
+
     @Test func namesSortAsInFinder() {
         let names = ["img10.png", "img2.png", "Ångström", "apple", "Banana"]
         let entries = names.map { name in

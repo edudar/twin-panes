@@ -20,8 +20,27 @@ public struct DirectoryEntry: Hashable, Sendable {
     /// type description is what made listing a big folder slow. Also picks the icon.
     public let type: UTType
 
-    /// The Kind column, e.g. "Folder", "Plain text", cached per type.
-    public var kind: String { TypeNames.description(of: type) }
+    /// The Kind column, e.g. "Folder", "Plain text". Stored, not looked up on each use
+    /// (docs/plans/M4.md, performance pass, step 2): a Kind sort of 100k entries looked
+    /// it up millions of times under a lock the main actor's cells also take.
+    public let kind: String
+
+    /// `kind` is the type's description unless given.
+    public init(
+        url: URL, name: String, isDirectory: Bool, isPackage: Bool, isSymbolicLink: Bool,
+        isHidden: Bool, size: UInt64?, modified: Date?, type: UTType, kind: String? = nil
+    ) {
+        self.url = url
+        self.name = name
+        self.isDirectory = isDirectory
+        self.isPackage = isPackage
+        self.isSymbolicLink = isSymbolicLink
+        self.isHidden = isHidden
+        self.size = size
+        self.modified = modified
+        self.type = type
+        self.kind = kind ?? TypeNames.description(of: type)
+    }
 }
 
 /// Type descriptions for the Kind column, looked up once per type.
