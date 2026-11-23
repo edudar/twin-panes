@@ -251,6 +251,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
+    /// A recent file that moved or was renamed: ask the user to find it, starting where
+    /// it was; the file they pick replaces the old entry.
+    @objc func locateRecentFile(_ sender: Any?) {
+        guard let lost = (sender as? NSMenuItem)?.representedObject as? URL else { return }
+        var folder = lost.deletingLastPathComponent()
+        while folder.path != "/", !FileManager.default.fileExists(atPath: folder.path) {
+            folder = folder.deletingLastPathComponent()
+        }
+        let panel = NSOpenPanel()
+        panel.message =
+            "“\(lost.lastPathComponent)” was moved or renamed. Find it to open it again."
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.directoryURL = folder
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        recentFiles.forget(lost)
+        openFile(url)
+    }
+
     @objc func clearRecentFiles(_ sender: Any?) {
         recentFiles.clear()
         NSDocumentController.shared.clearRecentDocuments(nil)

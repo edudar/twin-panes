@@ -3,7 +3,9 @@ import TwinPanesCore
 
 /// File › Open Recent, backed by app-scoped security-scoped bookmarks so files stay
 /// reachable from the sandbox after relaunch (PLAN.md §5). A bookmark that resolves
-/// but reports itself stale is recreated on the spot.
+/// but reports itself stale is recreated on the spot; one that no longer resolves stays
+/// in the menu as moved or renamed, and choosing it asks the user to find the file
+/// (docs/plans/M4.md, D-g).
 @MainActor
 final class RecentFiles: NSObject, NSMenuDelegate {
     static let limit = 10
@@ -59,6 +61,11 @@ final class RecentFiles: NSObject, NSMenuDelegate {
     /// The entries that still resolve, newest first.
     var entries: [(url: URL, data: Data)] { store.entries.map { ($0.url, $0.data) } }
 
+    /// Where files that no longer resolve last were, newest first.
+    var lost: [URL] { store.lost }
+
+    func forget(_ url: URL) { store.forget(url) }
+
     /// Resolves a bookmark from the menu, starts access, refreshes it if stale, and
     /// returns the URL with its scope token; nil if the file can't be reached any more.
     func open(_ data: Data) -> (URL, SecurityScope)? {
@@ -80,6 +87,14 @@ final class RecentFiles: NSObject, NSMenuDelegate {
             item.toolTip = entry.url.path
             item.image = NSWorkspace.shared.icon(forFile: entry.url.path)
             item.image?.size = NSSize(width: 16, height: 16)
+            menu.addItem(item)
+        }
+        for url in lost {
+            let item = NSMenuItem(
+                title: "\(url.lastPathComponent) (moved or renamed)",
+                action: #selector(AppActions.locateRecentFile(_:)), keyEquivalent: "")
+            item.representedObject = url
+            item.toolTip = url.path
             menu.addItem(item)
         }
         if menu.items.isEmpty {

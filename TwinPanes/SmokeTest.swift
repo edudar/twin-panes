@@ -86,6 +86,7 @@ struct SmokeTest {
             "folders first: \(browser.entries.map(\.name))")
         window.makeFirstResponder(browser.preferredFirstResponder)
         await hiddenFiles(check, browser: browser, window: window)
+        lostRecentFile(check, in: folder)
         var chain = FocusChain.scopes(in: window)
         check(
             chain.first == .item(.browser, part: "fileList"),
@@ -246,6 +247,24 @@ struct SmokeTest {
                 charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0)
         else { return false }
         return app.dispatcher.handle(event, in: window)
+    }
+
+    /// A recent file that went away stays in Open Recent, offering to find it (M4, D-g).
+    private func lostRecentFile(_ check: (Bool, String) -> Void, in folder: URL) {
+        let file = folder.appendingPathComponent("recent-\(UUID().uuidString).bin")
+        guard (try? Data([1]).write(to: file)) != nil else { return check(false, "write a recent") }
+        app.recentFiles.note(file)
+        try? FileManager.default.removeItem(at: file)
+        let menu = NSMenu()
+        app.recentFiles.menuNeedsUpdate(menu)
+        let item = menu.items.first {
+            ($0.representedObject as? URL)?.lastPathComponent == file.lastPathComponent
+        }
+        check(
+            item?.action == #selector(AppActions.locateRecentFile(_:))
+                && item?.title.hasSuffix("(moved or renamed)") == true,
+            "a recent file that went away offers to find it")
+        if let lost = item?.representedObject as? URL { app.recentFiles.forget(lost) }
     }
 
     /// ⇧⌘. as AppKit delivers it (">" with ⌘⇧ on a US layout) shows and hides dot-files

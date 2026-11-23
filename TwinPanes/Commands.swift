@@ -10,6 +10,7 @@ import WorkspaceKit
     @objc optional func newMainWindow(_ sender: Any?)
     @objc optional func openRecentFile(_ sender: Any?)
     @objc optional func clearRecentFiles(_ sender: Any?)
+    @objc optional func locateRecentFile(_ sender: Any?)
     @objc optional func newBrowserTab(_ sender: Any?)
     @objc optional func newEditorTab(_ sender: Any?)
     @objc optional func newEditorView(_ sender: Any?)
