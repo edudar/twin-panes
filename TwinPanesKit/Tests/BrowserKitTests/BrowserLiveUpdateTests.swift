@@ -87,4 +87,57 @@ import Testing
         item.go(to: root)
         #expect(item.notice == nil)
     }
+
+    @Test func aFullRelistSwapsTheRowsInPlace() async throws {
+        defer { cleanUp() }
+        FileManager.default.createFile(
+            atPath: root.appendingPathComponent("e.txt").path, contents: nil)
+        item.folderChanged(.relist)
+        await item.listed()
+        #expect(names == ["sub", "b.txt", "d.txt", "e.txt"])
+    }
+
+    @Test func closingTheTabStopsWatching() async throws {
+        defer { cleanUp() }
+        #expect(item.watcher != nil)
+        item.willClose()
+        #expect(item.watcher == nil)
+    }
+
+    /// A small change updates rows in place: the other rows keep their views.
+    @Test func aSmallChangeLeavesTheOtherRowsAlone() async throws {
+        defer { cleanUp() }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = item.controller.view
+        defer { window.close() }
+        // FSEvents delivers in order: once this shows, events from setting the folder up
+        // (which would reload those rows, rightly) are behind us.
+        FileManager.default.createFile(atPath: root.appendingPathComponent("z").path, contents: nil)
+        await until { names.last == "z" }
+        let table = item.controller.tableView
+        window.contentView?.layoutSubtreeIfNeeded()
+        table.layoutSubtreeIfNeeded()
+        let dRow = try #require(item.controller.row(named: "d.txt"))
+        let dView = try #require(table.view(atColumn: 0, row: dRow, makeIfNecessary: false))
+        FileManager.default.createFile(
+            atPath: root.appendingPathComponent("c.txt").path, contents: nil)
+        await until { names == ["sub", "b.txt", "c.txt", "d.txt", "z"] }
+        let moved = try #require(item.controller.row(named: "d.txt"))
+        #expect(moved == dRow + 1)
+        #expect(table.view(atColumn: 0, row: moved, makeIfNecessary: false) === dView)
+    }
+
+    /// When the selected entry goes, the row that took its place is selected.
+    @Test func removingTheSelectedEntrySelectsItsNeighbour() async throws {
+        defer { cleanUp() }
+        let table = item.controller.tableView
+        let row = try #require(item.controller.row(named: "b.txt"))
+        table.selectRowIndexes([row], byExtendingSelection: false)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("b.txt"))
+        await until { names == ["sub", "d.txt"] }
+        #expect(item.controller.selectedEntry?.name == "d.txt")
+    }
 }

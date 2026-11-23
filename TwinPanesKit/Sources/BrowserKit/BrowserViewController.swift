@@ -130,12 +130,45 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         }
     }
 
+    /// A live update (D-f): removes, inserts and reloads just the rows that changed
+    /// between `before` and the item's rows, so the scroll position, the selection and
+    /// the other rows' views stay. False (nothing done) when the change is too big.
+    func updateRows(from before: [DirectoryEntry], touching names: Set<String>) -> Bool {
+        guard isViewLoaded, let item, !item.needsAccess else { return false }
+        let after = item.listing.rows
+        let oldNames = Set(before.map(\.name))
+        let newNames = Set(after.map(\.name))
+        let offset = showsParentRow ? 1 : 0
+        let removed = IndexSet(
+            before.indices.filter { !newNames.contains(before[$0].name) }.map { $0 + offset })
+        let inserted = IndexSet(
+            after.indices.filter { !oldNames.contains(after[$0].name) }.map { $0 + offset })
+        let changed = IndexSet(
+            after.indices.filter {
+                names.contains(after[$0].name) && oldNames.contains(after[$0].name)
+            }
+            .map { $0 + offset })
+        guard removed.count + inserted.count + changed.count <= 100 else { return false }
+        let selected = tableView.selectedRow
+        tableView.beginUpdates()
+        tableView.removeRows(at: removed, withAnimation: [])
+        tableView.insertRows(at: inserted, withAnimation: [])
+        tableView.endUpdates()
+        tableView.reloadData(
+            forRowIndexes: changed, columnIndexes: IndexSet(0..<tableView.numberOfColumns))
+        if tableView.selectedRow < 0, selected >= 0, tableView.numberOfRows > 0 {
+            // The selected entry went: the row that took its place is selected.
+            restoreSelection(min(selected, tableView.numberOfRows - 1), parentRow: false)
+        }
+        return true
+    }
+
     /// The table row of the entry called `name`.
     func row(named name: String) -> Int? {
         item?.listing.row(named: name).map { $0 + (showsParentRow ? 1 : 0) }
     }
 
-    private func restoreSelection(_ row: Int?, parentRow: Bool) {
+    func restoreSelection(_ row: Int?, parentRow: Bool) {
         isRestoringSelection = true
         defer { isRestoringSelection = false }
         if let row {

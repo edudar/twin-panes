@@ -232,7 +232,7 @@ public final class BrowserItem: WorkspaceItem {
             return batch.isEmpty ? result : result.merging(batch)
         }
         if base.entries.count + batch.count <= FolderListing.mainActorLimit {
-            return show(work(), resorted: order != nil)
+            return show(work(), resorted: order != nil, updated: removals)
         }
         isMerging = true
         let wanted = generation
@@ -242,26 +242,33 @@ public final class BrowserItem: WorkspaceItem {
             await MainActor.run {
                 guard let self = box.item, self.generation == wanted else { return }
                 self.isMerging = false
-                self.show(merged, resorted: order != nil)
+                self.show(merged, resorted: order != nil, updated: removals)
             }
         }
     }
 
-    private func show(_ merged: FolderListing, resorted: Bool) {
+    /// `updated`: the names a live update touched, so a small change can update the
+    /// table row by row.
+    private func show(_ merged: FolderListing, resorted: Bool, updated: Set<String>) {
+        let before = listing.rows
         listing = merged
-        controller.reloadKeepingSelection(scrolling: resorted)
+        if resorted || updated.isEmpty
+            || !controller.updateRows(from: before, touching: updated)
+        {
+            controller.reloadKeepingSelection(scrolling: resorted)
+        }
         if hasPending {
             applyPending()
         } else if !isListing {
-            listingFinished()
+            listingFinished(reloading: false)  // the rows were just shown
         } else {
             updateStatus()
         }
     }
 
-    func listingFinished() {
+    func listingFinished(reloading: Bool = true) {
         lister = nil
-        controller.reloadKeepingSelection()
+        if reloading { controller.reloadKeepingSelection() }
         updateStatus()
         readChangedWhileListing()
         if !isReadingChanges { finishWaiting() }
