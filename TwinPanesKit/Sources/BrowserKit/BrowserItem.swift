@@ -15,6 +15,8 @@ extension ItemKind {
     @objc optional func browserEdit(_ sender: Any?)
     /// ⌘↑, Backspace: the parent folder.
     @objc optional func browserParent(_ sender: Any?)
+    /// ⌥⌘↓: enter the selected package (`.app`, `.bundle`) as a folder (D-i).
+    @objc optional func browserShowPackageContents(_ sender: Any?)
     /// ⌘[ and ⌘]: the tab's previous and next folder.
     @objc optional func browserBack(_ sender: Any?)
     @objc optional func browserForward(_ sender: Any?)

@@ -233,6 +233,12 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     @objc func browserEdit(_ sender: Any?) { browserView(sender) }
     @objc func browserParent(_ sender: Any?) { item?.goToParent() }
 
+    /// Packages list as files, as in Finder; this enters one as a folder (D-i).
+    @objc func browserShowPackageContents(_ sender: Any?) {
+        guard let entry = selectedEntry, entry.isPackage else { return NSSound.beep() }
+        item?.go(to: entry.url)
+    }
+
     @objc func browserBack(_ sender: Any?) { item?.goBack() }
     @objc func browserForward(_ sender: Any?) { item?.goForward() }
 
@@ -295,6 +301,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             return selectedEntry != nil
         case #selector(browserParent(_:)):
             return item.folder.path != "/"
+        case #selector(browserShowPackageContents(_:)):
+            return selectedEntry?.isPackage == true
         case #selector(browserBack(_:)):
             return !item.backStack.isEmpty
         case #selector(browserForward(_:)):

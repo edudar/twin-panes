@@ -201,3 +201,44 @@ import Testing
         #expect(!controller.isEditingPath && !controller.pathControl.isHidden)
     }
 }
+
+/// Packages list as files; Show Package Contents enters one (docs/plans/M4.md, D-i).
+@MainActor
+@Suite struct BrowserPackageTests {
+    @Test func showPackageContentsEntersAPackage() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrowserPackageTests-\(UUID().uuidString)", isDirectory: true)
+            .standardizedFileURL
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Tool.app/Contents"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("plain"), withIntermediateDirectories: true)
+        let grants = FolderGrants(
+            defaults: UserDefaults(suiteName: root.appendingPathComponent("plain/d").path)!)
+        var opened: [URL] = []
+        let item = BrowserItem(folder: root, grants: grants) { url, _ in opened.append(url) }
+        let controller = item.controller
+        _ = controller.view
+        await item.listed()
+        func enabled() -> Bool {
+            controller.validateMenuItem(
+                NSMenuItem(
+                    title: "",
+                    action: #selector(BrowserViewController.browserShowPackageContents(_:)),
+                    keyEquivalent: ""))
+        }
+        controller.tableView.selectRowIndexes(
+            [try #require(controller.row(named: "plain"))], byExtendingSelection: false)
+        #expect(!enabled())
+        controller.tableView.selectRowIndexes(
+            [try #require(controller.row(named: "Tool.app"))], byExtendingSelection: false)
+        #expect(enabled())
+        controller.browserOpen(nil)  // a package opens as a file, not a folder
+        #expect(opened.map(\.lastPathComponent) == ["Tool.app"] && item.folder.path == root.path)
+        controller.browserShowPackageContents(nil)
+        await item.listed()
+        #expect(
+            item.folder.lastPathComponent == "Tool.app" && item.entries.map(\.name) == ["Contents"])
+    }
+}

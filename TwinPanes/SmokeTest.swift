@@ -87,6 +87,7 @@ struct SmokeTest {
         window.makeFirstResponder(browser.preferredFirstResponder)
         await hiddenFiles(check, browser: browser, window: window)
         lostRecentFile(check, in: folder)
+        await packageContents(check, browser: browser, folder: folder, window: window)
         var chain = FocusChain.scopes(in: window)
         check(
             chain.first == .item(.browser, part: "fileList"),
@@ -255,6 +256,28 @@ struct SmokeTest {
                 charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0)
         else { return false }
         return app.dispatcher.handle(event, in: window)
+    }
+
+    /// ⌥⌘↓ enters a package, which otherwise lists as a file (M4, D-i).
+    private func packageContents(
+        _ check: (Bool, String) -> Void, browser: BrowserItem, folder: URL, window: NSWindow
+    ) async {
+        let sub = folder.standardizedFileURL.appendingPathComponent("sub")
+        browser.go(to: sub)
+        await browser.listed()
+        let table = browser.preferredFirstResponder as? NSTableView
+        check(
+            browser.entries.first { $0.name == "Tool.app" }.map { $0.isPackage && !$0.isDirectory }
+                == true,
+            "a package lists as a file")
+        table?.selectRowIndexes([1], byExtendingSelection: false)
+        let down = KeyChord(
+            String(Character(UnicodeScalar(NSDownArrowFunctionKey)!)), [.command, .option])
+        check(dispatch(down, in: window), "⌥⌘↓ dispatched")
+        await browser.listed()
+        check(browser.folder.lastPathComponent == "Tool.app", "⌥⌘↓ shows the package's contents")
+        browser.go(to: folder)
+        await browser.listed()
     }
 
     /// A recent file that went away stays in Open Recent, offering to find it (M4, D-g).
@@ -715,6 +738,9 @@ struct SmokeTest {
                 at: folder.appendingPathComponent("sub"), withIntermediateDirectories: true)
             try Data("hello".utf8).write(to: folder.appendingPathComponent("data.bin"))
             try Data().write(to: folder.appendingPathComponent(".hidden"))
+            try FileManager.default.createDirectory(
+                at: folder.appendingPathComponent("sub/Tool.app/Contents"),
+                withIntermediateDirectories: true)
             return folder
         } catch {
             return nil
