@@ -46,6 +46,8 @@ public final class EditorSession {
     public internal(set) var folder: SessionFolder?
     /// The clone failed (another volume): the original pieces read the live file.
     public internal(set) var isNarrowed = false
+    /// Came back from a crash (its tab says so while the edits are unsaved).
+    public private(set) var wasRecovered = false
     /// The operation journal in `folder`; nil before the first edit, or after it failed
     /// to write (edits go on, unprotected).
     var journal: SessionJournal?
@@ -114,6 +116,7 @@ public final class EditorSession {
         access = AccessMode.of(url)
         savedTree = saved
         self.folder = folder
+        wasRecovered = true
         journal = try SessionJournal(
             reopening: folder, records: decoded.records, validLength: decoded.validLength,
             add: add, fileSystem: saver.fileSystem)

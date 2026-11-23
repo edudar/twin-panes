@@ -150,6 +150,7 @@ extension SmokeTest {
             made.map { FileManager.default.fileExists(atPath: $0.file("original.clone").path) }
                 == true && !hex.session.isNarrowed,
             "the first edit clones the file into the session's folder")
+        await recovery(check, from: made)
         check(menu(save, key: "s", in: window), "File › Save (⌘S) reaches the editor")
         await saved()
         check(!hex.isDirty && disk(0x20..<0x21) == [0x7E], "the save reaches the file")
@@ -214,6 +215,35 @@ extension SmokeTest {
         check(
             made.map { !FileManager.default.fileExists(atPath: $0.url.path) } == true,
             "closing the tab deletes the session's folder")
+    }
+
+    /// M3c: a crashed session comes back as a dirty tab. The crash is played by copying
+    /// the live session's folder into a root of its own, which recovery then sweeps.
+    func recovery(_ check: (Bool, String) -> Void, from made: SessionFolder?) async {
+        guard let made else { return check(false, "a session folder to crash") }
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("smoke-sessions-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(
+                at: made.url, to: root.appendingPathComponent(made.url.lastPathComponent))
+        } catch {
+            return check(false, "copy a session folder: \(error)")
+        }
+        let recovered = app.recoverCrashedSessions(in: root)
+        guard let item = recovered.first, let controller = app.controller(containing: item.id)
+        else { return check(false, "a crashed session comes back as a tab") }
+        await settle()
+        let status = self.status(of: controller)
+        check(
+            recovered.count == 1 && item.isDirty && !item.canUndo
+                && status.hasSuffix("Recovered unsaved changes"),
+            "a crashed session comes back as a dirty tab: \(status)")
+        check((try? item.read(0x20..<0x21)) == Data([0x7E]), "with its unsaved edit")
+        controller.layout.remove(item.id)
+        item.willClose()
+        check(SessionFolder.sweep(root).isEmpty, "closing it deletes its folder")
     }
 
     /// The button titled `title` under `view`, for pressing a sheet's buttons.

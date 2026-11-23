@@ -81,7 +81,7 @@ public final class HexEditorItem: WorkspaceItem {
         } else if session.isSaving {
             parts.append("Saving…")
         } else if isDirty {
-            parts.append("Modified")
+            parts.append(session.wasRecovered ? "Recovered unsaved changes" : "Modified")
         }
         return parts.joined(separator: " · ")
     }

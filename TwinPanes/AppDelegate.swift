@@ -36,7 +36,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         // Files from Finder's Open With may already have opened a window.
         if windowControllers.isEmpty { openMainWindow() }
+        recoverCrashedSessions()
         NSApp.activate()
+    }
+
+    /// Reopens, as dirty tabs, the sessions that crashed with unsaved edits, and deletes
+    /// the folders of sessions that closed (docs/plans/M3c.md, D-f). A folder that can't
+    /// be recovered stays for the next launch.
+    @discardableResult
+    func recoverCrashedSessions(in root: URL = SessionFolder.defaultRoot) -> [HexEditorItem] {
+        SessionFolder.sweep(root).compactMap { folder in
+            guard let session = try? EditorSession(recovering: folder) else { return nil }
+            sessions.adopt(session)
+            let item = HexEditorItem(session: session)
+            item.didSaveAs = { [weak self] url in self?.recentFiles.note(url) }
+            show(item)
+            return item
+        }
     }
 
     /// Finder "Open With", dropping files on the Dock icon, `open -a`.

@@ -97,4 +97,25 @@ import Testing
         #expect(registry.session(for: a) === session)
         #expect(try open(registry, a).0 === session && registry.sessions.count == 1)
     }
+
+    /// A recovered session is found by opening its file, unless another session already
+    /// edits it.
+    @Test func adoptsRecoveredSessions() throws {
+        defer { cleanUp() }
+        let a = try file("a.bin")
+        let root = folder.appendingPathComponent("Sessions")
+        let crashed = try EditorSession(url: a, sessionsRoot: root)
+        try crashed.overwrite(Data([9]), at: 0, selectionBefore: 0..<1, selectionAfter: 1..<2)
+        let copy = folder.appendingPathComponent("Crashed")
+        try FileManager.default.copyItem(at: try #require(crashed.folder).url, to: copy)
+
+        let registry = SessionRegistry()
+        let live = try open(registry, a).0
+        let recovered = try EditorSession(recovering: SessionFolder(url: copy))
+        registry.adopt(recovered)
+        #expect(registry.session(for: a) === live)
+        let fresh = SessionRegistry()
+        fresh.adopt(recovered)
+        #expect(fresh.session(for: a) === recovered)
+    }
 }

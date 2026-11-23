@@ -31,15 +31,28 @@ public final class SessionRegistry {
         if let session = session(for: url) { return (session, false) }
         let session = try EditorSession(
             url: url, scope: scope, addDirectory: addDirectory, sessionsRoot: sessionsRoot)
+        register(session, key: session.identity.key)
+        return (session, true)
+    }
+
+    /// Takes in a session made elsewhere (a recovered one), keyed by its file as it is
+    /// now. A session whose file is gone, or whose file another live session already
+    /// edits, isn't found by opening the file.
+    public func adopt(_ session: EditorSession) {
+        guard let key = try? FileIdentity(url: session.url).key, entries[key]?.session == nil
+        else { return }
+        register(session, key: key)
+    }
+
+    private func register(_ session: EditorSession, key: FileIdentity.Key) {
         entries = entries.filter { $0.value.session != nil }
-        entries[session.identity.key] = Entry(session: session)
+        entries[key] = Entry(session: session)
         // A save replaces the file, giving it a new inode: follow the session there.
         session.observe(self) { [weak self, weak session] change in
             guard change == .saved, let self, let session else { return }
             self.entries = self.entries.filter { $0.value.session.map { $0 !== session } ?? false }
             self.entries[session.identity.key] = Entry(session: session)
         }
-        return (session, true)
     }
 
     /// Live sessions, for tests and the quit workflow.
