@@ -21,9 +21,13 @@ looking at.
 
 Twin Panes is early and changing quickly. Right now it can:
 
-- **Browse folders**: name, size, date and kind columns. Type to jump to a
-  file, Return or ⌘↓ to go in. Go up with the ".." row at the top of the list
-  (Return or double-click), ⌘↑ or Backspace; ⇧⌘G to type a path.
+- **Browse folders**, even ones with 100,000 files, without the window ever
+  stalling: rows appear as the folder is read, and the list follows changes made
+  by other apps as they happen. Sort by name, size, date or kind with the column
+  headers; show hidden files with ⇧⌘.; go back and forward with ⌘[ and ⌘]. Type
+  to jump to a file, Return or ⌘↓ to go in. Go up with the ".." row (Return or
+  double-click), ⌘↑, Backspace or a click on a folder in the path bar; ⇧⌘G to type
+  a path. Apps and other packages open as files; ⌥⌘↓ shows their contents.
 - **Open any file as hex** with F3, F4 or Return in the browser, with
   File › Open, by dropping a file (or folder) on the window, or with Finder's
   *Open With*.
@@ -48,7 +52,8 @@ Twin Panes is early and changing quickly. Right now it can:
 - **Use Safari-style tabs**, each with a file icon and a close button.
 
 It runs in the macOS App Sandbox. It sees only the folders you grant it, and it
-remembers those grants.
+remembers those grants: one grant covers a whole external drive or your home
+folder, and if a granted folder is renamed or a recent file moves, it asks again.
 
 ## Where it's going
 
