@@ -169,6 +169,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         let valid = rows.filteredIndexSet { $0 < tableView.numberOfRows }
         tableView.reloadData(
             forRowIndexes: valid, columnIndexes: IndexSet(0..<tableView.numberOfColumns))
+        restripe()
     }
 
     /// The names whose rows a reload needs: the selected entry and the one to select.
@@ -190,6 +191,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         tableView.endUpdates()
         tableView.reloadData(
             forRowIndexes: changed, columnIndexes: IndexSet(0..<tableView.numberOfColumns))
+        restripe()
         if tableView.selectedRow < 0, selected >= 0, tableView.numberOfRows > 0 {
             // The selected entry went: the row that took its place is selected.
             restoreSelection(min(selected, tableView.numberOfRows - 1), parentRow: false)

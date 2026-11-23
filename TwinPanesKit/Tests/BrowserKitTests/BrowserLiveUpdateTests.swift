@@ -159,6 +159,9 @@ import Testing
         await until { names == ["sub", "b.txt", "c.txt", "d.txt", "z"] }
         let moved = try #require(item.controller.row(named: "d.txt"))
         #expect(moved == dRow + 1)
+        // Its row moved under its row view, and the stripes followed.
+        let rowView = try #require(table.rowView(atRow: moved, makeIfNecessary: false))
+        #expect(rowView.backgroundColor == item.controller.stripe(moved))
         #expect(table.view(atColumn: 0, row: moved, makeIfNecessary: false) === dView)
     }
 

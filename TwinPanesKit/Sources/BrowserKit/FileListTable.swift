@@ -137,7 +137,11 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.usesAlternatingRowBackgroundColors = true
+        // Stripes come from the row views (see `stripe`): NSTableView's own filled its
+        // whole clip rect, 100-180 ms of software drawing per navigation once a folder
+        // had 100k rows (docs/plans/M4.md, step 13).
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.backgroundColor = NSColor.alternatingContentBackgroundColors[0]
         tableView.allowsMultipleSelection = false
         tableView.style = .fullWidth
         tableView.target = self
@@ -162,6 +166,23 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         order.column = column
         order.ascending = first.ascending
         item.sort(by: order)
+    }
+
+    /// The background of the row view showing `row`.
+    func stripe(_ row: Int) -> NSColor {
+        let colors = NSColor.alternatingContentBackgroundColors
+        return colors[row % colors.count]
+    }
+
+    func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
+        rowView.backgroundColor = stripe(row)
+    }
+
+    /// Rows moved under their row views (a refresh, a live update): colour them again.
+    func restripe() {
+        tableView.enumerateAvailableRowViews { rowView, row in
+            rowView.backgroundColor = stripe(row)
+        }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
