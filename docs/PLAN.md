@@ -1096,8 +1096,13 @@ byte histogram.
   - *The stall gate on slower machines*: after the performance pass (D44), CI still
     crossed 50 ms in three steps (listing 102–362 ms, scrolling 57–120 ms, switching
     to dark 73–114 ms). The limit is now scaled to the machine rather than set per
-    environment: 50 ms times how much slower this Mac runs a fixed reference
-    workload than the dev Mac (48 ms there), capped at 4×. If CI still fails, its
+    environment: 50 ms times how much slower this Mac runs two fixed reference
+    workloads than the dev Mac, the slower of the two, capped at 4×. One draws and
+    sorts names (48 ms on the dev Mac). The other builds a screenful of table rows
+    (7.5 ms), because on macOS 26 and 15 the failing gaps were a folder's first rows,
+    and AppKit's per-row setup (a layout pass and the key-view loop for each new row)
+    couldn't be made cheaper: lighter cells, reused cells and skipping the early
+    layout were measured and saved nothing overall. If CI still fails, its
     printed factor and the slowest steps say whether the workload under-measures a
     GPU-less runner or the step is truly slow (macOS 15's 362 ms listing gap had no
     timed step in it).

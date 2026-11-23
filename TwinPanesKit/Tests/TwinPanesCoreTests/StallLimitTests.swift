@@ -26,6 +26,18 @@ import Testing
         #expect(limit.factor == 3 && limit.limit == .milliseconds(150))
     }
 
+    /// A machine is as slow as its slowest kind of work: a runner without a GPU may draw
+    /// at the dev Mac's pace and still build table rows several times slower.
+    @Test func theSlowestWorkloadSetsTheFactor() {
+        let limit = StallLimit(
+            base: base, measured: [.milliseconds(40), .milliseconds(30)],
+            reference: [reference, .milliseconds(10)])
+        #expect(limit.factor == 3)
+        #expect(
+            StallLimit(base: base, measured: [.milliseconds(5)], reference: [reference]).factor
+                == 1)
+    }
+
     @Test func noReferenceMeansNoScaling() {
         #expect(StallLimit(base: base, measured: .seconds(1), reference: .zero).factor == 1)
     }

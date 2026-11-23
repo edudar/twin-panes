@@ -12,9 +12,17 @@ public struct StallLimit: Sendable, Equatable {
     public let factor: Double
 
     public init(base: Duration, measured: Duration, reference: Duration, maxFactor: Double = 4) {
+        self.init(base: base, measured: [measured], reference: [reference], maxFactor: maxFactor)
+    }
+
+    /// Several workloads, each timed here and on the reference machine: the machine is as
+    /// slow as its slowest kind of work.
+    public init(
+        base: Duration, measured: [Duration], reference: [Duration], maxFactor: Double = 4
+    ) {
         self.base = base
-        let ratio = reference > .zero ? measured / reference : 1
-        factor = min(maxFactor, max(1, ratio))
+        let ratios = zip(measured, reference).map { $1 > .zero ? $0 / $1 : 1 }
+        factor = min(maxFactor, max(1, ratios.max() ?? 1))
     }
 
     public var limit: Duration { base * factor }

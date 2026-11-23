@@ -151,21 +151,55 @@ extension SmokeTest {
 
     /// The reference workload's time on the dev Mac (M1 Pro, Debug build), fastest of 5.
     static let referenceTime = Duration.milliseconds(48)
+    /// The table-rows workload's time on the dev Mac, fastest of 5.
+    static let referenceRowsTime = Duration.microseconds(7_500)
 
     /// 50 ms on the dev Mac, scaled by how much slower this Mac runs the reference
     /// workload (docs/plans/M4.md, performance pass): the same work stalls a slower
     /// machine for longer, so CI's runners and slower Macs get a longer limit, and the
     /// check means the same everywhere.
+    /// Two workloads, since a Mac without a GPU (CI's runners) can draw at one pace and
+    /// build table rows at another; the slower one sets the limit.
     static func stallLimit() -> StallLimit {
-        let measured = StallLimit.fastest(of: 5) { referenceWork() }
+        let drawing = StallLimit.fastest(of: 5) { referenceWork() }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let rows = StallLimit.fastest(of: 9) { referenceRows(in: window) }
         let stall = StallLimit(
-            base: .milliseconds(50), measured: measured, reference: referenceTime)
+            base: .milliseconds(50), measured: [drawing, rows],
+            reference: [referenceTime, referenceRowsTime])
         print(
             String(
-                format:
-                    "  info reference work: %.1f ms here, %.0f on the dev Mac; stall limit %.0f ms",
-                milliseconds(measured), milliseconds(referenceTime), milliseconds(stall.limit)))
+                format: "  info reference work: drawing %.1f ms (%.1f on the dev Mac), table rows"
+                    + " %.1f ms (%.1f); stall limit %.0f ms",
+                milliseconds(drawing), milliseconds(referenceTime), milliseconds(rows),
+                milliseconds(referenceRowsTime), milliseconds(stall.limit)))
         return stall
+    }
+
+    /// A screenful of table rows built as the file list builds a folder's first rows: a
+    /// new four-column table of drawn cells in an offscreen window, laid out and drawn.
+    /// The window is made once, outside the timing: making one waits on the window server.
+    static func referenceRows(in window: NSWindow) {
+        let table = NSTableView()
+        table.style = .fullWidth
+        for index in 0..<4 {
+            let column = NSTableColumn(identifier: .init("c\(index)"))
+            column.width = 200
+            table.addTableColumn(column)
+        }
+        let rows = ReferenceRows()
+        table.dataSource = rows
+        table.delegate = rows
+        let scrollView = NSScrollView()
+        scrollView.documentView = table
+        scrollView.hasVerticalScroller = true
+        window.contentView = scrollView
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
     }
 
     /// Main-thread work like the browser's: a screenful of names and icons drawn into a
@@ -257,5 +291,26 @@ extension SmokeTest {
         for i in 0..<50 {
             fm.createFile(atPath: folder.appendingPathComponent("new-\(i)").path, contents: nil)
         }
+    }
+}
+
+/// The rows of `SmokeTest.referenceRows()`: cells that draw their text, like the file list's.
+@MainActor
+private final class ReferenceRows: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    final class Cell: NSTableCellView {
+        var text = ""
+        override func draw(_ dirtyRect: NSRect) {
+            (text as NSString).draw(
+                at: NSPoint(x: 2, y: 2),
+                withAttributes: [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize)])
+        }
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { 1_000 }
+
+    func tableView(_ tableView: NSTableView, viewFor column: NSTableColumn?, row: Int) -> NSView? {
+        let cell = Cell()
+        cell.text = "row \(row), \(column?.identifier.rawValue ?? "")"
+        return cell
     }
 }
