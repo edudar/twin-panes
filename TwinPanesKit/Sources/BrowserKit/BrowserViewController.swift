@@ -157,22 +157,29 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     }
 
     /// Shows the item's rows again. reloadData would build every visible row view anew
-    /// (with its key-view loop): tens of milliseconds for each sort of a big folder. The
-    /// table only needs the new count and fresh cells in the row views it already has.
+    /// (with its key-view loop): tens of milliseconds for each sort or listing batch of
+    /// a big folder. The table only needs the new count, and the cells it already shows
+    /// given their new rows (docs/plans/M4.md, performance pass, step 5).
     func refreshRows() {
         let step = StepTiming.start("refresh rows")
         defer { step?.end() }
-        // A big change in the count (most of a folder deleted) is slower this way than
-        // a plain reload: NSTableView then reworks its row data from scratch.
-        guard abs(tableView.numberOfRows - numberOfRows(in: tableView)) <= 1_000 else {
+        // Most of a big folder deleted is slower this way than a plain reload:
+        // NSTableView then reworks its row data from scratch.
+        guard tableView.numberOfRows - numberOfRows(in: tableView) <= 1_000 else {
             return tableView.reloadData()
         }
         tableView.noteNumberOfRowsChanged()
-        var rows = IndexSet()
-        tableView.enumerateAvailableRowViews { _, row in rows.insert(row) }
-        let valid = rows.filteredIndexSet { $0 < tableView.numberOfRows }
-        tableView.reloadData(
-            forRowIndexes: valid, columnIndexes: IndexSet(0..<tableView.numberOfColumns))
+        var stale = IndexSet()
+        tableView.enumerateAvailableRowViews { rowView, row in
+            // Row views past the new end are the table's to remove.
+            if row < tableView.numberOfRows, !refreshCells(in: rowView, row: row) {
+                stale.insert(row)
+            }
+        }
+        if !stale.isEmpty {
+            tableView.reloadData(
+                forRowIndexes: stale, columnIndexes: IndexSet(0..<tableView.numberOfColumns))
+        }
         restripe()
     }
 

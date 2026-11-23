@@ -390,10 +390,27 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         if showsParentRow, row == 0 { return parentCell(column) }
         guard let entry = entry(atRow: row) else { return nil }
         let cell = reusableCell(column == .name ? "name" : "detail")
+        configure(cell, entry, column)
+        return cell
+    }
+
+    private func configure(_ cell: FileCell, _ entry: DirectoryEntry, _ column: Column) {
         cell.text = text(for: entry, column)
         cell.icon = column == .name ? icon(for: entry) : nil
         cell.alignment = column == .size ? .right : .left
-        return cell
+    }
+
+    /// Gives the cells of `rowView` the entry now at `row`, in place; false if the row
+    /// view doesn't hold an entry's cells (the ".." row, or a row becoming it).
+    func refreshCells(in rowView: NSTableRowView, row: Int) -> Bool {
+        guard !(showsParentRow && row == 0), let entry = entry(atRow: row) else { return false }
+        for (index, tableColumn) in tableView.tableColumns.enumerated() {
+            guard let column = Column(rawValue: tableColumn.identifier.rawValue),
+                let cell = rowView.view(atColumn: index) as? FileCell
+            else { return false }
+            configure(cell, entry, column)
+        }
+        return true
     }
 
     /// The ".." row: a folder icon and ".." in the name column, the rest blank. One row,
