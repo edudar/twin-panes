@@ -24,6 +24,8 @@ public struct DirectoryEntry: Hashable, Sendable {
     /// (docs/plans/M4.md, performance pass, step 2): a Kind sort of 100k entries looked
     /// it up millions of times under a lock the main actor's cells also take.
     public let kind: String
+    /// An app, whose icon is its own rather than its type's.
+    public let isApplication: Bool
 
     /// `kind` is the type's description unless given.
     public init(
@@ -40,6 +42,7 @@ public struct DirectoryEntry: Hashable, Sendable {
         self.modified = modified
         self.type = type
         self.kind = kind ?? TypeNames.description(of: type)
+        isApplication = type.conforms(to: .application)
     }
 }
 

@@ -52,8 +52,8 @@ final class FileCell: NSTableCellView {
         let step = StepTiming.start("cell draw")
         defer { step?.end() }
         var x: CGFloat = 2
-        if let icon {
-            icon.draw(in: NSRect(x: x, y: (bounds.height - 16) / 2, width: 16, height: 16))
+        if !secondary {  // the name column, whose icon may still be on its way
+            icon?.draw(in: NSRect(x: x, y: (bounds.height - 16) / 2, width: 16, height: 16))
             x += 22
         }
         let paragraph = NSMutableParagraphStyle()
@@ -84,32 +84,43 @@ final class FileCell: NSTableCellView {
 /// on every draw. Applications have icons of their own, so they are kept by path, the
 /// last few hundred.
 ///
-/// Emptied when the system colours change (folders follow the accent colour) and when
-/// the app becomes active (a newly installed app may claim a type); `didEmpty` then
-/// tells the tables to fetch their icons again.
+/// Looked up and drawn off the main actor (step 3b): a first lookup goes through
+/// LaunchServices, tens of milliseconds for a screenful of apps. Until it's done there's
+/// no icon, and `didChange` then tells the tables to give their visible cells theirs.
+/// The system colours changing (folders follow the accent colour) or the app becoming
+/// active (a new app may claim a type) draws every icon again; the old ones show until
+/// then.
 @MainActor
 final class IconCache {
     static let shared = IconCache(center: .default)
-    static let didEmpty = Notification.Name("IconCache.didEmpty")
+    static let didChange = Notification.Name("IconCache.didChange")
 
-    struct Key: Hashable {
+    struct Key: Hashable, Sendable {
+        /// A type identifier, or an app's path.
         let id: String
+        let isPath: Bool
         let scale: CGFloat
         let appearance: NSAppearance.Name
     }
 
-    private var byType: [Key: NSImage] = [:]
-    private var byPath: [Key: NSImage] = [:]
+    typealias Renderer = @Sendable (Key) -> NSImage?
+    private var icons: [Key: (image: NSImage, generation: Int)] = [:]
+    private var loading: [Key: Int] = [:]
     private var pathOrder: [Key] = []
     let pathLimit = 256
+    private var generation = 0
+    private var announcing = false
     private let center: NotificationCenter
+    private let render: Renderer
+    private let queue = DispatchQueue(label: "IconCache", qos: .userInitiated)
 
-    init(center: NotificationCenter) {
+    init(center: NotificationCenter, render: @escaping Renderer = IconCache.render) {
         self.center = center
+        self.render = render
         for name in [
             NSColor.systemColorsDidChangeNotification, NSApplication.didBecomeActiveNotification,
         ] {
-            center.addObserver(self, selector: #selector(empty), name: name, object: nil)
+            center.addObserver(self, selector: #selector(redraw), name: name, object: nil)
         }
     }
 
@@ -121,46 +132,78 @@ final class IconCache {
         return copy
     }()
 
-    @objc func empty() {
-        byType = [:]
-        byPath = [:]
-        pathOrder = []
-        center.post(name: Self.didEmpty, object: self)
+    /// Draws every icon again; until each is done, the old one shows.
+    @objc func redraw() {
+        generation += 1
+        announce()
     }
 
     /// The entry at `path` changed (a new icon pasted in Get Info, say).
     func forget(path: String) {
-        let gone = pathOrder.filter { $0.id == path }
-        guard !gone.isEmpty else { return }
-        for key in gone { byPath[key] = nil }
+        for key in pathOrder where key.id == path { icons[key] = nil }
         pathOrder.removeAll { $0.id == path }
     }
 
+    /// The icon for `entry`, or nil until it's been drawn.
     func icon(
         for entry: DirectoryEntry, scale: CGFloat, appearance: NSAppearance.Name
-    ) -> NSImage {
-        guard entry.type.conforms(to: .application) else {
-            let key = Key(id: entry.type.identifier, scale: scale, appearance: appearance)
-            if let icon = byType[key] { return icon }
-            let icon = StepTiming.measure("icon lookup") {
-                Self.drawn(NSWorkspace.shared.icon(for: entry.type), key)
+    ) -> NSImage? {
+        let key = Key(
+            id: entry.isApplication ? entry.url.path : entry.type.identifier,
+            isPath: entry.isApplication, scale: scale, appearance: appearance)
+        let cached = icons[key]
+        if cached?.generation != generation { load(key) }
+        return cached?.image
+    }
+
+    private func load(_ key: Key) {
+        guard loading[key] != generation else { return }
+        loading[key] = generation
+        let (wanted, render) = (generation, render)
+        let box = WeakIconCache(self)
+        queue.async {
+            nonisolated(unsafe) let image = render(key)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { box.cache?.loaded(key, image, generation: wanted) }
             }
-            byType[key] = icon
-            return icon
         }
-        let key = Key(id: entry.url.path, scale: scale, appearance: appearance)
-        if let icon = byPath[key] { return icon }
-        let icon = StepTiming.measure("icon lookup") {
-            Self.drawn(NSWorkspace.shared.icon(forFile: key.id), key)
+    }
+
+    private func loaded(_ key: Key, _ image: NSImage?, generation wanted: Int) {
+        guard loading[key] == wanted else { return }  // a newer drawing is on its way
+        loading[key] = nil
+        guard let image else { return }
+        if key.isPath, icons[key] == nil {
+            pathOrder.append(key)
+            if pathOrder.count > pathLimit { icons[pathOrder.removeFirst()] = nil }
         }
-        byPath[key] = icon
-        pathOrder.append(key)
-        if pathOrder.count > pathLimit { byPath[pathOrder.removeFirst()] = nil }
-        return icon
+        icons[key] = (image, wanted)
+        announce()
+    }
+
+    /// One `didChange` for everything drawn in one turn of the run loop.
+    private func announce() {
+        guard !announcing else { return }
+        announcing = true
+        DispatchQueue.main.async { [self] in
+            MainActor.assumeIsolated {
+                announcing = false
+                center.post(name: Self.didChange, object: self)
+            }
+        }
+    }
+
+    /// Looks the key's icon up and draws it, off the main actor.
+    nonisolated static func render(_ key: Key) -> NSImage? {
+        let workspace = NSWorkspace.shared
+        let icon =
+            key.isPath
+            ? workspace.icon(forFile: key.id) : UTType(key.id).map { workspace.icon(for: $0) }
+        return icon.map { drawn($0, key) }
     }
 
     /// `icon` drawn once, at 16 points, for the key's scale and appearance.
-    static func drawn(_ icon: NSImage, _ key: Key) -> NSImage {
+    nonisolated static func drawn(_ icon: NSImage, _ key: Key) -> NSImage {
         let pixels = Int((16 * key.scale).rounded())
         let size = NSSize(width: 16, height: 16)
         guard
@@ -172,7 +215,7 @@ final class IconCache {
         rep.size = size
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        let appearance = NSAppearance(named: key.appearance) ?? NSAppearance.currentDrawing()
+        let appearance = NSAppearance(named: key.appearance) ?? NSAppearance(named: .aqua)!
         appearance.performAsCurrentDrawingAppearance {
             icon.draw(in: NSRect(origin: .zero, size: size))
         }
@@ -181,6 +224,12 @@ final class IconCache {
         image.addRepresentation(rep)
         return image
     }
+}
+
+/// The cache, weakly, for a drawing done off the main actor to hand back.
+private final class WeakIconCache: Sendable {
+    @MainActor weak var cache: IconCache?
+    @MainActor init(_ cache: IconCache) { self.cache = cache }
 }
 
 extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
@@ -230,7 +279,7 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         tableView.setAccessibilityIdentifier("fileList")
         tableView.iconsChanged = { [weak self] in self?.refreshIcons() }
         NotificationCenter.default.addObserver(
-            forName: IconCache.didEmpty, object: IconCache.shared, queue: .main
+            forName: IconCache.didChange, object: IconCache.shared, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated { self?.refreshIcons() } }
     }
 
@@ -312,7 +361,7 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     /// The icon for `entry` in the table's current scale and appearance.
-    func icon(for entry: DirectoryEntry) -> NSImage {
+    func icon(for entry: DirectoryEntry) -> NSImage? {
         let scale = tableView.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         let appearance = tableView.effectiveAppearance.name
         return IconCache.shared.icon(for: entry, scale: scale, appearance: appearance)

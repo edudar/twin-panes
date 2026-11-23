@@ -1,14 +1,15 @@
 import AppKit
+import Synchronization
 import Testing
 import UniformTypeIdentifiers
 
 @testable import BrowserKit
 @testable import TwinPanesCore
 
-/// Row icons drawn once per type, scale and appearance (docs/plans/M4.md, performance
-/// pass, step 3a).
+/// Row icons drawn once per type, scale and appearance, off the main actor
+/// (docs/plans/M4.md, performance pass, steps 3a and 3b).
 @MainActor
-@Suite struct BrowserIconTests {
+@Suite(.timeLimit(.minutes(1))) struct BrowserIconTests {
     let center = NotificationCenter()
 
     func entry(_ name: String, _ type: UTType) -> DirectoryEntry {
@@ -18,10 +19,37 @@ import UniformTypeIdentifiers
             type: type)
     }
 
+    /// Waits for the cache's next `didChange`.
+    func changed(_ cache: IconCache, in center: NotificationCenter) async {
+        final class Token { var value: NSObjectProtocol? }
+        let token = Token()
+        await withCheckedContinuation { done in
+            token.value = center.addObserver(
+                forName: IconCache.didChange, object: cache, queue: nil
+            ) { _ in
+                center.removeObserver(token.value!)
+                done.resume()
+            }
+        }
+    }
+
+    /// The icon once it's drawn.
+    func loaded(
+        _ cache: IconCache, _ entry: DirectoryEntry, scale: CGFloat = 2,
+        appearance: NSAppearance.Name = .aqua
+    ) async -> NSImage {
+        while true {
+            if let icon = cache.icon(for: entry, scale: scale, appearance: appearance) {
+                return icon
+            }
+            await changed(cache, in: center)
+        }
+    }
+
     @Test(arguments: [1.0, 2.0, 3.0])
-    func anIconIsOneBitmapAtTheScreensScale(scale: Double) throws {
+    func anIconIsOneBitmapAtTheScreensScale(scale: Double) async throws {
         let cache = IconCache(center: center)
-        let icon = cache.icon(for: entry("a.txt", .plainText), scale: scale, appearance: .aqua)
+        let icon = await loaded(cache, entry("a.txt", .plainText), scale: scale)
         #expect(icon.size == NSSize(width: 16, height: 16))
         #expect(icon.representations.count == 1)
         let rep = try #require(icon.representations.first as? NSBitmapImageRep)
@@ -29,43 +57,59 @@ import UniformTypeIdentifiers
         #expect(rep.size == NSSize(width: 16, height: 16))
     }
 
-    @Test func iconsAreKeptPerTypeScaleAndAppearance() {
+    @Test func iconsAreKeptPerTypeScaleAndAppearance() async {
         let cache = IconCache(center: center)
         let text = entry("a.txt", .plainText)
-        let light = cache.icon(for: text, scale: 2, appearance: .aqua)
-        #expect(cache.icon(for: entry("b.txt", .plainText), scale: 2, appearance: .aqua) === light)
-        #expect(cache.icon(for: text, scale: 1, appearance: .aqua) !== light)
-        #expect(cache.icon(for: text, scale: 2, appearance: .darkAqua) !== light)
-        #expect(cache.icon(for: entry("a.png", .png), scale: 2, appearance: .aqua) !== light)
+        let light = await loaded(cache, text)
+        #expect(await loaded(cache, entry("b.txt", .plainText)) === light)
+        #expect(await loaded(cache, text, scale: 1) !== light)
+        #expect(await loaded(cache, text, appearance: .darkAqua) !== light)
+        #expect(await loaded(cache, entry("a.png", .png)) !== light)
     }
 
-    @Test func colourChangesAndComingBackEmptyTheCacheAndSaySo() {
+    /// The first ask has no icon; asking again meanwhile doesn't draw it twice.
+    @Test func iconsAreDrawnOffTheMainActorOnce() async {
+        final class Drawn: Sendable { let onMain = Mutex<[Bool]>([]) }  // one per drawing
+        let drawn = Drawn()
+        let cache = IconCache(center: center) { key in
+            drawn.onMain.withLock { $0.append(Thread.isMainThread) }
+            return IconCache.render(key)
+        }
+        let text = entry("a.txt", .plainText)
+        #expect(cache.icon(for: text, scale: 2, appearance: .aqua) == nil)
+        #expect(cache.icon(for: text, scale: 2, appearance: .aqua) == nil)
+        _ = await loaded(cache, text)
+        #expect(drawn.onMain.withLock { $0 } == [false])
+    }
+
+    /// Colour changes and coming back draw again; the old icon shows until then.
+    @Test func colourChangesAndComingBackDrawAgain() async {
         let cache = IconCache(center: center)
         let text = entry("a.txt", .plainText)
-        var emptied = 0
-        let token = center.addObserver(forName: IconCache.didEmpty, object: cache, queue: nil) {
-            _ in emptied += 1
-        }
-        defer { center.removeObserver(token) }
-        var icon = cache.icon(for: text, scale: 2, appearance: .aqua)
+        var icon = await loaded(cache, text)
         for name in [
             NSColor.systemColorsDidChangeNotification, NSApplication.didBecomeActiveNotification,
         ] {
             center.post(name: name, object: nil)
-            let again = cache.icon(for: text, scale: 2, appearance: .aqua)
-            #expect(again !== icon)
+            #expect(cache.icon(for: text, scale: 2, appearance: .aqua) === icon)
+            var again = icon
+            while again === icon {
+                await changed(cache, in: center)
+                again = cache.icon(for: text, scale: 2, appearance: .aqua) ?? icon
+            }
             icon = again
         }
-        #expect(emptied == 2)
     }
 
-    @Test func aChangedAppIsLookedUpAgain() {
+    @Test func aChangedAppIsLookedUpAgain() async {
         let cache = IconCache(center: center)
         let app = entry("Tool.app", .application)
-        let icon = cache.icon(for: app, scale: 2, appearance: .aqua)
+        #expect(app.isApplication && !entry("a.txt", .plainText).isApplication)
+        let icon = await loaded(cache, app)
         #expect(cache.icon(for: app, scale: 2, appearance: .aqua) === icon)
         cache.forget(path: app.url.path)
-        #expect(cache.icon(for: app, scale: 2, appearance: .aqua) !== icon)
+        #expect(cache.icon(for: app, scale: 2, appearance: .aqua) == nil)
+        #expect(await loaded(cache, app) !== icon)
     }
 
     /// A visible cell gets the icon for the table's appearance when it changes.
@@ -93,15 +137,19 @@ import UniformTypeIdentifiers
         let table = item.controller.tableView
         window.contentView?.layoutSubtreeIfNeeded()
         let row = try #require(item.controller.row(named: "a.txt"))
-        func cell() -> FileCell? {
-            table.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileCell
-        }
         let entry = try #require(item.entries.first { $0.name == "a.txt" })
-        let scale = window.backingScaleFactor
-        #expect(cell()?.icon === IconCache.shared.icon(for: entry, scale: scale, appearance: .aqua))
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.contentView?.layoutSubtreeIfNeeded()
-        #expect(
-            cell()?.icon === IconCache.shared.icon(for: entry, scale: scale, appearance: .darkAqua))
+        let shared = IconCache.shared
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            window.appearance = NSAppearance(named: appearance)
+            window.contentView?.layoutSubtreeIfNeeded()
+            let scale = window.backingScaleFactor
+            // Each didChange reaches the table first, which gives its cells their icons.
+            while true {
+                let wanted = shared.icon(for: entry, scale: scale, appearance: appearance)
+                let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileCell
+                if let wanted, cell?.icon === wanted { break }
+                await changed(shared, in: .default)
+            }
+        }
     }
 }
