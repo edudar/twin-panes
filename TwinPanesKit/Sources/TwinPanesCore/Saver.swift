@@ -86,6 +86,7 @@ public struct Saver: Sendable {
     ) throws -> FileIdentity {
         try SaveJournal.begin(
             journal, file: url, identity: identity, ranges: plan.ranges, fileSystem: fileSystem)
+        var writesFlushed = false
         do {
             let descriptor = try fileSystem.openForWriting(url)
             do {
@@ -95,9 +96,16 @@ public struct Saver: Sendable {
                 throw error
             }
             fileSystem.close(descriptor)
+            writesFlushed = true
             try SaveJournal.commit(journal, fileSystem: fileSystem)
         } catch {
-            _ = try? SaveJournal.rollBackIfNeeded(journal, fileSystem: fileSystem)
+            let rolled = try? SaveJournal.rollBackIfNeeded(
+                journal, targetURL: url, fileSystem: fileSystem)
+            if rolled == false, writesFlushed, let id = try? FileIdentity(url: url),
+                id.key == identity.key
+            {
+                return id
+            }
             throw error
         }
         return try FileIdentity(url: url)

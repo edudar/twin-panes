@@ -111,19 +111,29 @@ public final class EditorSession {
     /// add buffer and the journal give back its current and saved versions. It comes
     /// back dirty, with no undo history, and goes on journaling into the same folder.
     public init(recovering folder: SessionFolder, saver: Saver = Saver()) throws {
-        // A save in place that didn't commit is undone first (strategy B).
-        _ = try? SaveJournal.rollBackIfNeeded(
-            folder.file(SaveJournal.fileName), fileSystem: saver.fileSystem)
         let manifest = try folder.manifest()
         var stale = false
         let resolved = manifest.bookmark.flatMap {
             try? URL(
-                resolvingBookmarkData: $0, options: .withSecurityScope, relativeTo: nil,
-                bookmarkDataIsStale: &stale)
+                resolvingBookmarkData: $0, options: [.withSecurityScope, .withoutUI],
+                relativeTo: nil, bookmarkDataIsStale: &stale)
         }
-        url = resolved ?? URL(fileURLWithPath: manifest.path)
-        scope = resolved.map(SecurityScope.init)
-        self.saver = saver
+        let target = resolved ?? URL(fileURLWithPath: manifest.path)
+        let targetScope = resolved.map(SecurityScope.init)
+        // A save in place that didn't commit is undone first (strategy B).
+        let rolledBack = try withExtendedLifetime(targetScope) {
+            try SaveJournal.rollBackIfNeeded(
+                folder.file(SaveJournal.fileName), targetURL: target, fileSystem: saver.fileSystem)
+        }
+        let refreshed = rolledBack ? try? FileIdentity(url: target) : nil
+        if (stale && resolved != nil) || rolledBack {
+            let mark = stale ? try? resolved?.bookmarkData(options: .withSecurityScope) : nil
+            try? folder.updateManifest(
+                SessionManifest(
+                    path: target.path, bookmark: mark ?? manifest.bookmark,
+                    identity: refreshed ?? manifest.identity))
+        }
+        (url, scope, self.saver) = (target, targetScope, saver)
         sessionsRoot = folder.url.deletingLastPathComponent()
         let clone = try ByteSource(url: folder.file(Self.cloneName))
         guard let addFile = Self.addBufferFile(in: folder) else {
@@ -134,7 +144,7 @@ public final class EditorSession {
         let decoded = JournalFormat.decode(data)
         let (tree, saved) = JournalFormat.replay(decoded.records, originalLength: clone.length)
         buffer = EditBuffer(original: clone, add: add, tree: tree)
-        identity = manifest.identity
+        identity = refreshed ?? manifest.identity
         access = AccessMode.of(url)
         savedTree = saved
         self.folder = folder

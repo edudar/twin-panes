@@ -123,10 +123,12 @@ public enum JournalFormat {
     }
 
     /// CRC32C (Castagnoli), as storage formats commonly use.
-    static func crc32c(_ bytes: some Sequence<UInt8>) -> UInt32 {
-        var crc: UInt32 = 0xFFFF_FFFF
+    static func crc32c(
+        _ bytes: some Sequence<UInt8>, seed: UInt32 = 0xFFFF_FFFF, finish: Bool = true
+    ) -> UInt32 {
+        var crc = seed
         for byte in bytes { crc = table[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8) }
-        return crc ^ 0xFFFF_FFFF
+        return finish ? crc ^ 0xFFFF_FFFF : crc
     }
 
     private static let table: [UInt32] = (0..<256).map { index in
