@@ -57,12 +57,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return true
     }
 
-    /// Quitting runs the same close workflow as closing a tab or window: one sheet per
-    /// dirty session, then quit (PLAN.md §4).
+    /// Quitting waits for saves that are running, then runs the same close workflow as
+    /// closing a tab or window: one sheet per dirty session, then quit (PLAN.md §4).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let items = workspace.allItems
-        if closeCoordinator.dirtySessions(closing: items).isEmpty { return .terminateNow }
+        let saving = sessions.sessions.filter(\.isSaving)
+        if saving.isEmpty, closeCoordinator.dirtySessions(closing: items).isEmpty {
+            return .terminateNow
+        }
         Task {
+            for session in saving { await session.finishSaving() }
             let approved = await closeCoordinator.confirmClose(items)
             NSApp.reply(toApplicationShouldTerminate: approved)
         }

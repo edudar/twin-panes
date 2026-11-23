@@ -1,9 +1,9 @@
 # M3b plan: sessions and saving
 
-_Status: approved 2026-11-22; in progress, commits 1–7 of 11 done (`FileIdentity`,
+_Status: approved 2026-11-22; in progress, steps 1–8 of 11 done (`FileIdentity`,
 `AccessMode`, `EditorSession`, the tab on a session, `SessionRegistry`, `SavePlan`,
-`FileSystem` and `Saver`, saving from the session; step 6 is two commits to stay under
-250 lines).
+`FileSystem` and `Saver`, saving from the session, Save and Revert in the app). Steps 6,
+7 and 8 are several commits each to stay under 250 lines.
 Split from the original M3b on review: this part is sessions and saving; the clone, external changes, crash recovery and the fault-injection suite
 are M3c (docs/plans/M3c.md)._
 
@@ -174,8 +174,10 @@ failing tests → implementation. I stop for "commit" after each one.
    (`savedTree = A`), one save at a time, a queued ⌘S, re-keying the registry, and failures leaving
    the session dirty. Tests with a gated `FileSystem` while typing.
 8. **App: Save, Revert to Saved, and Save in the close sheet.** The menu items and their
-   validation, `canSave`, the status line, the error sheet, the bookmark refresh, the
-   Undo and Redo titles, and quit waiting for saves.
+   validation, `canSave`, the status line, the error sheet, the Undo and Redo titles,
+   and quit waiting for saves. No code for the bookmark refresh: `RecentFiles` already
+   recreates a bookmark that resolves stale, which is what a replaced file's does
+   (found while building).
 9. **App: Save As….** The save panel, the streamed staging write, retargeting the
    session, and recents.
 10. **Smoke: saving in the running app.** Through the real menus:

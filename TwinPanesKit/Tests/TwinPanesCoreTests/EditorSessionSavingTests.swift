@@ -166,4 +166,31 @@ private final class GatedFileSystem: FileSystem {
         }
         #expect(!session.isSaving)
     }
+
+    /// Quitting waits for running and queued saves before it closes anything.
+    @Test func finishSavingWaitsForQueuedSaves() async throws {
+        defer { cleanUp() }
+        let fs = GatedFileSystem(holding: true)
+        let session = try session(fs)
+        await session.finishSaving()  // nothing running: returns at once
+        try type(session, 1, at: 1)
+        let first = Task { try await session.save() }
+        await fs.entered.wait()
+        try type(session, 2, at: 2)
+        let second = Task { try await session.save() }
+        let finished = Mutex(false)
+        let waiting = Task { @MainActor in
+            await session.finishSaving()
+            finished.withLock { $0 = true }
+        }
+        await Task.yield()
+        #expect(!finished.withLock { $0 } && session.isSaving)
+        fs.release()
+        fs.release()
+        await waiting.value
+        #expect(finished.withLock { $0 } && !session.isSaving)
+        #expect(try disk(1) == 1 && disk(2) == 2)
+        try await first.value
+        try await second.value
+    }
 }

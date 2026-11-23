@@ -28,6 +28,12 @@ extension EditorSession {
         try await task.value
     }
 
+    /// Returns once no save is running or queued (quitting waits for this); a failed
+    /// save counts as finished.
+    public func finishSaving() async {
+        while let tail = saveTail { _ = try? await tail.value }
+    }
+
     private func finishSave() {
         savesPending -= 1
         guard savesPending == 0 else { return }

@@ -114,6 +114,39 @@ extension SmokeTest {
         hex.discardChanges()
         check(!hex.isDirty && bytes(0x10..<0x11) == [0x10], "Discard drops the edits")
         type("\t", in: window)  // back to the hex column
+
+    }
+
+    /// M3b saving in the running app, on a file of its own: a save swaps in a new file,
+    /// and the tab keeps reading the one it opened.
+    func saving(_ check: (Bool, String) -> Void, window target: NSWindow) async {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("smoke-save-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: url) }
+        do { try Data((0..<256).map { UInt8($0) }).write(to: url) } catch {
+            return check(false, "write a sample to save: \(error)")
+        }
+        guard let hex = app.openFile(url), let controller = app.controller(containing: hex.id),
+            let window = controller.window
+        else { return check(false, "the save sample opens") }
+        defer { controller.layout.remove(hex.id) }
+        check(window === target, "it opens in the window under test")
+        await settle()
+        window.makeFirstResponder(hex.hexView)
+        func disk(_ range: Range<Int>) -> [UInt8] {
+            (try? Data(contentsOf: url)).map { Array($0[range]) } ?? []
+        }
+        func saved() async {
+            for _ in 0..<100 where hex.isDirty || hex.session.isSaving {
+                await settle(milliseconds: 20)
+            }
+        }
+        let save = #selector(HexEditorActions.editorSave(_:))
+        hex.hexView.go(to: 0x20)
+        type("7E", in: window)
+        check(menu(save, key: "s", in: window), "File › Save (⌘S) reaches the editor")
+        await saved()
+        check(!hex.isDirty && disk(0x20..<0x21) == [0x7E], "the save reaches the file")
     }
 
     /// A file without write permission opens read-only (M3b, D-b): typing changes
