@@ -91,3 +91,44 @@ import TwinPanesCore
         #expect(item.order == ListingOrder())
     }
 }
+
+/// The hidden-files toggle (docs/plans/M4.md, D-e, step 6).
+@MainActor
+@Suite struct BrowserHiddenFilesTests {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("BrowserHiddenFilesTests-\(UUID().uuidString)", isDirectory: true)
+        .standardizedFileURL
+
+    @Test func hiddenFilesShowWithoutListingAgain() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fm = FileManager.default
+        try fm.createDirectory(
+            at: root.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        for name in ["visible.txt", ".dot", "sub/.inner"] {
+            fm.createFile(atPath: root.appendingPathComponent(name).path, contents: nil)
+        }
+        let prefs = root.appendingPathComponent("sub")
+        let grants = FolderGrants(
+            defaults: UserDefaults(suiteName: prefs.appendingPathComponent("d").path)!)
+        let item = BrowserItem(folder: root, grants: grants) { _, _ in }
+        _ = item.viewController.view
+        await item.listed()
+        #expect(
+            item.entries.map(\.name) == ["sub", "visible.txt"] && item.listing.hiddenCount == 1)
+
+        let menuItem = NSMenuItem(
+            title: "", action: #selector(BrowserViewController.browserToggleHidden(_:)),
+            keyEquivalent: "")
+        #expect(item.controller.validateMenuItem(menuItem) && menuItem.state == .off)
+        item.controller.browserToggleHidden(nil)
+        #expect(!item.isListing)  // filtered, not listed again
+        #expect(item.entries.map(\.name) == ["sub", ".dot", "visible.txt"])
+        #expect(item.controller.validateMenuItem(menuItem) && menuItem.state == .on)
+
+        item.go(to: root.appendingPathComponent("sub"))  // the toggle belongs to the tab
+        await item.listed()
+        #expect(item.entries.map(\.name).contains(".inner"))
+        item.showHidden(false)
+        #expect(!item.entries.map(\.name).contains(".inner"))
+    }
+}

@@ -15,6 +15,8 @@ extension ItemKind {
     @objc optional func browserEdit(_ sender: Any?)
     /// ⌘↑, Backspace: the parent folder.
     @objc optional func browserParent(_ sender: Any?)
+    /// ⇧⌘.: show or hide hidden files in this tab.
+    @objc optional func browserToggleHidden(_ sender: Any?)
     /// ⇧⌘G: focus the path field.
     @objc optional func browserGoToFolder(_ sender: Any?)
     /// Ask for sandbox access to the current folder.
@@ -50,6 +52,10 @@ public final class BrowserItem: WorkspaceItem {
     private var pendingBatch: [DirectoryEntry] = []
     /// A new order waiting for the same; applied before the waiting batches.
     private var pendingOrder: ListingOrder?
+    private var pendingHidden: Bool?
+    private var hasPending: Bool {
+        !pendingBatch.isEmpty || pendingOrder != nil || pendingHidden != nil
+    }
     private var isMerging = false
     private var listedWaiters: [CheckedContinuation<Void, Never>] = []
     /// Set when the sandbox refuses the folder until the user grants access.
@@ -92,7 +98,7 @@ public final class BrowserItem: WorkspaceItem {
         let order = self.order
         stopListing()
         needsAccess = problem != nil
-        listing = FolderListing(order: order, showsHidden: listing.showsHidden)
+        listing = FolderListing(order: order, showsHidden: showsHidden)
         folder = target
         scope = newScope
         hasListed = true
@@ -121,12 +127,25 @@ public final class BrowserItem: WorkspaceItem {
         generation += 1
         pendingBatch = []
         pendingOrder = nil
+        pendingHidden = nil
         isMerging = false
         isListing = false
     }
 
     /// The order the rows are in, or are being sorted into; it outlives navigation.
     public private(set) var order = ListingOrder()
+
+    /// Whether hidden files show in this tab (D-e); it outlives navigation.
+    public private(set) var showsHidden = false
+
+    /// Shows or hides hidden files. The listing always holds them, so this only
+    /// filters: nothing is listed again.
+    public func showHidden(_ shows: Bool) {
+        guard shows != showsHidden else { return }
+        showsHidden = shows
+        pendingHidden = shows
+        applyPending()
+    }
 
     /// Sorts the rows (D-c): here for a small folder, off the main actor for a big one,
     /// keeping the selected entry selected. Batches still arriving merge in the new order.
@@ -156,15 +175,18 @@ public final class BrowserItem: WorkspaceItem {
     /// Applies the waiting order and batches: here when the folder is small, else off
     /// the main actor, one run at a time; a result for an older navigation is dropped.
     private func applyPending() {
-        guard !isMerging, !pendingBatch.isEmpty || pendingOrder != nil else { return }
+        guard !isMerging, hasPending else { return }
         let batch = pendingBatch
         let order = pendingOrder
+        let hidden = pendingHidden
         pendingBatch = []
         pendingOrder = nil
+        pendingHidden = nil
         let base = listing
         let work: @Sendable () -> FolderListing = {
-            let sorted = order.map { base.sorted(by: $0) } ?? base
-            return batch.isEmpty ? sorted : sorted.merging(batch)
+            var result = order.map { base.sorted(by: $0) } ?? base
+            if let hidden { result = result.showingHidden(hidden) }
+            return batch.isEmpty ? result : result.merging(batch)
         }
         if base.entries.count + batch.count <= FolderListing.mainActorLimit {
             return show(work(), resorted: order != nil)
@@ -184,7 +206,7 @@ public final class BrowserItem: WorkspaceItem {
     private func show(_ merged: FolderListing, resorted: Bool) {
         listing = merged
         controller.reloadKeepingSelection(scrolling: resorted)
-        if !pendingBatch.isEmpty || pendingOrder != nil {
+        if hasPending {
             applyPending()
         } else if !isListing {
             listingFinished()
@@ -240,8 +262,10 @@ public final class BrowserItem: WorkspaceItem {
             host?.showStatus("\(folder.path) · Listing… \(listing.entries.count.formatted()) items")
         } else {
             let folders = entries.filter(\.isDirectory).count
+            let hidden = listing.hiddenCount
             host?.showStatus(
-                "\(folder.path) · \(entries.count) items (\(folders) folders)")
+                "\(folder.path) · \(entries.count.formatted()) items (\(folders.formatted()) folders)"
+                    + (hidden > 0 ? ", \(hidden.formatted()) hidden" : ""))
         }
     }
 }

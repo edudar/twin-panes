@@ -85,6 +85,7 @@ struct SmokeTest {
             browser.entries.map(\.name) == ["sub", "data.bin"],
             "folders first: \(browser.entries.map(\.name))")
         window.makeFirstResponder(browser.preferredFirstResponder)
+        await hiddenFiles(check, browser: browser, window: window)
         var chain = FocusChain.scopes(in: window)
         check(
             chain.first == .item(.browser, part: "fileList"),
@@ -237,6 +238,27 @@ struct SmokeTest {
                 charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0)
         else { return false }
         return app.dispatcher.handle(event, in: window)
+    }
+
+    /// ⇧⌘. as AppKit delivers it (">" with ⌘⇧ on a US layout) shows and hides dot-files
+    /// without listing the folder again (M4, D-e).
+    private func hiddenFiles(
+        _ check: (Bool, String) -> Void, browser: BrowserItem, window: NSWindow
+    ) async {
+        func press() -> Bool {
+            guard
+                let event = NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [.command, .shift],
+                    timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, characters: ">",
+                    charactersIgnoringModifiers: ">", isARepeat: false, keyCode: 47)
+            else { return false }
+            return app.dispatcher.handle(event, in: window)
+        }
+        check(
+            press() && browser.entries.contains { $0.name == ".hidden" }, "⇧⌘. shows hidden files")
+        check(!browser.isListing, "showing hidden files doesn't list the folder again")
+        check(press() && !browser.entries.contains { $0.name == ".hidden" }, "⇧⌘. hides them again")
     }
 
     /// The ".." row: drawn first in the list, Return on it and the list's double-click
@@ -657,6 +679,7 @@ struct SmokeTest {
             try FileManager.default.createDirectory(
                 at: folder.appendingPathComponent("sub"), withIntermediateDirectories: true)
             try Data("hello".utf8).write(to: folder.appendingPathComponent("data.bin"))
+            try Data().write(to: folder.appendingPathComponent(".hidden"))
             return folder
         } catch {
             return nil

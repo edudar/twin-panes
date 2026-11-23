@@ -46,6 +46,7 @@ extension CommandID {
     static let browserOpen: CommandID = "browser.open"
     static let browserParent: CommandID = "browser.parent"
     static let browserGoToFolder: CommandID = "browser.goToFolder"
+    static let browserToggleHidden: CommandID = "browser.toggleHidden"
     static let editorFind: CommandID = "editor.find"
     static let editorFindNext: CommandID = "editor.findNext"
     static let editorFindPrevious: CommandID = "editor.findPrevious"
@@ -102,6 +103,9 @@ enum DefaultCommands {
         add(.browserOpen, "Open", #selector(BrowserActions.browserOpen(_:)))
         add(.browserParent, "Enclosing Folder", #selector(BrowserActions.browserParent(_:)))
         add(.browserGoToFolder, "Go to Folder…", #selector(BrowserActions.browserGoToFolder(_:)))
+        add(
+            .browserToggleHidden, "Show Hidden Files",
+            #selector(BrowserActions.browserToggleHidden(_:)))
         add(.editorFind, "Find…", #selector(HexEditorActions.editorFind(_:)))
         add(.editorFindNext, "Find Next", #selector(HexEditorActions.editorFindNext(_:)))
         add(
@@ -151,6 +155,7 @@ enum DefaultCommands {
             KeyChord(Self.arrow(NSUpArrowFunctionKey), .command), to: .browserParent, in: browser)
         registry.bind(KeyChord("\u{7f}"), to: .browserParent, in: fileList)
         registry.bind(KeyChord("g", [.command, .shift]), to: .browserGoToFolder, in: browser)
+        registry.bind(KeyChord(">", .command), to: .browserToggleHidden, in: browser)  // ⇧⌘.
         registry.bind(KeyChord("s", .command), to: .save, in: editor)
         registry.bind(KeyChord("s", [.command, .shift]), to: .saveAs, in: editor)
         registry.bind(KeyChord("f", .command), to: .editorFind, in: editor)

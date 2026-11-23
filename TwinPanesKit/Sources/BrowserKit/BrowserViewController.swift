@@ -188,6 +188,11 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     @objc func browserEdit(_ sender: Any?) { browserView(sender) }
     @objc func browserParent(_ sender: Any?) { item?.goToParent() }
 
+    @objc func browserToggleHidden(_ sender: Any?) {
+        guard let item else { return }
+        item.showHidden(!item.showsHidden)
+    }
+
     @objc func browserGoToFolder(_ sender: Any?) {
         view.window?.makeFirstResponder(pathField)
         pathField.currentEditor()?.selectAll(nil)
@@ -233,6 +238,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             return selectedEntry != nil
         case #selector(browserParent(_:)):
             return item.folder.path != "/"
+        case #selector(browserToggleHidden(_:)):
+            menuItem.state = item.showsHidden ? .on : .off
+            return true
         default:
             return true
         }

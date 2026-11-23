@@ -84,6 +84,7 @@ enum MainMenu {
                 command(.nextTab), command(.previousTab), .separator(),
                 command(.browserOpen), command(.browserView), command(.browserEdit),
                 command(.browserParent), command(.browserGoToFolder),
+                command(.browserToggleHidden),
                 .separator(), command(.goToOffset), command(.toggleInspector), .separator(),
                 options(
                     "Bytes per Row", #selector(HexEditorActions.setBytesPerRow(_:)),
