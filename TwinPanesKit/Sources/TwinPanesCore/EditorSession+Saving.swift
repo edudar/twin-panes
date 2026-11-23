@@ -62,6 +62,11 @@ extension EditorSession {
     private func journalSaved(after count: UInt64?) {
         guard let count else { return }
         do { try journal?.recordSaved(after: count) } catch { journal = nil }
+        // The manifest follows the file: recovery saves against what was saved last.
+        let bookmark = try? url.bookmarkData(
+            options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        try? folder?.updateManifest(
+            SessionManifest(path: url.path, bookmark: bookmark, identity: identity))
     }
 
     /// Runs `body` on a dispatch queue, not Swift concurrency's few threads: a save

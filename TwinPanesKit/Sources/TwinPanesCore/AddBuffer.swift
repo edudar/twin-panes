@@ -64,6 +64,33 @@ public final class AddBuffer: Sendable {
         state = Mutex(State(cache: PageCache(capacity: max(1, pageCapacity))))
     }
 
+    /// Reopens the add buffer at `url` as a crash left it (recovery, docs/plans/M3c.md
+    /// D-f); appends go on after its end, and its folder goes with it as usual.
+    public init(reopening url: URL, pageCapacity: Int = 64) throws {
+        self.url = url
+        folder = url.deletingLastPathComponent()
+        let descriptor = open(url.path, O_RDWR | O_CLOEXEC)
+        guard descriptor >= 0 else {
+            throw AddBufferError.createFailed(path: url.path, errno: errno)
+        }
+        var info = stat()
+        let length = fstat(descriptor, &info) == 0 ? UInt64(max(0, info.st_size)) : 0
+        // The partly filled last page lives in memory, as it would have before the crash.
+        var tail = Data(count: Int(length % Self.pageSize))
+        let read = tail.withUnsafeMutableBytes { buffer in
+            pread(
+                descriptor, buffer.baseAddress, buffer.count, off_t(length - UInt64(buffer.count)))
+        }
+        guard read == tail.count else {
+            let code = read < 0 ? errno : EIO
+            close(descriptor)
+            throw AddBufferError.createFailed(path: url.path, errno: code)
+        }
+        fd = descriptor
+        state = Mutex(
+            State(length: length, tail: tail, cache: PageCache(capacity: max(1, pageCapacity))))
+    }
+
     deinit {
         close(fd)
         try? FileManager.default.removeItem(at: folder)

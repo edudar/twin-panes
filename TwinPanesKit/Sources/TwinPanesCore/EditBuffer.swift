@@ -148,6 +148,14 @@ public final class EditBuffer {
         openedTree = tree
     }
 
+    /// A recovered buffer: `tree` over `original` (the clone) and `add`, as replayed.
+    init(original: ByteSource, add: AddBuffer, tree: PieceTree) {
+        self.original = original
+        self.add = add
+        self.tree = tree
+        openedTree = PieceTree(originalLength: original.length)
+    }
+
     public init(original: ByteSource, addDirectory: URL?) throws {
         self.original = original
         add = try AddBuffer(directory: addDirectory)

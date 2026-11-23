@@ -25,6 +25,28 @@ final class SessionJournal {
         descriptor = try fileSystem.create(url)
     }
 
+    /// Reopens the journal of a recovered session: its first `validLength` bytes hold
+    /// `records` (a torn tail is cut off), and new records follow them.
+    init(
+        reopening folder: SessionFolder, records: [JournalRecord], validLength: Int,
+        add: AddBuffer, fileSystem: any FileSystem
+    ) throws {
+        let url = folder.file(Self.fileName)
+        self.fileSystem = fileSystem
+        self.add = add
+        path = url.path
+        let descriptor = try fileSystem.openForWriting(url)
+        do {
+            try fileSystem.truncate(descriptor, to: UInt64(validLength), path: path)
+        } catch {
+            fileSystem.close(descriptor)
+            throw error
+        }
+        self.descriptor = descriptor
+        length = UInt64(validLength)
+        replaceCount = UInt64(records.count { if case .replace = $0 { true } else { false } })
+    }
+
     /// Records what changed between `old` and `new` (an edit, undo, redo or revert).
     func record(from old: PieceTree, to new: PieceTree) throws {
         for range in SavePlan.changedRanges(from: old, to: new) {

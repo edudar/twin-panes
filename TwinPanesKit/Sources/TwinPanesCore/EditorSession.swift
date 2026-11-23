@@ -85,6 +85,49 @@ public final class EditorSession {
         savedTree = buffer.tree
     }
 
+    /// Reopens a session that crashed, from its folder (docs/plans/M3c.md, D-f). Its file
+    /// is the manifest's (by bookmark, else by path, even if it's gone); the clone, the
+    /// add buffer and the journal give back its current and saved versions. It comes
+    /// back dirty, with no undo history, and goes on journaling into the same folder.
+    public init(recovering folder: SessionFolder, saver: Saver = Saver()) throws {
+        let manifest = try folder.manifest()
+        var stale = false
+        let resolved = manifest.bookmark.flatMap {
+            try? URL(
+                resolvingBookmarkData: $0, options: .withSecurityScope, relativeTo: nil,
+                bookmarkDataIsStale: &stale)
+        }
+        url = resolved ?? URL(fileURLWithPath: manifest.path)
+        scope = resolved.map(SecurityScope.init)
+        self.saver = saver
+        sessionsRoot = folder.url.deletingLastPathComponent()
+        let clone = try ByteSource(url: folder.file(Self.cloneName))
+        guard let addFile = Self.addBufferFile(in: folder) else {
+            throw ByteSourceError.openFailed(path: folder.url.path, errno: ENOENT)
+        }
+        let add = try AddBuffer(reopening: addFile)
+        let data = (try? Data(contentsOf: folder.file(SessionJournal.fileName))) ?? Data()
+        let decoded = JournalFormat.decode(data)
+        let (tree, saved) = JournalFormat.replay(decoded.records, originalLength: clone.length)
+        buffer = EditBuffer(original: clone, add: add, tree: tree)
+        identity = manifest.identity
+        access = AccessMode.of(url)
+        savedTree = saved
+        self.folder = folder
+        journal = try SessionJournal(
+            reopening: folder, records: decoded.records, validLength: decoded.validLength,
+            add: add, fileSystem: saver.fileSystem)
+    }
+
+    /// The add buffer's file in a session folder (in the subfolder `AddBuffer` makes).
+    static func addBufferFile(in folder: SessionFolder) -> URL? {
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: folder.url.path)) ?? []
+        return entries.lazy.map {
+            folder.url.appendingPathComponent($0).appendingPathComponent("add-buffer")
+        }
+        .first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     deinit {
         if let folder {
             try? folder.markClosed()

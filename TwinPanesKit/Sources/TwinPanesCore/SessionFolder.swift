@@ -69,6 +69,11 @@ public struct SessionFolder: Sendable, Equatable {
             SessionManifest.self, from: Data(contentsOf: file(Self.manifestName)))
     }
 
+    /// Replaces the manifest (after a save or Save As).
+    public func updateManifest(_ manifest: SessionManifest) throws {
+        try JSONEncoder().encode(manifest).write(to: file(Self.manifestName), options: .atomic)
+    }
+
     /// A file in the folder.
     public func file(_ name: String) -> URL { url.appendingPathComponent(name) }
 
