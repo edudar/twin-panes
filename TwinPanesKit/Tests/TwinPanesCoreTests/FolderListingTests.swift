@@ -105,6 +105,33 @@ import UniformTypeIdentifiers
         #expect(listing.removing(names: []).entries == listing.entries)
     }
 
+    /// The row changes of a live update match what a table needs: remove the old rows,
+    /// insert the new ones, and the result lines up with the new rows.
+    @Test(arguments: orders)
+    func rowChangesReplayToTheNewRows(order: ListingOrder) throws {
+        let all = Self.entries(300, seed: 17)
+        let old = FolderListing(order: order).merging(all)
+        let gone = Set(all.prefix(10).map(\.name))
+        let fresh = Self.entries(8, seed: 99).map { entry in
+            DirectoryEntry(
+                url: entry.url, name: "new-" + entry.name, isDirectory: entry.isDirectory,
+                isPackage: false, isSymbolicLink: false, isHidden: entry.isHidden, size: entry.size,
+                modified: entry.modified, type: entry.type)
+        }
+        let touched = gone.union(fresh.map(\.name)).union([all[20].name])
+        let new = old.removing(names: gone.union([all[20].name])).merging(fresh + [all[20]])
+        let changes = try #require(new.rowChanges(from: old, touching: touched, limit: 100))
+        var replay = old.rows.map(\.name)
+        for row in changes.removed.reversed() { replay.remove(at: row) }
+        for row in changes.inserted { replay.insert(new.rows[row].name, at: row) }
+        #expect(replay == new.rows.map(\.name))
+        #expect(
+            changes.changed.map { new.rows[$0].name } == (all[20].isHidden ? [] : [all[20].name]))
+        #expect(new.rowChanges(from: old, touching: touched, limit: 3) == nil)
+        #expect(new.folderCount == new.rows.filter(\.isDirectory).count)
+        #expect(new.rows(named: [all[30].name, "missing"]).count == (all[30].isHidden ? 0 : 1))
+    }
+
     @Test func hiddenEntriesAreFilteredNotDropped() {
         let all = Self.entries(400, seed: 5)
         let hidden = all.filter(\.isHidden).count

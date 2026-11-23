@@ -1,5 +1,13 @@
 import Foundation
 
+/// Rows a live update changed: `removed` in the old rows, `inserted` and `changed` in the
+/// new ones, each ascending.
+public struct RowChanges: Equatable, Sendable {
+    public var removed: [Int]
+    public var inserted: [Int]
+    public var changed: [Int]
+}
+
 /// How a folder's entries are ordered (docs/plans/M4.md, D-c).
 public struct ListingOrder: Hashable, Sendable {
     public enum Column: String, CaseIterable, Sendable {
@@ -60,6 +68,9 @@ public struct FolderListing: Sendable {
     public private(set) var rows: [DirectoryEntry] = []
     public private(set) var order: ListingOrder
     public private(set) var showsHidden: Bool
+    /// How many of the rows are folders, counted with the filter, so the status line
+    /// doesn't walk 100k rows on the main actor.
+    public private(set) var folderCount = 0
 
     public init(order: ListingOrder = ListingOrder(), showsHidden: Bool = false) {
         self.order = order
@@ -124,7 +135,36 @@ public struct FolderListing: Sendable {
     /// The row showing the entry called `name`, if it's shown.
     public func row(named name: String) -> Int? { rows.firstIndex { $0.name == name } }
 
+    /// The rows of the entries called any of `names`, in one pass: for restoring the
+    /// selection without a search per name on the main actor.
+    public func rows(named names: Set<String>) -> [String: Int] {
+        guard !names.isEmpty else { return [:] }
+        var found: [String: Int] = [:]
+        for (row, entry) in rows.enumerated() where names.contains(entry.name) {
+            found[entry.name] = row
+            if found.count == names.count { break }
+        }
+        return found
+    }
+
+    /// How the rows changed from `old` when only the entries called `names` did (a live
+    /// update): the old rows that went, the new rows that came, the new rows that were
+    /// read again. Nil if more than `limit` rows changed.
+    public func rowChanges(
+        from old: FolderListing, touching names: Set<String>, limit: Int
+    ) -> RowChanges? {
+        let before = old.rows(named: names)
+        let after = rows(named: names)
+        guard before.count + after.count <= 2 * limit else { return nil }
+        let removed = before.filter { after[$0.key] == nil }.map(\.value).sorted()
+        let inserted = after.filter { before[$0.key] == nil }.map(\.value).sorted()
+        let changed = after.filter { before[$0.key] != nil }.map(\.value).sorted()
+        guard removed.count + inserted.count + changed.count <= limit else { return nil }
+        return RowChanges(removed: removed, inserted: inserted, changed: changed)
+    }
+
     private mutating func filter() {
         rows = showsHidden ? entries : entries.filter { !$0.isHidden }
+        folderCount = rows.reduce(0) { $0 + ($1.isDirectory ? 1 : 0) }
     }
 }
