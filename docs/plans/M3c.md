@@ -2,8 +2,10 @@
 
 _Status: updated 2026-11-22 from how M3b was built (PLAN.md D30–D33) and started the
 same day while the maintainer was away, at their request; the decisions below are open to
-review when they're back. In progress: steps 1–10 done (narrowed mode reduced, see
-D-d; external changes use a vnode watch rather than `NSFilePresenter`, see D-c).__
+review when they're back. In progress: steps 1–12 done (narrowed mode reduced, see
+D-d; external changes use a vnode watch rather than `NSFilePresenter`, see D-c; the
+fault suite runs on real files, see D-g). Left: iCloud dataless files (13), the crash
+smoke test, and the docs (14).__
 
 ## Context
 
@@ -150,6 +152,15 @@ Strategy B is used when `st_nlink > 1`, or when staging fails on a volume with a
 - **Each case must end** with the old or the new file intact, and with a recovered tree
   that matches the reference model up to the last durable record.
 - The kill cases also run once against `RealFileSystem`.
+- **As built (steps 11–12):** `CrashingFileSystem` (in the tests) wraps the real file
+  system instead of keeping files in memory, so sources and the add buffer read real
+  files: it throws at operation N and from then on (a kill), and `powerLoss()` puts
+  every file written since its last `F_FULLFSYNC` back to its flushed contents. The add
+  buffer writes outside the seam, so its own power loss isn't simulated. The suites:
+  saving with strategies A and B (old or new contents after recovery's rollback), and a
+  scripted session (the state recovered is one it had: after a kill the last before the
+  crash; the saved version is never one the file doesn't hold). Typing during a save,
+  outside rewrites and a lost volume are covered by their own tests, not crash points.
 
 ## Commits
 
