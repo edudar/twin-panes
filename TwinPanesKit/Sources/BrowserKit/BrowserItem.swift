@@ -60,6 +60,9 @@ public final class BrowserItem: WorkspaceItem {
     private var pendingHidden: Bool?
     /// Names a live update removes before merging their new versions (D-f).
     var pendingRemovals: Set<String> = []
+    /// Whether `pendingBatch` holds entries from the lister, not only entries read again
+    /// for a live update: such a run is never applied row by row.
+    var pendingHasListed = false
     /// A full re-list's entries, replacing all of them.
     var pendingReplacement: [DirectoryEntry]?
     /// Names that changed while the folder was still listing, read once it's done.
@@ -179,6 +182,7 @@ public final class BrowserItem: WorkspaceItem {
         pendingBatch = []
         pendingRemovals = []
         pendingReplacement = nil
+        pendingHasListed = false
         changedWhileListing = []
         readsInFlight = 0
         isRelisting = false
@@ -218,6 +222,7 @@ public final class BrowserItem: WorkspaceItem {
         switch event {
         case .batch(let batch):
             pendingBatch += batch
+            pendingHasListed = true
             applyPending()
         case .done:
             isListing = false
@@ -238,6 +243,8 @@ public final class BrowserItem: WorkspaceItem {
         let order = pendingOrder
         let hidden = pendingHidden
         let removals = pendingRemovals
+        let listed = pendingHasListed
+        pendingHasListed = false
         pendingBatch = []
         pendingRemovals = []
         pendingOrder = nil
@@ -255,8 +262,10 @@ public final class BrowserItem: WorkspaceItem {
             if let order { result = result.sorted(by: order) }
             if let hidden { result = result.showingHidden(hidden) }
             result = result.removing(names: removals)
-            if !batch.isEmpty { result = result.merging(batch) }
-            let live = order == nil && hidden == nil && replacement == nil && !removals.isEmpty
+            if !batch.isEmpty { result = result.merging(Self.latest(batch, of: removals)) }
+            let live =
+                order == nil && hidden == nil && replacement == nil && !listed
+                && !removals.isEmpty
             return Applied(
                 listing: result,
                 changes: live ? result.rowChanges(from: base, touching: removals, limit: 100) : nil,
@@ -277,6 +286,19 @@ public final class BrowserItem: WorkspaceItem {
                 self.show(applied, resorted: order != nil)
             }
         }
+    }
+
+    /// `batch` with only the last copy of each entry read again: a live update can share
+    /// a run with the lister's last batches, and the entry it read again is the newer one.
+    nonisolated static func latest(
+        _ batch: [DirectoryEntry], of names: Set<String>
+    ) -> [DirectoryEntry] {
+        guard !names.isEmpty else { return batch }
+        var seen = Set<String>()
+        let kept = batch.reversed().filter {
+            !names.contains($0.name) || seen.insert($0.name).inserted
+        }
+        return kept.reversed()
     }
 
     /// One run of the pipeline, with what the table needs worked out alongside.

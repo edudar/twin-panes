@@ -181,6 +181,12 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     func applyRowChanges(_ changes: RowChanges) -> Bool {
         guard isViewLoaded, let item, !item.needsAccess else { return false }
         let offset = showsParentRow ? 1 : 0
+        // Changes worked out against other rows than the table shows would make
+        // NSTableView throw: show everything again instead.
+        guard tableView.numberOfRows == changes.oldCount + offset,
+            item.listing.rows.count == changes.newCount,
+            changes.oldCount - changes.removed.count + changes.inserted.count == changes.newCount
+        else { return false }
         let removed = IndexSet(changes.removed.map { $0 + offset })
         let inserted = IndexSet(changes.inserted.map { $0 + offset })
         let changed = IndexSet(changes.changed.map { $0 + offset })

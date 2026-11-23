@@ -6,6 +6,9 @@ public struct RowChanges: Equatable, Sendable {
     public var removed: [Int]
     public var inserted: [Int]
     public var changed: [Int]
+    /// The row counts before and after, so a table can check the changes are its own.
+    public var oldCount: Int
+    public var newCount: Int
 }
 
 /// How a folder's entries are ordered (docs/plans/M4.md, D-c).
@@ -160,7 +163,9 @@ public struct FolderListing: Sendable {
         let inserted = after.filter { before[$0.key] == nil }.map(\.value).sorted()
         let changed = after.filter { before[$0.key] != nil }.map(\.value).sorted()
         guard removed.count + inserted.count + changed.count <= limit else { return nil }
-        return RowChanges(removed: removed, inserted: inserted, changed: changed)
+        return RowChanges(
+            removed: removed, inserted: inserted, changed: changed, oldCount: old.rows.count,
+            newCount: rows.count)
     }
 
     private mutating func filter() {

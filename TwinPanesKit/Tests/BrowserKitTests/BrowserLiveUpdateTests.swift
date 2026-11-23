@@ -129,6 +129,39 @@ import Testing
         #expect(item.entries.count == 3_000 && Set(item.entries.map(\.name)).count == 3_000)
     }
 
+    /// A live update that lands in the same run as the lister's last batches (FSEvents
+    /// reported names while the final merge ran) isn't applied row by row: its changes
+    /// would leave out the batch's rows, and NSTableView threw on the next insert.
+    @Test func aLiveUpdateMixedWithListedRowsReloads() async throws {
+        defer { cleanUp() }
+        func entry(_ name: String) -> DirectoryEntry {
+            DirectoryEntry(
+                url: root.appendingPathComponent(name), name: name, isDirectory: false,
+                isPackage: false, isSymbolicLink: false, isHidden: false, size: 1, modified: nil,
+                type: .data)
+        }
+        item.pendingRemovals = ["b.txt"]
+        item.pendingBatch = [entry("b.txt")]  // read again
+        item.received(.batch([entry("a1"), entry("a2"), entry("zz")]))  // listed
+        let table = item.controller.tableView
+        #expect(table.numberOfRows == item.controller.numberOfRows(in: table))
+        #expect(names == ["sub", "a1", "a2", "b.txt", "d.txt", "zz"])
+        // The lister's copy and the one read again share a run: only the latter stays.
+        var newer = entry("d.txt")
+        newer = DirectoryEntry(
+            url: newer.url, name: newer.name, isDirectory: false, isPackage: false,
+            isSymbolicLink: false, isHidden: false, size: 77, modified: nil, type: .data)
+        item.pendingRemovals = ["d.txt"]
+        item.pendingBatch = [entry("d.txt"), newer]
+        item.pendingHasListed = true
+        item.applyPending()
+        #expect(names.filter { $0 == "d.txt" }.count == 1)
+        #expect(item.entries.first { $0.name == "d.txt" }?.size == 77)
+        // And changes that aren't the table's are refused rather than thrown on.
+        let wrong = RowChanges(removed: [], inserted: [50], changed: [], oldCount: 40, newCount: 41)
+        #expect(!item.controller.applyRowChanges(wrong))
+    }
+
     @Test func closingTheTabStopsWatching() async throws {
         defer { cleanUp() }
         #expect(item.watcher != nil)
