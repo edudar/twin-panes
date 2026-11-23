@@ -1,8 +1,8 @@
 # M3b plan: sessions and saving
 
-_Status: approved 2026-11-22; in progress, commits 1–4 of 11 done (`FileIdentity`,
-`AccessMode`, `EditorSession`, the tab on a session, `SessionRegistry`). Split from the original M3b on review: this part is sessions
-and saving; the clone, external changes, crash recovery and the fault-injection suite
+_Status: approved 2026-11-22; in progress, commits 1–5 of 11 done (`FileIdentity`,
+`AccessMode`, `EditorSession`, the tab on a session, `SessionRegistry`, `SavePlan`).
+Split from the original M3b on review: this part is sessions and saving; the clone, external changes, crash recovery and the fault-injection suite
 are M3c (docs/plans/M3c.md)._
 
 ## Context
@@ -75,10 +75,12 @@ Save As… works. `canSave` is false, so the close sheet keeps the Discard form.
     inode, so the undo history stays valid.
   - The disk space of the old inode comes back when the tab closes.
   - M3c moves the original pieces onto a clone.
-- **The save plan** is the union of `modifiedRanges(savedTree)` and
-  `modifiedRanges(current)`, written with the current bytes. That covers new edits and
-  edits undone since the last save, which is how undo after a save restores the
-  original.
+- **The save plan** (`SavePlan`) walks the pieces of `savedTree` and the current tree
+  side by side and writes, with the current bytes, every stretch where they take their
+  bytes from a different source or offset. That covers new edits and edits undone since
+  the last save, which is how undo after a save restores the original, and skips edits
+  already saved. (Planned as the union of both trees' modified ranges; the exact
+  comparison is as cheap and writes less, changed while building step 5.)
 - **If the file on disk no longer matches** the identity, size and mtime recorded at the
   last open or save, the plan becomes **the whole file**. Patching ranges onto someone
   else's content would be wrong. M3c adds watching for changes and the sheet; M3b only
@@ -159,9 +161,10 @@ failing tests → implementation. I stop for "commit" after each one.
    Open, Recent, the browser and drops all go through it, and opening an open file
    focuses its tab. Tests in Core, plus a smoke check. Re-keying moved to step 7, the
    first change that gives a session a new identity (changed while building).
-5. **Core: the save plan.** The union ranges, and the decision to write the whole file.
-   A fuzz test: after random edits, undos, redos and saves, applying each plan to a byte
-   model gives the current bytes.
+5. **Core: the save plan.** The ranges where the saved and current trees differ, and the
+   decision to write the whole file. A fuzz test: after random edits, jumps through the
+   history, saves and outside changes, applying each plan to a byte model of the disk
+   gives the current bytes, and a ranged plan writes exactly where the versions differ.
 6. **Core: the `FileSystem` seam and `Saver` strategy A.** Clone or copy, patch, fsync,
    coordinated replace, and the new identity. Round-trip tests with xattrs, tags, mode
    and creation date; the hard-link refusal; the free-space check.
