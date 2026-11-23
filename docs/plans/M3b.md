@@ -1,7 +1,8 @@
 # M3b plan: sessions and saving
 
-_Status: approved 2026-11-22; in progress, commits 1–5 of 11 done (`FileIdentity`,
-`AccessMode`, `EditorSession`, the tab on a session, `SessionRegistry`, `SavePlan`).
+_Status: approved 2026-11-22; in progress, commits 1–6 of 11 done (`FileIdentity`,
+`AccessMode`, `EditorSession`, the tab on a session, `SessionRegistry`, `SavePlan`,
+`FileSystem` and `Saver`; step 6 is two commits to stay under 250 lines).
 Split from the original M3b on review: this part is sessions and saving; the clone, external changes, crash recovery and the fault-injection suite
 are M3c (docs/plans/M3c.md)._
 
