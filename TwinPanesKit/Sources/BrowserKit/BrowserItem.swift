@@ -83,7 +83,8 @@ public final class BrowserItem: WorkspaceItem {
         folder = target
         scope = newScope
         hasListed = true
-        controller.reload(selecting: name)
+        controller.startShowing(selecting: name)
+        controller.reloadKeepingSelection()
         onChange?()
         updateStatus()
         return true

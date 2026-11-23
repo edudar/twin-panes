@@ -69,7 +69,12 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     override func viewDidLoad() {
         super.viewDidLoad()
         guard let item else { return }
-        if !item.hasListed { item.go() } else { reload(selecting: nil) }
+        if !item.hasListed {
+            item.go()
+        } else {
+            startShowing(selecting: nil)
+            reloadKeepingSelection()
+        }
     }
 
     override func viewDidAppear() {
@@ -77,25 +82,63 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         item?.updateStatus()
     }
 
-    /// Shows the item's current listing; selects `name` if given, else the first row
-    /// (".." when there is one).
-    func reload(selecting name: String?) {
+    /// The entry to select once it has been listed (the folder you came from), until the
+    /// user moves the selection first.
+    private var wantedSelection: String?
+    /// Set while the selection is changed here rather than by the user.
+    private(set) var isRestoringSelection = false
+
+    /// A new folder: empties the list (it fills as batches arrive), selects the first
+    /// row, and remembers `name` to select once it's listed.
+    func startShowing(selecting name: String?) {
         guard isViewLoaded, let item else { return }
         pathField.stringValue = item.folder.path
-        tableView.reloadData()
         scrollView.isHidden = item.needsAccess
         accessPrompt.isHidden = !item.needsAccess
         accessLabel.stringValue =
             "Twin Panes needs your permission to show “\(item.title)”.\n"
             + "Grant access once and it’s remembered."
-        let offset = showsParentRow ? 1 : 0
-        let row =
-            name.flatMap { n in item.entries.firstIndex { $0.url.lastPathComponent == n } }
-            .map { $0 + offset } ?? 0
-        if tableView.numberOfRows > 0 {
-            tableView.selectRowIndexes([row], byExtendingSelection: false)
+        wantedSelection = name
+        tableView.reloadData()
+        restoreSelection(nil, parentRow: true)
+        tableView.scrollRowToVisible(0)
+    }
+
+    /// Shows the item's current rows, keeping the selected entry selected by name.
+    func reloadKeepingSelection() {
+        guard isViewLoaded, let item else { return }
+        scrollView.isHidden = item.needsAccess
+        accessPrompt.isHidden = !item.needsAccess
+        let selected = selectedEntry?.name
+        let onParent = isParentRowSelected
+        tableView.reloadData()
+        if let wanted = wantedSelection, let row = row(named: wanted) {
+            wantedSelection = nil
+            restoreSelection(row, parentRow: false)
             tableView.scrollRowToVisible(row)
+        } else {
+            restoreSelection(selected.flatMap(row(named:)), parentRow: onParent)
         }
+    }
+
+    /// The table row of the entry called `name`.
+    func row(named name: String) -> Int? {
+        item?.entries.firstIndex { $0.name == name }.map { $0 + (showsParentRow ? 1 : 0) }
+    }
+
+    private func restoreSelection(_ row: Int?, parentRow: Bool) {
+        isRestoringSelection = true
+        defer { isRestoringSelection = false }
+        if let row {
+            tableView.selectRowIndexes([row], byExtendingSelection: false)
+        } else if tableView.numberOfRows > 0, parentRow || tableView.selectedRow < 0 {
+            tableView.selectRowIndexes([0], byExtendingSelection: false)
+        }
+    }
+
+    /// The user moved the selection: the folder you came from no longer wins it back.
+    func selectionMovedByUser() {
+        if !isRestoringSelection { wantedSelection = nil }
     }
 
     /// Row 0 is "..", the parent folder, everywhere but the top folder. It's a view row
