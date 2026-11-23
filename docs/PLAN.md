@@ -501,6 +501,24 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
 - **File list:** view-based `NSTableView` with columns (name, size, date, kind),
   async directory enumeration so 100k-entry folders don't block, live updates via
   FSEvents, type-to-select, sorting.
+- **Path completion in the path field** (requested 2026-11-23, M5): typing a path in
+  the field ⇧⌘G opens completes it the way a terminal shell does:
+  - **Tab** completes the last component to the longest prefix all matching entries
+    share. A folder that's the only match gets its trailing `/`, so the next
+    component can follow at once.
+  - **A second Tab** with several matches lists them under the field (folders
+    first, as in the file list). The arrow keys pick one and Return takes it.
+  - **Matching:** case-insensitive, like the default APFS volume, and `~` expands to
+    the real home folder, not the app's container. Hidden entries are offered only
+    when the typed component starts with `.`, whatever the tab's hidden-files toggle
+    says.
+  - **Listing:** the folder being completed is read off the main actor with the
+    lister's cheap keys, and the read is cached while the field is open, so a
+    100k-entry folder never stalls typing. A folder without a sandbox grant offers
+    nothing; it doesn't prompt for access.
+  - **Keys:** while the field has focus, Tab completes instead of moving focus,
+    bound through the field's own command scope (§4.11). Escape closes the list,
+    then the field.
 - **Selection:** standard macOS multi-select (⇧/⌘-click, ⇧-arrows) is the target of
   F5–F8. No Norton Commander muscle memory beyond the F-keys is required day one;
   NC-style marking (Insert/Space, +/−/`*`) and drive switching are later candidates.
@@ -945,7 +963,7 @@ starts; this table stays the summary.
 | M3b | Sessions & saving → **first usable hex version** | `EditorSession` + `SessionRegistry`, dirty state, read-only mode, save strategy A (clone-stage-replace) per the M0 capability matrix with a range-patch save plan, save race handling, Save / Save As / Revert, unsaved-changes sheets with Save, Undo/Redo menu wired to the session. Hard-linked files offer Save As until M3c | Edit + save on 4 GB is near-instant; undo after save restores original bytes; typing during a save keeps the new edits; a failed save leaves the old file intact; read-only files refuse edits but Save As works |
 | M3c | Protecting unsaved edits & crash recovery | Session folder + clone at the first edit (backing generation), strategy B (in place + journal + commit record) for hard-linked files, recovery guarantee per volume (narrowed mode where no clone), external-change policy with own-write suppression, iCloud dataless files, operation journal + crash restore, the fault-injection suite | Killing the app mid-edit or mid-save loses nothing, and power loss loses at most the last ~1 s of edits; typing during a save keeps the new edits and their journal; saving never triggers the external-change sheet; external modification never corrupts unsaved edits; **the fault-injection suite (§7) passes** |
 | M4 | Browser foundation | Builds on M1b: async listing that never blocks the UI, back/forward history, sorting by column, hidden-files toggle, live updates (FSEvents), per-volume access flow informed by the M0 spike | Browse a 100k-file folder without UI stalls |
-| M5 | Dual panels + tabs | Second panel, active-panel focus, per-panel tab bar, tab restore on relaunch via AppKit restoration (D23), collapsible sidebar (Favorites, Locations) | Daily navigation possible without Finder |
+| M5 | Dual panels + tabs | Second panel, active-panel focus, per-panel tab bar, tab restore on relaunch via AppKit restoration (D23), collapsible sidebar (Favorites, Locations), shell-style path completion in the path field (§4.7) | Daily navigation possible without Finder |
 | M6 | NC keys + file operations | Function-key bar, F2–F8 actions with ⌘ equivalents, operations queue (copy/move/trash/new folder/rename) with progress and conflict handling, cross-volume move with per-item failure reporting | Copy/move large trees reliably with cancel and conflicts |
 | M7 | Preview pane + hex integration | Collapsible right pane with Quick Look + metadata, viewer factory injected by the TwinPanes app target, QuickView item (F3 quick view in opposite panel, read-only `ByteSource`, unsaved-edits marker), F4 editor tab (hex), hex view in preview for unsupported types | Hex editor reachable entirely from the file manager; moving the cursor through 1,000 files in quick view creates no sessions |
 | M8 | Insert/delete | PieceTable insert/delete exposed, insert-mode toggle in hex, paste/delete ranges, strategy A with a streamed rewrite (inode re-keying, new backing generation, metadata preservation), free-space check, refusal or copy-based path on strategy-B-only volumes | Random edit sequences round-trip byte-exact through save; xattrs/tags survive |
