@@ -12,6 +12,8 @@ extension HexEditorItem {
     public var isDirty: Bool { session.isDirty }
     /// A read-only file can't be saved; its close sheet offers only Discard.
     public var canSave: Bool { session.access.isWritable }
+    public var isSaving: Bool { session.isSaving }
+    public func finishSaving() async { await session.finishSaving() }
 
     /// Saves the session (File › Save, and Save in the close sheet).
     public func save() async throws { try await session.save() }

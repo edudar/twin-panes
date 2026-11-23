@@ -43,6 +43,7 @@ extension EditorSession {
 
     /// Drops the unsaved edits and reads the file as it is now (Reload in the sheet).
     public func reloadDiscardingEdits() throws {
+        guard !isSaving else { throw EditorSessionError.saveInProgress }
         close()
         try reloadFromDisk()
         fileState = .unchanged

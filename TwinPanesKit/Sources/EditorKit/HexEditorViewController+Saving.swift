@@ -40,7 +40,9 @@ extension HexEditorViewController {
 
     /// Asks, then reverts; for the menu action and its tests.
     func revertToSaved() async {
-        guard let item, item.isDirty, await confirmRevert(self, item.title) else { return }
+        guard let item, item.isDirty, !item.isSaving, await confirmRevert(self, item.title),
+            item.isDirty, !item.isSaving
+        else { return }
         item.discardChanges()
     }
 

@@ -150,6 +150,51 @@ import Testing
         #expect(await close.confirmClose(items))
         #expect(log.titles == ["first"])
     }
+
+    @Test func discardThenCancelLeavesEarlierTabDirty() async {
+        let first = TestSession(), second = TestSession()
+        first.isDirty = true
+        second.isDirty = true
+        let items = [TestItem("first", session: first), TestItem("second", session: second)]
+        for item in items { windowA.insert(item) }
+        let close = CloseCoordinator(openItems: { [workspace] in workspace.allItems }) {
+            $0.representative.title == "first" ? .discard : .cancel
+        }
+        #expect(await close.confirmClose(items) == false)
+        #expect(first.discards == 0 && first.isDirty && second.isDirty)
+    }
+
+    @Test func waitsForFinishSavingEvenWhenClean() async {
+        let session = TestSession()
+        session.isSaving = true
+        let item = TestItem("saving", session: session)
+        windowA.insert(item)
+        let log = Log()
+        session.onFinishSaving = {
+            await Task.yield()
+            log.titles.append("finished")
+            session.isDirty = true
+        }
+        #expect(await coordinator(answer: .discard, log: log).confirmClose([item]))
+        #expect(session.finishSavingCalls == 1 && session.discards == 1)
+        #expect(log.titles == ["finished", "saving"])
+    }
+
+    @Test func failedSaveInvokesOnSaveError() async {
+        let first = TestSession(), second = TestSession()
+        first.isDirty = true
+        second.isDirty = true
+        second.failSave = true
+        let items = [TestItem("first", session: first), TestItem("second", session: second)]
+        for item in items { windowA.insert(item) }
+        var reported: [String] = []
+        let close = CloseCoordinator(
+            openItems: { [workspace] in workspace.allItems },
+            prompt: { $0.representative.title == "first" ? .discard : .save },
+            onSaveError: { session, _ in reported.append(session.representative.title) })
+        #expect(await close.confirmClose(items) == false)
+        #expect(reported == ["second"] && first.discards == 0 && first.isDirty && second.isDirty)
+    }
 }
 
 @MainActor

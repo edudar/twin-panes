@@ -7,10 +7,11 @@ import Testing
 
 /// The real file system, but a save can be held at its flush until `release()`, or
 /// made to fail there. Counts the staged files it opens (one per save).
-private final class GatedFileSystem: FileSystem {
+final class GatedFileSystem: FileSystem {
     let real = RealFileSystem()
     let holding: Bool
     let failing = Mutex(false)
+    let makeMovedReadOnly = Mutex(false)
     let saves = Mutex(0)
     let entered = SearchSignal()
     private let gate = DispatchSemaphore(value: 0)
@@ -32,7 +33,13 @@ private final class GatedFileSystem: FileSystem {
         return try real.openForWriting(url)
     }
     func create(_ url: URL) throws -> Int32 { try real.create(url) }
-    func move(_ source: URL, to destination: URL) throws { try real.move(source, to: destination) }
+    func move(_ source: URL, to destination: URL) throws {
+        try real.move(source, to: destination)
+        if makeMovedReadOnly.withLock({ $0 }) {
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o444], ofItemAtPath: destination.path)
+        }
+    }
     func write(_ data: Data, to descriptor: Int32, at offset: UInt64, path: String) throws {
         try real.write(data, to: descriptor, at: offset, path: path)
     }
@@ -40,7 +47,7 @@ private final class GatedFileSystem: FileSystem {
         try real.truncate(descriptor, to: length, path: path)
     }
     func fullSync(_ descriptor: Int32, path: String) throws {
-        if holding {
+        if holding, !path.hasSuffix("journal.bin") {
             entered.signal()
             gate.wait()  // on the save queue, not a Swift concurrency thread
         }

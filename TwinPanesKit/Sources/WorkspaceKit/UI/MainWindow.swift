@@ -111,7 +111,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
     public func windowShouldClose(_ sender: NSWindow) -> Bool {
         if closeApproved { return true }
         let items = layout.allItems
-        if closeCoordinator.dirtySessions(closing: items).isEmpty { return true }
+        if closeCoordinator.dirtySessions(closing: items).isEmpty,
+            !items.contains(where: \.isSaving)
+        {
+            return true
+        }
         Task {
             if await closeCoordinator.confirmClose(items) {
                 closeWithoutAsking()

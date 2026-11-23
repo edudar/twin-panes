@@ -100,6 +100,7 @@ extension EditorSession {
     /// Saves the version current now: plans against the saved version (the whole file if
     /// the disk no longer holds it), writes on a background queue, then records the result.
     private func performSave() async throws {
+        if case .readOnly(let reason) = access { throw EditorSessionError.readOnly(reason) }
         let version = buffer.tree
         let journaled = journal?.replaceCount
         let onDisk = try? FileIdentity(url: url)

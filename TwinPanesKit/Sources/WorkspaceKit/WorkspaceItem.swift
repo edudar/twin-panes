@@ -66,6 +66,12 @@ public protocol WorkspaceItem: AnyObject {
     /// only Discard and Cancel (the hex editor until saving lands in M3b).
     var canSave: Bool { get }
 
+    /// Whether a save of the session this item views is running or queued.
+    var isSaving: Bool { get }
+
+    /// Waits until any running or queued save finishes.
+    func finishSaving() async
+
     /// Saves the session this item views. Only called while `isDirty` and `canSave`.
     func save() async throws
 
@@ -81,6 +87,8 @@ extension WorkspaceItem {
     public var sessionKey: AnyHashable? { nil }
     public var isDirty: Bool { false }
     public var canSave: Bool { true }
+    public var isSaving: Bool { false }
+    public func finishSaving() async {}
     public var icon: NSImage? { nil }
     public var preferredFirstResponder: NSView? { nil }
     public func save() async throws {}

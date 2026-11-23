@@ -28,7 +28,10 @@ final class TestItem: WorkspaceItem {
     }
 
     var isDirty: Bool { session?.isDirty ?? ownDirty }
+    var isSaving: Bool { session?.isSaving ?? false }
     var sessionKey: AnyHashable? { session.map { ObjectIdentifier($0) } }
+
+    func finishSaving() async { await session?.finishSaving() }
 
     func save() async throws {
         if let session {
@@ -55,7 +58,16 @@ final class TestItem: WorkspaceItem {
 @MainActor
 final class TestSession {
     var isDirty = false
+    var isSaving = false
     var failSave = false
     var saves = 0
     var discards = 0
+    var finishSavingCalls = 0
+    var onFinishSaving: (@MainActor () async -> Void)?
+
+    func finishSaving() async {
+        finishSavingCalls += 1
+        await onFinishSaving?()
+        isSaving = false
+    }
 }

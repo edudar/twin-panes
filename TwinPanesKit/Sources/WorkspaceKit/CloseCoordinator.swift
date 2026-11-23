@@ -27,16 +27,21 @@ public final class CloseCoordinator {
 
     private let openItems: @MainActor () -> [any WorkspaceItem]
     private let prompt: Prompt
+    private let onSaveError: (@MainActor (DirtySession, Error) async -> Void)?
     private var inProgress = false
 
     /// - Parameters:
     ///   - openItems: every item open in the app right now, across all windows.
     ///   - prompt: asks the user about one session (a sheet in the app, a stub in tests).
+    ///   - onSaveError: reports a failed save before aborting the close.
     public init(
-        openItems: @escaping @MainActor () -> [any WorkspaceItem], prompt: @escaping Prompt
+        openItems: @escaping @MainActor () -> [any WorkspaceItem],
+        prompt: @escaping Prompt,
+        onSaveError: (@MainActor (DirtySession, Error) async -> Void)? = nil
     ) {
         self.openItems = openItems
         self.prompt = prompt
+        self.onSaveError = onSaveError
     }
 
     /// Sessions that would lose their last view if `closing` closed.
@@ -66,6 +71,13 @@ public final class CloseCoordinator {
         inProgress = true
         defer { inProgress = false }
 
+        if closing.contains(where: \.isSaving) {
+            for item in closing where item.isSaving {
+                await item.finishSaving()
+            }
+        }
+
+        var toDiscard: [DirtySession] = []
         for session in dirtySessions(closing: closing) {
             // The session may have been saved while an earlier sheet was up.
             guard session.representative.isDirty else { continue }
@@ -73,16 +85,20 @@ public final class CloseCoordinator {
             case .cancel:
                 return false
             case .discard:
-                session.representative.discardChanges()
+                toDiscard.append(session)
             case .save:
                 // A prompt that offered no Save can't mean it; treat it as Cancel.
                 guard session.representative.canSave else { return false }
                 do {
                     try await session.representative.save()
                 } catch {
+                    await onSaveError?(session, error)
                     return false
                 }
             }
+        }
+        for session in toDiscard {
+            session.representative.discardChanges()
         }
         return true
     }

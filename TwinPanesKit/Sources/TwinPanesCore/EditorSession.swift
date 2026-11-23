@@ -3,10 +3,13 @@ import Foundation
 public enum EditorSessionError: Error, Equatable, CustomStringConvertible {
     /// The session can't change its file (docs/plans/M3b.md, D-b).
     case readOnly(AccessMode.ReadOnlyReason)
+    /// A reload can't discard edits while a save is running or queued.
+    case saveInProgress
 
     public var description: String {
         switch self {
         case .readOnly(let reason): return "The file is read-only: \(reason)"
+        case .saveInProgress: return "A save is already in progress"
         }
     }
 }
@@ -205,6 +208,7 @@ public final class EditorSession {
     /// Goes back to the version on disk and forgets the undo history (Revert to Saved,
     /// and the close prompt's Discard).
     public func revert() {
+        guard !isSaving else { return }
         let old = buffer.tree
         buffer.restore(savedTree)
         journalChange(from: old)

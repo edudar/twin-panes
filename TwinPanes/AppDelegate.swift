@@ -12,7 +12,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     let workspace = WorkspaceRegistry()
     lazy var closeCoordinator = CloseCoordinator(
         openItems: { [workspace] in workspace.allItems },
-        prompt: { [weak self] session in await self?.askToSave(session) ?? .cancel })
+        prompt: { [weak self] session in await self?.askToSave(session) ?? .cancel },
+        onSaveError: { [weak self] session, error in
+            await self?.presentCloseSaveError(error, session: session)
+        })
     lazy var spike = SandboxSpike(app: self)
     let recentFiles = RecentFiles()
     /// One session per open file (docs/plans/M3b.md, D-a).
@@ -89,9 +92,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return .terminateNow
         }
         Task {
-            for session in saving { await session.finishSaving() }
-            let approved = await closeCoordinator.confirmClose(items)
-            NSApp.reply(toApplicationShouldTerminate: approved)
+            while true {
+                for session in sessions.sessions.filter(\.isSaving) {
+                    await session.finishSaving()
+                }
+                let currentItems = workspace.allItems
+                if closeCoordinator.dirtySessions(closing: currentItems).isEmpty {
+                    if sessions.sessions.contains(where: \.isSaving) { continue }
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                    return
+                }
+                guard await closeCoordinator.confirmClose(currentItems) else {
+                    NSApp.reply(toApplicationShouldTerminate: false)
+                    return
+                }
+            }
         }
         return .terminateLater
     }
@@ -313,7 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         } else {
             alert.messageText = "Discard the changes made to “\(title)”?"
             alert.informativeText =
-                "This version of Twin Panes can’t save edits yet, so closing discards them."
+                "This file can’t be saved here, so closing discards your changes."
             let discard = alert.addButton(withTitle: "Discard Changes")
             discard.hasDestructiveAction = true
             discard.keyEquivalent = "d"
@@ -337,15 +352,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func askToSave(_ session: DirtySession) async -> CloseDecision {
         let alert = makeCloseAlert(for: session)
         let response: NSApplication.ModalResponse
-        if let window = controller(containing: session.representative.id)?.window {
-            if let controller = controller(containing: session.representative.id) {
-                controller.layout.select(session.representative.id)
-            }
+        if let controller = controller(containing: session.representative.id),
+            let window = controller.window
+        {
+            controller.layout.exitZoom()
+            controller.layout.select(session.representative.id)
             window.makeKeyAndOrderFront(nil)
             response = await alert.beginSheetModal(for: window)
         } else {
             response = alert.runModal()
         }
         return Self.closeDecision(for: response, canSave: session.representative.canSave)
+    }
+
+    private func presentCloseSaveError(_ error: Error, session: DirtySession) async {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Couldn’t save “\(session.representative.title)”."
+        let reason =
+            (error as? Saver.SaveError)?.description
+            ?? (error as? FileSystemError)?.description
+            ?? (error as? ByteSourceError)?.description
+            ?? (error as? EditorSessionError)?.description
+            ?? error.localizedDescription
+        alert.informativeText = "\(reason). Your changes are still here."
+        if let window = controller(containing: session.representative.id)?.window {
+            window.makeKeyAndOrderFront(nil)
+            await alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 }

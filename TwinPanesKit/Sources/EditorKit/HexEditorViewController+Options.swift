@@ -57,7 +57,7 @@ extension HexEditorViewController: NSMenuItemValidation {
         case #selector(editorSave(_:)):
             return item.map { $0.isDirty && $0.canSave } ?? false
         case #selector(editorRevertToSaved(_:)):
-            return item?.isDirty ?? false
+            return item.map { $0.isDirty && !$0.isSaving } ?? false
         case #selector(editorCloseFind(_:)):
             return !findBar.isHidden
         case #selector(toggleInspector(_:)):
