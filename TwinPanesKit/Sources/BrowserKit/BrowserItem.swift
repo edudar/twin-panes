@@ -49,15 +49,28 @@ public final class BrowserItem: WorkspaceItem {
     /// True while the current folder's listing is still arriving.
     public private(set) var isListing = false
     /// Bumped by every navigation: work started for an older one is dropped.
-    private var generation = 0
+    private(set) var generation = 0
     private(set) var lister: FolderLister?
     /// Batches waiting for the merge that's running off the main actor.
-    private var pendingBatch: [DirectoryEntry] = []
+    var pendingBatch: [DirectoryEntry] = []
     /// A new order waiting for the same; applied before the waiting batches.
     private var pendingOrder: ListingOrder?
     private var pendingHidden: Bool?
+    /// Names a live update removes before merging their new versions (D-f).
+    var pendingRemovals: Set<String> = []
+    /// Names that changed while the folder was still listing, read once it's done.
+    var changedWhileListing: Set<String> = []
+    var watcher: FolderWatcher?
+    /// Called after each live update reaches the rows; for tests.
+    var didUpdate: (() -> Void)?
+    /// Live-update reads (and a full re-list) still running off the main actor.
+    var readsInFlight = 0
+    var isReadingChanges: Bool { readsInFlight > 0 }
+    /// Why the tab moved on its own, shown until the next navigation.
+    var notice: String?
     private var hasPending: Bool {
         !pendingBatch.isEmpty || pendingOrder != nil || pendingHidden != nil
+            || !pendingRemovals.isEmpty
     }
     private var isMerging = false
     private var listedWaiters: [CheckedContinuation<Void, Never>] = []
@@ -97,6 +110,7 @@ public final class BrowserItem: WorkspaceItem {
         navigate(to: url, selecting: name, recording: true, quietly: false)
     }
 
+    @discardableResult
     func navigate(to url: URL?, selecting name: String?, recording: Bool, quietly: Bool) -> Bool {
         let target = (url ?? folder).standardizedFileURL
         let newScope = grants.scope(covering: target)
@@ -121,7 +135,10 @@ public final class BrowserItem: WorkspaceItem {
         hasListed = true
         controller.startShowing(selecting: name)
         onChange?()
-        if !needsAccess { startListing() }
+        if !needsAccess {
+            startListing()
+            startWatching()
+        }
         updateStatus()
         if !isListing { finishWaiting() }
         return true
@@ -138,11 +155,17 @@ public final class BrowserItem: WorkspaceItem {
         }
     }
 
-    private func stopListing() {
+    func stopListing() {
         lister?.cancel()
         lister = nil
+        watcher?.stop()
+        watcher = nil
         generation += 1
         pendingBatch = []
+        pendingRemovals = []
+        changedWhileListing = []
+        readsInFlight = 0
+        notice = nil
         pendingOrder = nil
         pendingHidden = nil
         isMerging = false
@@ -191,18 +214,21 @@ public final class BrowserItem: WorkspaceItem {
 
     /// Applies the waiting order and batches: here when the folder is small, else off
     /// the main actor, one run at a time; a result for an older navigation is dropped.
-    private func applyPending() {
+    func applyPending() {
         guard !isMerging, hasPending else { return }
         let batch = pendingBatch
         let order = pendingOrder
         let hidden = pendingHidden
+        let removals = pendingRemovals
         pendingBatch = []
+        pendingRemovals = []
         pendingOrder = nil
         pendingHidden = nil
         let base = listing
         let work: @Sendable () -> FolderListing = {
             var result = order.map { base.sorted(by: $0) } ?? base
             if let hidden { result = result.showingHidden(hidden) }
+            result = result.removing(names: removals)
             return batch.isEmpty ? result : result.merging(batch)
         }
         if base.entries.count + batch.count <= FolderListing.mainActorLimit {
@@ -232,16 +258,18 @@ public final class BrowserItem: WorkspaceItem {
         }
     }
 
-    private func listingFinished() {
+    func listingFinished() {
         lister = nil
         controller.reloadKeepingSelection()
         updateStatus()
-        finishWaiting()
+        readChangedWhileListing()
+        if !isReadingChanges { finishWaiting() }
+        didUpdate?()
     }
 
     /// Returns once the current folder has been listed completely.
     public func listed() async {
-        guard isListing || isMerging else { return }
+        guard isListing || isMerging || isReadingChanges else { return }
         await withCheckedContinuation { listedWaiters.append($0) }
     }
 
@@ -272,8 +300,12 @@ public final class BrowserItem: WorkspaceItem {
         go(to: url == folder ? nil : url)
     }
 
+    public func willClose() { stopListing() }
+
     func updateStatus() {
-        if needsAccess {
+        if let notice {
+            host?.showStatus(notice)
+        } else if needsAccess {
             host?.showStatus("\(folder.path) · no access yet")
         } else if isListing {
             host?.showStatus("\(folder.path) · Listing… \(listing.entries.count.formatted()) items")
