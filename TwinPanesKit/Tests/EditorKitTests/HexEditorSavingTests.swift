@@ -134,6 +134,41 @@ private final class StatusLog: WorkspaceHost {
         #expect(SessionFolder.sweep(root).isEmpty)
     }
 
+    /// The file changes on disk under unsaved edits: the tab asks; Keep Mine keeps the
+    /// edits and says so, Reload drops them for the file on disk (M3c).
+    @Test(arguments: [true, false])
+    func anOutsideChangeAsks(keepMine: Bool) async throws {
+        defer { cleanUp() }
+        let session = try EditorSession(
+            url: url, sessionsRoot: folder.appendingPathComponent("Sessions"))
+        session.startWatching()
+        let item = HexEditorItem(session: session)
+        _ = item.controller.view
+        let asked = AsyncSignal(), reloaded = AsyncSignal()
+        final class Owner {}
+        let owner = Owner()
+        item.controller.askAboutOutsideChange = { _, title in
+            #expect(title == "file.bin")
+            asked.signal()
+            return keepMine ? .keepMine : .reload
+        }
+        item.hexView.insertText("FF")
+        session.observe(owner) { if $0 == .edited { reloaded.signal() } }
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.write(contentsOf: Data(repeating: 0x22, count: 256))
+        try handle.close()
+        await asked.wait()
+        if keepMine {
+            #expect(try item.isDirty && item.read(0..<2) == Data([0xFF, 1]))
+            #expect(item.statusText.hasSuffix("Modified · Changed on disk"))
+        } else {
+            await reloaded.wait()
+            #expect(try !item.isDirty && item.read(0..<2) == Data([0x22, 0x22]))
+            #expect(!item.statusText.contains("Changed on disk"))
+        }
+        item.willClose()
+    }
+
     @Test func readOnlyTabsCantSave() throws {
         defer { cleanUp() }
         try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)

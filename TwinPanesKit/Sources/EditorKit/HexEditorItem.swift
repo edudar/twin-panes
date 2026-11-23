@@ -84,6 +84,11 @@ public final class HexEditorItem: WorkspaceItem {
             parts.append(session.wasRecovered ? "Recovered unsaved changes" : "Modified")
         }
         if session.isNarrowed { parts.append("No crash recovery on this volume") }
+        switch session.fileState {
+        case .unchanged: break
+        case .changed: parts.append("Changed on disk")
+        case .deleted: parts.append("Deleted on disk")
+        }
         return parts.joined(separator: " · ")
     }
 
@@ -104,6 +109,7 @@ public final class HexEditorItem: WorkspaceItem {
         controller.cancelSearch()
         // One tab per session for now (the registry brings an open file's tab forward),
         // so this tab closing ends the session: its folder goes (docs/plans/M3c.md).
+        session.stopWatching()
         session.close()
     }
 

@@ -246,6 +246,59 @@ extension SmokeTest {
         check(SessionFolder.sweep(root).isEmpty, "closing it deletes its folder")
     }
 
+    /// M3c: another app rewrites the file. With unsaved edits the tab asks (Keep Mine,
+    /// Reload, Save As…) and Keep Mine keeps them; clean, it reloads without asking.
+    func outsideChange(_ check: (Bool, String) -> Void, window target: NSWindow) async {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("smoke-outside-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: url) }
+        func rewrite(_ byte: UInt8) {
+            let handle = try? FileHandle(forWritingTo: url)
+            try? handle?.write(contentsOf: Data(repeating: byte, count: 256))
+            try? handle?.close()
+        }
+        guard (try? Data(count: 256).write(to: url)) != nil, let hex = app.openFile(url),
+            let controller = app.controller(containing: hex.id), let window = controller.window
+        else { return check(false, "open a sample for outside changes") }
+        defer {
+            controller.layout.remove(hex.id)
+            hex.willClose()
+        }
+        check(window === target, "it opens in the window under test")
+        await settle()
+        window.makeFirstResponder(hex.hexView)
+        type("AB", in: window)
+        rewrite(0x22)
+        var sheet: NSWindow?
+        for _ in 0..<100 where sheet == nil {
+            await settle(milliseconds: 20)
+            sheet = window.attachedSheet
+        }
+        let titles = sheet.map { Self.buttons(in: $0.contentView).map(\.title) } ?? []
+        check(titles == ["Keep Mine", "Reload", "Save As…"], "an outside change asks: \(titles)")
+        Self.button("Keep Mine", in: sheet?.contentView)?.performClick(nil)
+        await settle()
+        check(
+            hex.isDirty && (try? hex.read(0..<2)) == Data([0xAB, 0])
+                && self.status(of: controller).hasSuffix("Changed on disk"),
+            "Keep Mine keeps the edits: \(self.status(of: controller))")
+        do { try await hex.save() } catch { check(false, "save after Keep Mine: \(error)") }
+        check(
+            (try? Data(contentsOf: url)) == Data([0xAB] + [UInt8](repeating: 0, count: 255)),
+            "and saving writes the whole version over the outside change")
+        rewrite(0x33)
+        for _ in 0..<100 where (try? hex.read(0..<1)) != Data([0x33]) {
+            await settle(milliseconds: 20)
+        }
+        check((try? hex.read(0..<1)) == Data([0x33]), "a clean tab reloads an outside change")
+    }
+
+    /// Every button under `view`, in order.
+    static func buttons(in view: NSView?) -> [NSButton] {
+        guard let view else { return [] }
+        return (view as? NSButton).map { [$0] } ?? view.subviews.flatMap { buttons(in: $0) }
+    }
+
     /// The button titled `title` under `view`, for pressing a sheet's buttons.
     static func button(_ title: String, in view: NSView?) -> NSButton? {
         guard let view else { return nil }

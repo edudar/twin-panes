@@ -330,6 +330,7 @@ struct SmokeTest {
         await editing(check, hex: hex, window: window)
         await readOnlyFile(check, window: window)
         await saving(check, window: window)
+        await outsideChange(check, window: window)
         await truncation(check)
         check(app.openFile(dir) == nil, "a folder is refused")
         window.attachedSheet.map { window.endSheet($0) }

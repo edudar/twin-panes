@@ -2,8 +2,8 @@
 
 _Status: updated 2026-11-22 from how M3b was built (PLAN.md D30–D33) and started the
 same day while the maintainer was away, at their request; the decisions below are open to
-review when they're back. In progress: steps 1–9 done (narrowed mode reduced, see
-D-d).__
+review when they're back. In progress: steps 1–10 done (narrowed mode reduced, see
+D-d; external changes use a vnode watch rather than `NSFilePresenter`, see D-c).__
 
 ## Context
 
@@ -84,6 +84,12 @@ Strategy B is used when `st_nlink > 1`, or when staging fails on a volume with a
   file, per M3b's D-c), **Reload** and **Save As…**.
 - **Deleted file:** the tab stays open, dirty and backed by the clone. Save writes the
   file back.
+
+- **As built (step 10):** a vnode `DispatchSource` on the file is the watch, not
+  `NSFilePresenter`, which only hears coordinated writes. Our own saves are told apart by
+  identity: an event leaving the file as the session last saved it is ignored, and events
+  during a save wait for it to finish. A deleted file is written back whole by Save. The
+  sheet comes up for a change, not a deletion; the status line says "Deleted on disk".
 
 ### D-d: narrowed mode, on volumes without a clone (decided on review)
 

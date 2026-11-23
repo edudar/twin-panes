@@ -57,6 +57,13 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     /// replaces it.
     var confirmRevert: @MainActor (HexEditorViewController, String) async -> Bool =
         HexEditorViewController.askToRevert
+    /// Asks what to do about the file changing on disk under unsaved edits; a sheet unless
+    /// a test replaces it.
+    var askAboutOutsideChange:
+        @MainActor (HexEditorViewController, String) async -> OutsideChangeChoice =
+            HexEditorViewController.askAboutOutsideChange
+
+    enum OutsideChangeChoice { case keepMine, reload, saveAs }
 
     init(item: HexEditorItem) {
         self.item = item

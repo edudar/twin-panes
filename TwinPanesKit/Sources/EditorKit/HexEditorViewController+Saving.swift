@@ -76,6 +76,46 @@ extension HexEditorViewController {
         return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
     }
 
+    /// The file changed on disk under unsaved edits: Keep Mine leaves them (the next save
+    /// writes the whole file), Reload drops them for the file on disk, Save As keeps both.
+    func outsideChange() async {
+        guard let item, item.isDirty, item.session.fileState == .changed else { return }
+        switch await askAboutOutsideChange(self, item.title) {
+        case .keepMine: break
+        case .saveAs: editorSaveAs(nil)
+        case .reload:
+            do {
+                try item.session.reloadDiscardingEdits()
+            } catch {
+                item.host?.showStatus("Couldn't reload “\(item.title)”: \(Self.describe(error))")
+            }
+        }
+    }
+
+    /// The sheet for `outsideChange()`.
+    static func askAboutOutsideChange(
+        _ controller: HexEditorViewController, _ title: String
+    )
+        async -> OutsideChangeChoice
+    {
+        guard let window = controller.view.window, window.attachedSheet == nil else {
+            return .keepMine
+        }
+        let alert = NSAlert()
+        alert.messageText = "“\(title)” was changed by another app."
+        alert.informativeText =
+            "Your unsaved changes are safe. Keep them (saving then writes the whole file), "
+            + "reload the file and lose them, or save them as a new file."
+        alert.addButton(withTitle: "Keep Mine")
+        alert.addButton(withTitle: "Reload").hasDestructiveAction = true
+        alert.addButton(withTitle: "Save As…")
+        switch await alert.beginSheetModal(for: window) {
+        case .alertSecondButtonReturn: return .reload
+        case .alertThirdButtonReturn: return .saveAs
+        default: return .keepMine
+        }
+    }
+
     /// Our own errors read well as they are; others (Cocoa's) have a localized text.
     static func describe(_ error: Error) -> String {
         switch error {

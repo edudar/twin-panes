@@ -69,9 +69,10 @@ extension HexEditorItem {
     /// hex view then moves the cursor, which refreshes the status line and inspector
     /// once. Anything else also ends the typing burst and drops a half-typed byte.
     func sessionChanged(_ change: EditorSession.Change) {
-        guard change == .edited else {  // a save started, finished or landed
+        guard change == .edited else {  // a save, or the file changing on disk
             updateStatus()
             onChange?()
+            if change == .fileChanged { Task { await controller.outsideChange() } }
             return
         }
         let ownTyping = controller.applyingTypingEdit

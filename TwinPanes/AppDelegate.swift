@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         SessionFolder.sweep(root).compactMap { folder in
             guard let session = try? EditorSession(recovering: folder) else { return nil }
             sessions.adopt(session)
+            session.startWatching()
             let item = HexEditorItem(session: session)
             item.didSaveAs = { [weak self] url in self?.recentFiles.note(url) }
             show(item)
