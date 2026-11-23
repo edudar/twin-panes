@@ -59,6 +59,9 @@ extension BrowserItem {
     func read(_ names: Set<String>) {
         let wanted = generation
         let folder = self.folder
+        for name in names {
+            IconCache.shared.forget(path: folder.appendingPathComponent(name).path)
+        }
         readsInFlight += 1
         // Only a weak box crosses: even `self?` held over the hop would keep a closed
         // tab alive until the main actor ran it.

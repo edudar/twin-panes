@@ -7,6 +7,18 @@ import WorkspaceKit
 /// Backspace are bound only while the list has focus (PLAN.md §4.11).
 final class FileListTableView: NSTableView, CommandScopeProviding {
     var commandScopes: [BindingScope] { [.item(.browser, part: "fileList")] }
+    /// The icons drawn for the rows no longer match: a new appearance or screen scale.
+    var iconsChanged: (() -> Void)?
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        iconsChanged?()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        iconsChanged?()
+    }
 }
 
 /// A file-list cell that draws its icon and text itself (docs/plans/M4.md, step 13):
@@ -66,45 +78,108 @@ final class FileCell: NSTableCellView {
     }
 }
 
-/// Row icons, by type (docs/plans/M4.md, D-b). Applications have icons of their own, so
-/// they are looked up by path and the last few hundred kept.
+/// Row icons, by type (docs/plans/M4.md, D-b), each drawn once into a 16-point bitmap
+/// for one screen scale and appearance (performance pass, step 3a): the workspace's
+/// icons carry every size up to 1024 px, and drawing one scaled and colour-matched it
+/// on every draw. Applications have icons of their own, so they are kept by path, the
+/// last few hundred.
+///
+/// Emptied when the system colours change (folders follow the accent colour) and when
+/// the app becomes active (a newly installed app may claim a type); `didEmpty` then
+/// tells the tables to fetch their icons again.
 @MainActor
 final class IconCache {
-    static let shared = IconCache()
-    private var byType: [UTType: NSImage] = [:]
-    private var byPath: [String: NSImage] = [:]
-    private var pathOrder: [String] = []
-    let pathLimit = 256
+    static let shared = IconCache(center: .default)
+    static let didEmpty = Notification.Name("IconCache.didEmpty")
 
-    /// A 16-point copy: the workspace's icons carry every size, which an image view
-    /// weighs up each time it lays out.
-    static func small(_ icon: NSImage) -> NSImage {
-        let copy = icon.copy() as? NSImage ?? icon
-        copy.size = NSSize(width: 16, height: 16)
-        return copy
+    struct Key: Hashable {
+        let id: String
+        let scale: CGFloat
+        let appearance: NSAppearance.Name
     }
 
-    /// The generic folder icon at 16 points.
-    private(set) lazy var folder = Self.small(NSWorkspace.shared.icon(for: .folder))
+    private var byType: [Key: NSImage] = [:]
+    private var byPath: [Key: NSImage] = [:]
+    private var pathOrder: [Key] = []
+    let pathLimit = 256
+    private let center: NotificationCenter
 
-    func icon(for entry: DirectoryEntry) -> NSImage {
+    init(center: NotificationCenter) {
+        self.center = center
+        for name in [
+            NSColor.systemColorsDidChangeNotification, NSApplication.didBecomeActiveNotification,
+        ] {
+            center.addObserver(self, selector: #selector(empty), name: name, object: nil)
+        }
+    }
+
+    /// The generic folder icon at 16 points, for the path bar and the ".." row, whose
+    /// image views pick a size themselves.
+    private(set) lazy var folder: NSImage = {
+        let copy = NSWorkspace.shared.icon(for: .folder).copy() as? NSImage ?? NSImage()
+        copy.size = NSSize(width: 16, height: 16)
+        return copy
+    }()
+
+    @objc func empty() {
+        byType = [:]
+        byPath = [:]
+        pathOrder = []
+        center.post(name: Self.didEmpty, object: self)
+    }
+
+    /// The entry at `path` changed (a new icon pasted in Get Info, say).
+    func forget(path: String) {
+        let gone = pathOrder.filter { $0.id == path }
+        guard !gone.isEmpty else { return }
+        for key in gone { byPath[key] = nil }
+        pathOrder.removeAll { $0.id == path }
+    }
+
+    func icon(
+        for entry: DirectoryEntry, scale: CGFloat, appearance: NSAppearance.Name
+    ) -> NSImage {
         guard entry.type.conforms(to: .application) else {
-            if let icon = byType[entry.type] { return icon }
+            let key = Key(id: entry.type.identifier, scale: scale, appearance: appearance)
+            if let icon = byType[key] { return icon }
             let icon = StepTiming.measure("icon lookup") {
-                Self.small(NSWorkspace.shared.icon(for: entry.type))
+                Self.drawn(NSWorkspace.shared.icon(for: entry.type), key)
             }
-            byType[entry.type] = icon
+            byType[key] = icon
             return icon
         }
-        let path = entry.url.path
-        if let icon = byPath[path] { return icon }
+        let key = Key(id: entry.url.path, scale: scale, appearance: appearance)
+        if let icon = byPath[key] { return icon }
         let icon = StepTiming.measure("icon lookup") {
-            Self.small(NSWorkspace.shared.icon(forFile: path))
+            Self.drawn(NSWorkspace.shared.icon(forFile: key.id), key)
         }
-        byPath[path] = icon
-        pathOrder.append(path)
+        byPath[key] = icon
+        pathOrder.append(key)
         if pathOrder.count > pathLimit { byPath[pathOrder.removeFirst()] = nil }
         return icon
+    }
+
+    /// `icon` drawn once, at 16 points, for the key's scale and appearance.
+    static func drawn(_ icon: NSImage, _ key: Key) -> NSImage {
+        let pixels = Int((16 * key.scale).rounded())
+        let size = NSSize(width: 16, height: 16)
+        guard
+            let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { return icon }
+        rep.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        let appearance = NSAppearance(named: key.appearance) ?? NSAppearance.currentDrawing()
+        appearance.performAsCurrentDrawingAppearance {
+            icon.draw(in: NSRect(origin: .zero, size: size))
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        let image = NSImage(size: size)
+        image.addRepresentation(rep)
+        return image
     }
 }
 
@@ -153,6 +228,10 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         tableView.target = self
         tableView.doubleAction = #selector(browserOpen(_:))
         tableView.setAccessibilityIdentifier("fileList")
+        tableView.iconsChanged = { [weak self] in self?.refreshIcons() }
+        NotificationCenter.default.addObserver(
+            forName: IconCache.didEmpty, object: IconCache.shared, queue: .main
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.refreshIcons() } }
     }
 
     /// The header's sort indicator, matching `order`.
@@ -209,7 +288,7 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         guard let entry = entry(atRow: row) else { return nil }
         let cell = reusableCell(column == .name ? "name" : "detail")
         cell.text = text(for: entry, column)
-        cell.icon = column == .name ? IconCache.shared.icon(for: entry) : nil
+        cell.icon = column == .name ? icon(for: entry) : nil
         cell.alignment = column == .size ? .right : .left
         return cell
     }
@@ -230,6 +309,23 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         stack.identifier = identifier
         stack.setAccessibilityIdentifier("parentRow")
         return stack
+    }
+
+    /// The icon for `entry` in the table's current scale and appearance.
+    func icon(for entry: DirectoryEntry) -> NSImage {
+        let scale = tableView.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let appearance = tableView.effectiveAppearance.name
+        return IconCache.shared.icon(for: entry, scale: scale, appearance: appearance)
+    }
+
+    /// The icons no longer match the screen or the appearance: give the name cells on
+    /// screen theirs again.
+    func refreshIcons() {
+        tableView.enumerateAvailableRowViews { rowView, row in
+            guard let cell = rowView.view(atColumn: 0) as? FileCell, let entry = entry(atRow: row)
+            else { return }
+            cell.icon = icon(for: entry)
+        }
     }
 
     /// A cell from the table's reuse queue, or a new one.
