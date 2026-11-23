@@ -16,12 +16,13 @@ struct SmokeTest {
 
     func run() {
         // A guard against hangs, not a performance gate: the full run takes about 10 s on
-        // the dev Mac and over 30 s on a hosted macOS 27 runner.
+        // the dev Mac and over 30 s on a hosted macOS 27 runner, before M4's 100k-file
+        // folder (created and deleted in the run).
         let started = ContinuousClock.now
-        DispatchQueue.main.asyncAfter(deadline: .now() + 120) {
-            print("SMOKE FAIL: timed out after 120 s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 240) {
+            print("SMOKE FAIL: timed out after 240 s")
             if ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true" {
-                print("::error title=Smoke test::timed out after 120 s")
+                print("::error title=Smoke test::timed out after 240 s")
             }
             exit(1)
         }
@@ -88,6 +89,7 @@ struct SmokeTest {
         await hiddenFiles(check, browser: browser, window: window)
         lostRecentFile(check, in: folder)
         await packageContents(check, browser: browser, folder: folder, window: window)
+        await bigFolder(check, browser: browser, window: window)
         var chain = FocusChain.scopes(in: window)
         check(
             chain.first == .item(.browser, part: "fileList"),
