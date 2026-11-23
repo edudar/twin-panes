@@ -23,13 +23,16 @@ extension SmokeTest {
         }
     }
 
-    /// Chooses an Edit menu item the way AppKit does for a key window: the first object
-    /// in the first responder's chain that implements the action validates and performs
-    /// it. (The smoke-test app isn't frontmost, so its window never becomes key and
-    /// the menu's own key-equivalent path has no target.) Checks the key equivalent too.
-    func menu(_ title: String, in window: NSWindow) -> Bool {
-        guard let item = NSApp.mainMenu?.item(withTitle: "Edit")?.submenu?.item(withTitle: title),
-            item.keyEquivalent.lowercased() == "z", let action = item.action
+    /// Chooses the main-menu item for `action` the way AppKit does for a key window: the
+    /// first object in the first responder's chain that implements the action validates
+    /// and performs it. (The smoke-test app isn't frontmost, so its window never becomes
+    /// key and the menu's own key-equivalent path has no target.) Finds the item by its
+    /// action, since validation may retitle it ("Undo Typing"), and checks its key.
+    func menu(_ action: Selector, key: String, in window: NSWindow) -> Bool {
+        guard
+            let item = NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items)
+                .first(where: { $0.action == action }),
+            item.keyEquivalent.lowercased() == key
         else { return false }
         var responder = window.firstResponder
         while let current = responder, !current.responds(to: action) {
@@ -46,6 +49,7 @@ extension SmokeTest {
         func bytes(_ range: Range<UInt64>) -> [UInt8] {
             (try? hex.read(range)).map(Array.init) ?? []
         }
+        let undo = #selector(HexEditorActions.undo(_:)), redo = #selector(HexEditorActions.redo(_:))
         window.makeFirstResponder(hex.hexView)
         hex.hexView.go(to: 0x10)
         type("AB", in: window)
@@ -80,11 +84,11 @@ extension SmokeTest {
             check(false, "editor has a find field")
         }
 
-        check(menu("Undo", in: window), "Edit › Undo (⌘Z) reaches the editor")
+        check(menu(undo, key: "z", in: window), "Edit › Undo (⌘Z) reaches the editor")
         check(bytes(0x11..<0x13) == [0x11, 0x12], "Undo reverts the text-column typing")
-        check(menu("Undo", in: window), "Undo again")
+        check(menu(undo, key: "z", in: window), "Undo again")
         check(bytes(0x10..<0x11) == [0x10] && !hex.isDirty, "Undo again reverts the hex typing")
-        check(menu("Redo", in: window), "Edit › Redo (⇧⌘Z) reaches the editor")
+        check(menu(redo, key: "z", in: window), "Edit › Redo (⇧⌘Z) reaches the editor")
         check(bytes(0x10..<0x11) == [0xAB], "Redo brings the hex typing back")
 
         let dirty = app.closeCoordinator.dirtySessions(closing: [hex])

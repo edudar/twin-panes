@@ -106,4 +106,17 @@ private final class StatusLog: WorkspaceHost {
         #expect(!item.canSave)
         #expect(!enabled(item, #selector(HexEditorViewController.editorSave(_:))))
     }
+
+    @Test func undoAndRedoNameWhatTheyDo() throws {
+        defer { cleanUp() }
+        let (item, _) = try makeItem()
+        let undo = menuItem(#selector(HexEditorViewController.undo(_:)))
+        let redo = menuItem(#selector(HexEditorViewController.redo(_:)))
+        #expect(!item.controller.validateMenuItem(undo) && undo.title == "Undo")
+        item.hexView.insertText("FF")
+        #expect(item.controller.validateMenuItem(undo) && undo.title == "Undo Typing")
+        item.controller.undo(nil)
+        #expect(item.controller.validateMenuItem(redo) && redo.title == "Redo Typing")
+        #expect(!item.controller.validateMenuItem(undo) && undo.title == "Undo")
+    }
 }
