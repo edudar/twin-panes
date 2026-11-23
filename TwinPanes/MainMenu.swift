@@ -49,7 +49,8 @@ enum MainMenu {
             [
                 command(.newWindow), command(.newBrowserTab), command(.newEditorTab),
                 command(.newEditorView), .separator(), command(.openFile), recentHolder,
-                .separator(), command(.save), command(.revertToSaved), command(.saveSelection),
+                .separator(), command(.save), command(.saveAs), command(.revertToSaved),
+                command(.saveSelection),
                 .separator(), command(.closeTab),
                 command(.closeWindow),
             ])

@@ -15,6 +15,12 @@ extension HexEditorItem {
 
     /// Saves the session (File › Save, and Save in the close sheet).
     public func save() async throws { try await session.save() }
+
+    /// Saves the session to `url` and keeps editing that file (File › Save As…).
+    public func saveAs(to url: URL, scope: SecurityScope? = nil) async throws {
+        try await session.saveAs(to: url, scope: scope)
+        didSaveAs?(url)
+    }
     public var canUndo: Bool { session.canUndo }
     public var canRedo: Bool { session.canRedo }
 

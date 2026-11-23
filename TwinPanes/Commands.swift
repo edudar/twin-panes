@@ -31,6 +31,7 @@ extension CommandID {
     static let saveSelection: CommandID = "editor.saveSelection"
     static let save: CommandID = "file.save"
     static let revertToSaved: CommandID = "file.revertToSaved"
+    static let saveAs: CommandID = "file.saveAs"
     static let newBrowserTab: CommandID = "workspace.newBrowserTab"
     static let newEditorTab: CommandID = "workspace.newEditorTab"
     static let newEditorView: CommandID = "editor.newView"
@@ -80,6 +81,7 @@ enum DefaultCommands {
         add(.copyAsHex, "Copy as Hex", #selector(HexEditorActions.copyAsHex(_:)))
         add(.copyAsText, "Copy as Text", #selector(HexEditorActions.copyAsText(_:)))
         add(.save, "Save", #selector(HexEditorActions.editorSave(_:)))
+        add(.saveAs, "Save As…", #selector(HexEditorActions.editorSaveAs(_:)))
         add(
             .revertToSaved, "Revert to Saved",
             #selector(HexEditorActions.editorRevertToSaved(_:)))
@@ -150,6 +152,7 @@ enum DefaultCommands {
         registry.bind(KeyChord("\u{7f}"), to: .browserParent, in: fileList)
         registry.bind(KeyChord("g", [.command, .shift]), to: .browserGoToFolder, in: browser)
         registry.bind(KeyChord("s", .command), to: .save, in: editor)
+        registry.bind(KeyChord("s", [.command, .shift]), to: .saveAs, in: editor)
         registry.bind(KeyChord("f", .command), to: .editorFind, in: editor)
         // Primary menu shortcuts (⌘G / ⇧⌘G) are bound before secondary F3 / ⇧F3.
         registry.bind(KeyChord("g", .command), to: .editorFindNext, in: editor)

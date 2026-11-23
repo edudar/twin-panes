@@ -9,6 +9,30 @@ extension HexEditorViewController {
         Task { await saveShowingErrors() }
     }
 
+    /// Asks where in a save panel, then saves there and keeps editing the new file.
+    @objc func editorSaveAs(_ sender: Any?) {
+        guard let item, let window = view.window else { return NSSound.beep() }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = item.title
+        panel.directoryURL = item.url.deletingLastPathComponent()
+        panel.canCreateDirectories = true
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { await self?.saveAsShowingErrors(to: url) }
+        }
+    }
+
+    /// Saves as `url` and reports a failure; for the panel and its tests. The panel's URL
+    /// carries sandbox access for this run; the scope token keeps it while the tab lives.
+    func saveAsShowingErrors(to url: URL) async {
+        guard let item else { return }
+        do {
+            try await item.saveAs(to: url, scope: SecurityScope(url: url))
+        } catch {
+            await report(error, saving: url.lastPathComponent)
+        }
+    }
+
     /// Asks first (`confirmRevert`), then drops every unsaved edit and the undo history.
     @objc func editorRevertToSaved(_ sender: Any?) {
         Task { await revertToSaved() }
@@ -26,14 +50,19 @@ extension HexEditorViewController {
         do {
             try await item.save()
         } catch {
-            let reason = Self.describe(error)
-            item.host?.showStatus("Couldn't save “\(item.title)”: \(reason)")
-            guard let window = view.window else { return }
-            let alert = NSAlert()
-            alert.messageText = "Couldn't save “\(item.title)”."
-            alert.informativeText = reason + ". Your changes are still here."
-            await alert.beginSheetModal(for: window)
+            await report(error, saving: item.title)
         }
+    }
+
+    /// A failed save: the reason in the status line and in a sheet.
+    private func report(_ error: Error, saving name: String) async {
+        let reason = Self.describe(error)
+        item?.host?.showStatus("Couldn't save “\(name)”: \(reason)")
+        guard let window = view.window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Couldn't save “\(name)”."
+        alert.informativeText = reason + ". Your changes are still here."
+        await alert.beginSheetModal(for: window)
     }
 
     /// The Revert to Saved sheet.

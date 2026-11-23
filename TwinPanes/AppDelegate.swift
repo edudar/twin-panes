@@ -177,6 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 return item
             }
             let item = HexEditorItem(session: session)
+            item.didSaveAs = { [weak self] url in self?.recentFiles.note(url) }
             show(item, in: target)
             return item
         } catch {

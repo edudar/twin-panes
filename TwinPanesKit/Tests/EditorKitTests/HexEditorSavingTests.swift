@@ -99,6 +99,28 @@ private final class StatusLog: WorkspaceHost {
         #expect(try !item.isDirty && !item.canUndo && item.read(0..<1) == Data([0]))
     }
 
+    /// Save As: the tab takes the new file's name, tells the app (recents), and a failure
+    /// leaves it where it was and says why.
+    @Test func saveAsMovesTheTabToTheNewFile() async throws {
+        defer { cleanUp() }
+        let (item, log) = try makeItem()
+        var noted: [URL] = []
+        var changes = 0
+        item.didSaveAs = { noted.append($0) }
+        item.onChange = { changes += 1 }
+        item.hexView.insertText("FF")
+        let copy = folder.appendingPathComponent("copy.bin")
+        await item.controller.saveAsShowingErrors(to: copy)
+        #expect(item.title == "copy.bin" && item.url == copy && !item.isDirty)
+        #expect(noted == [copy] && changes > 1)
+        #expect(try Data(contentsOf: copy)[0] == 0xFF && disk(0) == 0)
+
+        let nowhere = folder.appendingPathComponent("missing/x.bin")
+        await item.controller.saveAsShowingErrors(to: nowhere)
+        #expect(item.url == copy && noted == [copy])
+        #expect(log.messages.last?.hasPrefix("Couldn't save “x.bin”") == true)
+    }
+
     @Test func readOnlyTabsCantSave() throws {
         defer { cleanUp() }
         try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)

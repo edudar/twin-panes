@@ -21,6 +21,9 @@ public final class HexEditorItem: WorkspaceItem {
     public let session: EditorSession
     public weak var host: WorkspaceHost?
     public var onChange: (() -> Void)?
+    /// Called after Save As moved the session to another file (the app notes it as a
+    /// recent file).
+    public var didSaveAs: ((URL) -> Void)?
 
     public var url: URL { session.url }
     public var source: ByteSource { session.buffer.original }

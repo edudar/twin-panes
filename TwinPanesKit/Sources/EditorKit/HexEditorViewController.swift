@@ -9,6 +9,7 @@ import WorkspaceKit
     @objc optional func redo(_ sender: Any?)
     @objc optional func editorSave(_ sender: Any?)
     @objc optional func editorRevertToSaved(_ sender: Any?)
+    @objc optional func editorSaveAs(_ sender: Any?)
     @objc optional func goToOffset(_ sender: Any?)
     @objc optional func copyAsHex(_ sender: Any?)
     @objc optional func copyAsText(_ sender: Any?)

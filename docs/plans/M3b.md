@@ -1,9 +1,9 @@
 # M3b plan: sessions and saving
 
-_Status: approved 2026-11-22; in progress, steps 1–8 of 11 done (`FileIdentity`,
+_Status: approved 2026-11-22; in progress, steps 1–9 of 11 done (`FileIdentity`,
 `AccessMode`, `EditorSession`, the tab on a session, `SessionRegistry`, `SavePlan`,
-`FileSystem` and `Saver`, saving from the session, Save and Revert in the app). Steps 6,
-7 and 8 are several commits each to stay under 250 lines.
+`FileSystem` and `Saver`, saving from the session, Save and Revert in the app, Save As).
+Steps 6 to 9 are several commits each to stay under 250 lines.
 Split from the original M3b on review: this part is sessions and saving; the clone, external changes, crash recovery and the fault-injection suite
 are M3c (docs/plans/M3c.md)._
 

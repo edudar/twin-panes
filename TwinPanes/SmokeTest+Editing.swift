@@ -147,6 +147,35 @@ extension SmokeTest {
         check(menu(save, key: "s", in: window), "File › Save (⌘S) reaches the editor")
         await saved()
         check(!hex.isDirty && disk(0x20..<0x21) == [0x7E], "the save reaches the file")
+
+        // Save As: the menu item is there with ⇧⌘S; the panel itself can't be driven
+        // here, so the tab's saveAs stands in for its OK button.
+        let action = #selector(HexEditorActions.editorSaveAs(_:))
+        let saveAs = NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items)
+            .first { $0.action == action }
+        var responder = window.firstResponder
+        while let current = responder, !current.responds(to: action) {
+            responder = current.nextResponder
+        }
+        let enabled = saveAs.flatMap { item in
+            (responder as? NSMenuItemValidation)?.validateMenuItem(item)
+        }
+        check(
+            saveAs?.keyEquivalent == "s" && saveAs?.keyEquivalentModifierMask == [.command, .shift]
+                && responder != nil && enabled != false,
+            "File › Save As… (⇧⌘S) reaches the editor and is enabled")
+        let copy = url.deletingLastPathComponent()
+            .appendingPathComponent("smoke-save-as-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: copy) }
+        type("11", in: window)
+        do { try await hex.saveAs(to: copy) } catch { check(false, "Save As: \(error)") }
+        check(
+            hex.title == copy.lastPathComponent && !hex.isDirty
+                && (try? Data(contentsOf: copy))?[0x21] == 0x11,
+            "Save As writes the new file and the tab follows it")
+        check(
+            app.recentFiles.entries.contains { $0.url.lastPathComponent == copy.lastPathComponent },
+            "the new file is a recent file")
     }
 
     /// A file without write permission opens read-only (M3b, D-b): typing changes
