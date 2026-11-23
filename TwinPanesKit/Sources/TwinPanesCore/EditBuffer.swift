@@ -6,9 +6,10 @@ import Foundation
 public struct EditSnapshot: ByteReading {
     public let tree: PieceTree
     public let original: ByteSource
-    public let add: AddBuffer
+    /// Nil until the first edit; a tree has `.add` pieces only once it exists.
+    public let add: AddBuffer?
 
-    public init(tree: PieceTree, original: ByteSource, add: AddBuffer) {
+    public init(tree: PieceTree, original: ByteSource, add: AddBuffer?) {
         self.tree = tree
         self.original = original
         self.add = add
@@ -21,7 +22,7 @@ public struct EditSnapshot: ByteReading {
         var out = Data(capacity: clampedCount(range))
         for (_, piece) in spans(range) {
             let range = piece.offset..<(piece.offset + piece.length)
-            out.append(try piece.source == .original ? original.read(range) : add.read(range))
+            out.append(try piece.source == .original ? original.read(range) : add!.read(range))
         }
         return out
     }
@@ -33,7 +34,7 @@ public struct EditSnapshot: ByteReading {
             let range = piece.offset..<(piece.offset + piece.length)
             let data =
                 try piece.source == .original
-                ? original.readSequential(range) : add.readSequential(range)
+                ? original.readSequential(range) : add!.readSequential(range)
             out.append(data)
             // The original got shorter: later bytes would land at the wrong offsets.
             if data.count < range.count { break }
@@ -47,7 +48,7 @@ public struct EditSnapshot: ByteReading {
         for (_, piece) in spans(range) {
             let range = piece.offset..<(piece.offset + piece.length)
             let data =
-                piece.source == .original ? original.cachedBytes(range) : add.cachedBytes(range)
+                piece.source == .original ? original.cachedBytes(range) : add!.cachedBytes(range)
             guard let data else { return nil }
             out.append(data)
         }
@@ -67,14 +68,14 @@ public struct EditSnapshot: ByteReading {
         let addRanges = pieces.filter { $0.source == .add }.map {
             $0.offset..<($0.offset + $0.length)
         }
-        let addTicket = add.nextPrefetchTicket(supersede: supersede)
+        let addTicket = add?.nextPrefetchTicket(supersede: supersede)
         original.prefetch(originalRanges, supersede: supersede) { [add] error in
             if let error {
                 completion(error)
-            } else if addRanges.isEmpty {
-                completion(nil)
-            } else {
+            } else if let add, !addRanges.isEmpty {
                 add.prefetch(addRanges, ticket: addTicket, completion: completion)
+            } else {
+                completion(nil)
             }
         }
     }
@@ -129,14 +130,25 @@ public struct EditSnapshot: ByteReading {
 /// The edit model of one open file: the original, the add buffer and the current tree.
 /// Not thread-safe; it belongs to the editor's actor, and other threads use snapshots.
 public final class EditBuffer {
-    public let original: ByteSource
-    public let add: AddBuffer
+    /// The file the original pieces read: the file as opened, or the session's clone
+    /// once `attach` swapped it in (docs/plans/M3c.md).
+    public private(set) var original: ByteSource
+    /// Holds typed bytes; made on the first edit (or given by `attach`), so viewing a file
+    /// writes nothing.
+    public private(set) var add: AddBuffer?
     /// The current version.
     public private(set) var tree: PieceTree
     /// The version the file was opened with.
     public let openedTree: PieceTree
 
-    public init(original: ByteSource, addDirectory: URL? = nil) throws {
+    /// A buffer that makes its add buffer, in the temporary folder, on the first edit.
+    public init(original: ByteSource) {
+        self.original = original
+        tree = PieceTree(originalLength: original.length)
+        openedTree = tree
+    }
+
+    public init(original: ByteSource, addDirectory: URL?) throws {
         self.original = original
         add = try AddBuffer(directory: addDirectory)
         tree = PieceTree(originalLength: original.length)
@@ -155,6 +167,16 @@ public final class EditBuffer {
     /// every edit makes it unmodified again).
     public var isModified: Bool { !tree.isSameVersion(as: openedTree) }
 
+    /// Switches to `original` (the session's clone: same length, same bytes) and `add`
+    /// (in the session folder), once, before the first edit. Snapshots taken before keep
+    /// reading what they had.
+    public func attach(original: ByteSource, add: AddBuffer) {
+        precondition(original.length == self.original.length, "a clone of another length")
+        precondition((self.add?.length ?? 0) == 0, "attach after an edit")
+        self.original = original
+        self.add = add
+    }
+
     public func snapshot() -> EditSnapshot {
         EditSnapshot(tree: tree, original: original, add: add)
     }
@@ -168,6 +190,8 @@ public final class EditBuffer {
             throw ByteSourceError.truncated(expected: offset + count, available: length)
         }
         guard count > 0 else { return offset..<offset }
+        let add = try self.add ?? AddBuffer()
+        self.add = add
         let added = try add.append(bytes)
         tree = tree.overwriting(
             at: offset, with: Piece(.add, offset: added.lowerBound, length: count))

@@ -115,4 +115,33 @@ struct EditBufferTests {
             snap.cachedBytes(UInt64(page * 4)..<UInt64(page * 4 + 16))
                 == Data(repeating: 0x11, count: 16))
     }
+
+    /// Viewing writes nothing: the add buffer comes with the first edit.
+    @Test func makesItsAddBufferOnTheFirstEdit() throws {
+        defer { cleanUp() }
+        let url = try makeFile(Array(0..<10))
+        let buffer = EditBuffer(original: try ByteSource(url: url))
+        #expect(buffer.add == nil && buffer.snapshot().add == nil)
+        #expect(try buffer.snapshot().read(2..<4) == Data([2, 3]))
+        try buffer.overwrite(at: 3, with: Data([0xAA]))
+        #expect(try buffer.add != nil && buffer.snapshot().read(2..<5) == Data([2, 0xAA, 4]))
+    }
+
+    /// The session's clone replaces the original before the first edit; snapshots taken
+    /// earlier keep reading the file they had.
+    @Test func attachSwitchesSourcesForLaterSnapshots() throws {
+        defer { cleanUp() }
+        let opened = try makeFile(Array(0..<10))
+        let stand = folder.appendingPathComponent("clone.bin")  // a "clone" told apart
+        try Data(repeating: 7, count: 10).write(to: stand)
+        let buffer = EditBuffer(original: try ByteSource(url: opened))
+        let before = buffer.snapshot()
+        let add = try AddBuffer(directory: folder)
+        buffer.attach(original: try ByteSource(url: stand), add: add)
+        #expect(try before.read(0..<2) == Data([0, 1]))
+        #expect(try buffer.snapshot().read(0..<2) == Data([7, 7]))
+        try buffer.overwrite(at: 1, with: Data([0xBB]))
+        #expect(buffer.add === add && add.length == 1)
+        #expect(try buffer.snapshot().read(0..<3) == Data([7, 0xBB, 7]))
+    }
 }
