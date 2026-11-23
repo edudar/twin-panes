@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.19 (2026-11-22). Living document; requirements will keep growing.
+Status: draft v0.20 (2026-11-22). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -47,6 +47,10 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D31 | **A save writes where the saved and current versions differ** (M3b) | `SavePlan` walks both piece trees side by side and writes every stretch taken from a different source or offset; that covers undone edits (undo after a save restores the original) and skips edits already saved. The whole file is written when the disk no longer matches the saved identity, size and mtime, or the length changed. Planned as the union of modified ranges; the exact comparison is as cheap. |
 | D32 | **Saving: strategy A behind a `FileSystem` seam, off the main actor, one at a time** (M3b) | `Saver` clones (or copies, after a free-space check) into `itemReplacementDirectory`, patches, `F_FULLFSYNC`s and swaps the file in with a coordinated replace. Every write goes through `FileSystem`, for M3c's fault injection. Saves run on a dispatch queue over a snapshot; edits typed meanwhile stay unsaved (`savedTree` = the version written). A save asked for while one runs is queued once. Hard-linked files get Save As until M3c's strategy B. |
 | D33 | **No rebasing after a save** (M3b) | Pieces keep pointing at the file as opened: after a replace the session reads the old inode through its open descriptor, so undo across saves needs no remapping. M3c moves the original pieces onto a clone made at the first edit. Save As moves the session (URL, scope, identity, access) to the new file and keeps its undo history. |
+| D34 | **Session folder and clone at the first edit; a journal of tree changes** (M3c) | `Sessions/<id>/` holds the manifest, the clone the original pieces read, the add buffer and `journal.bin`. Viewing writes nothing. Journal records are `replace(range, pieces)` for whatever the tree comparison finds changed (edits, undo, redo, revert alike), `saved(n)` and `closed`, framed with a CRC32C. Recovery replays over the clone; the tab comes back dirty without undo history. |
+| D35 | **Strategy B for hard-linked files, needing the clone** (M3c) | Old bytes and the file's identity go to a save journal, the ranges are written in place, a commit mark is appended; recovery rolls back an uncommitted one. Whole-file plans and narrowed sessions still get Save As. |
+| D36 | **Outside changes by vnode watch, our saves told apart by identity** (M3c) | A `DispatchSource` on the file instead of `NSFilePresenter` (which only hears coordinated writes); an event leaving the file as last saved is ignored. Clean tabs reload; dirty ones ask Keep Mine / Reload / Save As. |
+| D37 | **Narrowed sessions keep no journal, for now** (M3c) | Replaying against the live file after a save would bring back saved bytes where an undo had restored the opened ones. Until the external-volume spike, a session without a clone isn't recoverable and says so. |
 
 ## 3. Constraints that drive the design
 
@@ -114,7 +118,9 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `FileIdentity`, `AccessMode` | M3b | which file (device, inode) and how it looked (size, mtime, links); writable or read-only with the reason |
 | `EditorSession`, `SessionRegistry` | M3b, M3c | per-file session: undo, saved version, save, Save As, revert, file identity, access, security scope (M3b, D30); backing generations, crash journal (M3c) |
 | `SavePlan` | M3b | the ranges a save writes, or the whole file (D31) |
-| `Saver`, `FileSystem` | M3b, M3c | save strategy A (clone, patch, replace) and Save As in M3b, B (in place + journal) in M3c (§4.3, D32); every write goes through the `FileSystem` seam |
+| `Saver`, `FileSystem`, `SaveJournal` | M3b, M3c | save strategy A (clone, patch, replace) and Save As in M3b, B (in place + save journal) in M3c (§4.3, D32, D35); the saver and journal write through the `FileSystem` seam |
+| `SessionFolder`, `SessionJournal`, `JournalFormat` | M3c | the session's folder and manifest, its operation journal and its format and replay (D34) |
+| `FileWatcher` | M3c | the vnode watch behind outside-change handling (D36) |
 
 - **Project layout (D20):**
 
@@ -293,6 +299,17 @@ opening an editor from the browser) goes through a protocol or factory defined i
   - **Fault-injection tests are an M3c gate** (§7): kill and simulated power loss at
     every write/fsync/rename point of save and journal, external rewrites during
     edit and save, typing during save, volume disappearing mid-save.
+- **As built (M3c, in progress):** D34. The clone is made at the first edit after a
+  check that the file is still as opened (else a reload first); `EditBuffer.attach`
+  switches the original and add buffer once. Records are written at once through the
+  `FileSystem` seam; `F_FULLFSYNC` of the add buffer then the journal runs within 1 s
+  and at each save and close. The save race needs no truncation: `saved(n)` names the
+  record count behind the version written. Launch sweeps the sessions root, deleting
+  closed folders and reopening the rest as tabs ("Recovered unsaved changes"); a torn
+  journal tail is cut off and journaling goes on in the same folder. Saves rewrite the
+  manifest so a recovered session saves against what was saved last. Narrowed sessions
+  journal nothing (D37). Not built yet: the fault-injection suite, iCloud dataless
+  files (docs/plans/M3c.md, steps 11–13).
 
 ### 4.3 Saving: `Saver`
 `NSFileCoordinator` only coordinates with cooperating clients; atomicity and recovery
@@ -1006,4 +1023,10 @@ byte histogram.
   - *Smoke coverage*: typing during a save needs a held save, so it is a unit test
     only; the Save As panel is stood in for by `saveAs(to:)`.
   - *`AddBuffer` writes through `FileSystem`*: only `Saver` uses the seam in M3b; the
-    add buffer and the journal join it in M3c.
+    journal joined it in M3c, the add buffer joins it with the fault suite.
+- **From M3c (2026-11-22):**
+  - *Narrowed recovery* (D37): hashing sampled pages, conditional replay and
+    rebasing the journal at saves wait for the external-volume spike.
+  - *Flushing on app deactivation*: the 1 s debounce and the flush at save and close
+    cover it; an explicit flush when the app goes to the background isn't wired.
+  - *Strategy B writes aren't coordinated* with `NSFileCoordinator` yet.

@@ -39,6 +39,10 @@ Twin Panes is early and changing quickly. Right now it can:
   changed, so saving an edit to a 4 GB file takes a fraction of a second; Save As
   and Revert to Saved work too. Read-only and locked files open for viewing and
   say why they can't be edited.
+- **Keep unsaved edits safe**: if the app crashes, they come back as a tab the
+  next time it starts. If another app changes the file meanwhile, the edits
+  aren't touched, and you choose whether to keep them, reload, or save a copy.
+  Files with hard links save in place.
 - **Change the view**: offsets in hex or decimal, byte grouping, and an ASCII or
   Latin-1 text column.
 - **Use Safari-style tabs**, each with a file icon and a close button.
@@ -50,14 +54,12 @@ remembers those grants.
 
 In rough order:
 
-1. **Safer editing**: unsaved edits survive the app crashing or another app
-   changing the file, and hard-linked files can be saved in place.
-2. **The full file manager**: two panels, a sidebar, a Quick Look preview pane,
+1. **The full file manager**: two panels, a sidebar, a Quick Look preview pane,
    an F-key bar, and copy, move, rename and trash with progress and conflict
    handling.
-3. **More editing**: insert and delete bytes, plus plain-text and Markdown modes
+2. **More editing**: insert and delete bytes, plus plain-text and Markdown modes
    with find and replace.
-4. **Later**: a built-in terminal, multiple windows, remote connections, folder
+3. **Later**: a built-in terminal, multiple windows, remote connections, folder
    compare and more.
 
 The full plan, with every decision behind it, is in
