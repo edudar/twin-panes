@@ -2,7 +2,8 @@
 
 _Status: updated 2026-11-22 from how M3b was built (PLAN.md D30–D33) and started the
 same day while the maintainer was away, at their request; the decisions below are open to
-review when they're back. In progress.__
+review when they're back. In progress: steps 1–9 done (narrowed mode reduced, see
+D-d).__
 
 ## Context
 
@@ -93,6 +94,14 @@ Strategy B is used when `st_nlink > 1`, or when staging fails on a volume with a
   save. Strategy B is refused and Save As… offered, because remapping pieces waits for
   the external-volume spike.
 - The private copy (§9.3) stays deferred.
+- **As built (step 9, changed while building):** no journal at all for now. Replaying
+  against the live file goes wrong once a save has run: the file then holds the saved
+  bytes, so a record that undid an edit back to the opened bytes would replay to the
+  saved ones. Rebasing the journal at each save needs more design, and narrowed mode only
+  happens on volumes the spike hasn't measured. So a narrowed session journals nothing,
+  marks its folder closed at once (the next launch deletes it), says "No crash recovery
+  on this volume", and saves with strategy A only. Hashing, conditional replay and
+  rebasing wait for the external-volume spike.
 
 ### D-e: the operation journal
 

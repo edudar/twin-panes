@@ -26,7 +26,15 @@ extension EditorSession {
                 isNarrowed = true
             }
             buffer.attach(original: original, add: add)
-            journal = try SessionJournal(folder: made, add: add, fileSystem: saver.fileSystem)
+            if isNarrowed {
+                // Without a clone the journal can't be replayed safely after a save (the
+                // file then holds the saved bytes, not the opened ones), so a narrowed
+                // session keeps none: the folder is only the add buffer's, and marked closed
+                // so the next launch deletes it (docs/plans/M3c.md, D-d as built).
+                try made.markClosed()
+            } else {
+                journal = try SessionJournal(folder: made, add: add, fileSystem: saver.fileSystem)
+            }
         } catch {
             made.delete()
             throw error

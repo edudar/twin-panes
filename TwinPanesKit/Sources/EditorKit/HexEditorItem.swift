@@ -83,6 +83,7 @@ public final class HexEditorItem: WorkspaceItem {
         } else if isDirty {
             parts.append(session.wasRecovered ? "Recovered unsaved changes" : "Modified")
         }
+        if session.isNarrowed { parts.append("No crash recovery on this volume") }
         return parts.joined(separator: " · ")
     }
 
