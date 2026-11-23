@@ -32,6 +32,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         pathField.setAccessibilityIdentifier("browserPath")
 
         configureTable()
+        if let item { showSortIndicator(item.order) }
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
@@ -108,8 +109,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         tableView.scrollRowToVisible(0)
     }
 
-    /// Shows the item's current rows, keeping the selected entry selected by name.
-    func reloadKeepingSelection() {
+    /// Shows the item's current rows, keeping the selected entry selected by name;
+    /// after a re-sort, also in view. Batches don't scroll.
+    func reloadKeepingSelection(scrolling: Bool = false) {
         guard isViewLoaded, let item else { return }
         scrollView.isHidden = item.needsAccess
         accessPrompt.isHidden = !item.needsAccess
@@ -122,6 +124,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             tableView.scrollRowToVisible(row)
         } else {
             restoreSelection(selected.flatMap(row(named:)), parentRow: onParent)
+            if scrolling, tableView.selectedRow >= 0 {
+                tableView.scrollRowToVisible(tableView.selectedRow)
+            }
         }
     }
 

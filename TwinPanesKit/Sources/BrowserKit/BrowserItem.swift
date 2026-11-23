@@ -48,6 +48,8 @@ public final class BrowserItem: WorkspaceItem {
     private(set) var lister: FolderLister?
     /// Batches waiting for the merge that's running off the main actor.
     private var pendingBatch: [DirectoryEntry] = []
+    /// A new order waiting for the same; applied before the waiting batches.
+    private var pendingOrder: ListingOrder?
     private var isMerging = false
     private var listedWaiters: [CheckedContinuation<Void, Never>] = []
     /// Set when the sandbox refuses the folder until the user grants access.
@@ -87,9 +89,10 @@ public final class BrowserItem: WorkspaceItem {
             NSSound.beep()
             return false
         }
+        let order = self.order
         stopListing()
         needsAccess = problem != nil
-        listing = FolderListing(order: listing.order, showsHidden: listing.showsHidden)
+        listing = FolderListing(order: order, showsHidden: listing.showsHidden)
         folder = target
         scope = newScope
         hasListed = true
@@ -117,15 +120,28 @@ public final class BrowserItem: WorkspaceItem {
         lister = nil
         generation += 1
         pendingBatch = []
+        pendingOrder = nil
         isMerging = false
         isListing = false
+    }
+
+    /// The order the rows are in, or are being sorted into; it outlives navigation.
+    public private(set) var order = ListingOrder()
+
+    /// Sorts the rows (D-c): here for a small folder, off the main actor for a big one,
+    /// keeping the selected entry selected. Batches still arriving merge in the new order.
+    public func sort(by order: ListingOrder) {
+        guard order != self.order else { return }
+        self.order = order
+        pendingOrder = order
+        applyPending()
     }
 
     func received(_ event: FolderLister.Event) {
         switch event {
         case .batch(let batch):
             pendingBatch += batch
-            mergePending()
+            applyPending()
         case .done:
             isListing = false
             if !isMerging { listingFinished() }
@@ -137,33 +153,39 @@ public final class BrowserItem: WorkspaceItem {
         }
     }
 
-    /// Merges the waiting batches: here when the folder is small, else off the main
-    /// actor, one merge at a time; a result for an older navigation is dropped.
-    private func mergePending() {
-        guard !isMerging, !pendingBatch.isEmpty else { return }
+    /// Applies the waiting order and batches: here when the folder is small, else off
+    /// the main actor, one run at a time; a result for an older navigation is dropped.
+    private func applyPending() {
+        guard !isMerging, !pendingBatch.isEmpty || pendingOrder != nil else { return }
         let batch = pendingBatch
+        let order = pendingOrder
         pendingBatch = []
+        pendingOrder = nil
         let base = listing
+        let work: @Sendable () -> FolderListing = {
+            let sorted = order.map { base.sorted(by: $0) } ?? base
+            return batch.isEmpty ? sorted : sorted.merging(batch)
+        }
         if base.entries.count + batch.count <= FolderListing.mainActorLimit {
-            return show(base.merging(batch))
+            return show(work(), resorted: order != nil)
         }
         isMerging = true
         let wanted = generation
         Task.detached(priority: .userInitiated) {
-            let merged = base.merging(batch)
+            let merged = work()
             await MainActor.run { [weak self] in
                 guard let self, self.generation == wanted else { return }
                 self.isMerging = false
-                self.show(merged)
+                self.show(merged, resorted: order != nil)
             }
         }
     }
 
-    private func show(_ merged: FolderListing) {
+    private func show(_ merged: FolderListing, resorted: Bool) {
         listing = merged
-        controller.reloadKeepingSelection()
-        if !pendingBatch.isEmpty {
-            mergePending()
+        controller.reloadKeepingSelection(scrolling: resorted)
+        if !pendingBatch.isEmpty || pendingOrder != nil {
+            applyPending()
         } else if !isListing {
             listingFinished()
         } else {

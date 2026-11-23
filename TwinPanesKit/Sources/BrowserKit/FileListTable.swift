@@ -40,6 +40,15 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
     private enum Column: String, CaseIterable {
         case name = "Name", size = "Size", modified = "Date Modified", kind = "Kind"
 
+        var sortColumn: ListingOrder.Column {
+            switch self {
+            case .name: return .name
+            case .size: return .size
+            case .modified: return .modified
+            case .kind: return .kind
+            }
+        }
+
         var width: CGFloat {
             switch self {
             case .name: return 260
@@ -56,6 +65,8 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
             tableColumn.title = column.rawValue
             tableColumn.width = column.width
             tableColumn.minWidth = 50
+            tableColumn.sortDescriptorPrototype = NSSortDescriptor(
+                key: column.sortColumn.rawValue, ascending: true)
             tableView.addTableColumn(tableColumn)
         }
         tableView.dataSource = self
@@ -66,6 +77,25 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         tableView.target = self
         tableView.doubleAction = #selector(browserOpen(_:))
         tableView.setAccessibilityIdentifier("fileList")
+    }
+
+    /// The header's sort indicator, matching `order`.
+    func showSortIndicator(_ order: ListingOrder) {
+        let wanted = [NSSortDescriptor(key: order.column.rawValue, ascending: order.ascending)]
+        if tableView.sortDescriptors != wanted { tableView.sortDescriptors = wanted }
+    }
+
+    /// A header click: sort by that column (D-c). Folders stay on top either way.
+    func tableView(
+        _ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]
+    ) {
+        guard let item, let first = tableView.sortDescriptors.first,
+            let column = first.key.flatMap(ListingOrder.Column.init(rawValue:))
+        else { return }
+        var order = item.order
+        order.column = column
+        order.ascending = first.ascending
+        item.sort(by: order)
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
