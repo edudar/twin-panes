@@ -285,6 +285,60 @@ import TwinPanesCore
         #expect(controller.tableView(table, typeSelectStringFor: column, row: 1) == "sub")
     }
 
+    func makeFiles(_ count: Int, in folder: URL) throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for i in 0..<count {
+            FileManager.default.createFile(
+                atPath: folder.appendingPathComponent("f\(i).bin").path, contents: nil)
+        }
+    }
+
+    /// Past `FolderListing.mainActorLimit` batches merge off the main actor; the rows
+    /// still end up complete and in order (M4 step 4).
+    @Test func aBigFolderArrivesInBatchesAndInOrder() async throws {
+        defer { cleanUp() }
+        let big = root.appendingPathComponent("big")
+        try makeFiles(FolderListing.mainActorLimit + 1_500, in: big)
+        let item = browser(at: big)
+        _ = item.viewController.view
+        #expect(item.isListing)
+        await item.listed()
+        #expect(item.entries.count == FolderListing.mainActorLimit + 1_500)
+        let names = item.entries.map(\.name)
+        #expect(names == names.sorted { $0.localizedStandardCompare($1) == .orderedAscending })
+        #expect(item.controller.numberOfRows(in: item.controller.tableView) == names.count + 1)
+    }
+
+    /// A listing that a navigation superseded never reaches the new folder's rows.
+    @Test func lateBatchesFromTheOldFolderAreDropped() async throws {
+        defer { cleanUp() }
+        let big = root.appendingPathComponent("big")
+        try makeFiles(3_000, in: big)
+        let item = browser(at: root)
+        _ = item.viewController.view
+        await item.listed()
+        item.go(to: big)
+        let old = try #require(item.lister)
+        item.go(to: root.appendingPathComponent("sub"))
+        await item.listed()
+        await withCheckedContinuation { done in old.whenFinished { done.resume() } }
+        #expect(item.entries.map(\.name) == ["inner"])
+        #expect(item.folder.lastPathComponent == "sub")
+    }
+
+    /// Going up selects the folder you came from once it's listed, unless the user has
+    /// moved the selection meanwhile.
+    @Test func theFolderYouCameFromIsSelectedWhenItArrives() async throws {
+        defer { cleanUp() }
+        let item = browser(at: root.appendingPathComponent("sub"))
+        _ = item.viewController.view
+        await item.listed()
+        item.goToParent()
+        #expect(item.controller.isParentRowSelected)  // nothing listed yet
+        await item.listed()
+        #expect(item.controller.selectedEntry?.name == "sub")
+    }
+
     static func labels(in view: NSView?) -> [String] {
         guard let view else { return [] }
         let own = (view as? NSTextField).map { [$0.stringValue] } ?? []
