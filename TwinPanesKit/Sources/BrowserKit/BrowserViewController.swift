@@ -9,6 +9,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     weak var item: BrowserItem?
     let tableView = FileListTableView()
     let pathField = NSTextField()
+    /// The clickable path above the list (D-h); the field replaces it while editing.
+    let pathControl = NSPathControl()
     private let scrollView = NSScrollView()
     private let accessPrompt = NSStackView()
     private let accessLabel = NSTextField(wrappingLabelWithString: "")
@@ -31,6 +33,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         pathField.target = self
         pathField.action = #selector(pathEntered(_:))
         pathField.setAccessibilityIdentifier("browserPath")
+        pathField.delegate = self
+        configurePathBar()
 
         configureTable()
         if let item { showSortIndicator(item.order) }
@@ -51,7 +55,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         accessPrompt.addArrangedSubview(grant)
 
         let root = NSView()
-        for view in [pathField, scrollView, accessPrompt] as [NSView] {
+        for view in [pathControl, pathField, scrollView, accessPrompt] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
@@ -59,6 +63,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             pathField.topAnchor.constraint(equalTo: root.topAnchor, constant: 6),
             pathField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 6),
             pathField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -6),
+            pathControl.centerYAnchor.constraint(equalTo: pathField.centerYAnchor),
+            pathControl.leadingAnchor.constraint(equalTo: pathField.leadingAnchor),
+            pathControl.trailingAnchor.constraint(equalTo: pathField.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: pathField.bottomAnchor, constant: 6),
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -102,6 +109,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     func startShowing(selecting name: String?) {
         guard isViewLoaded, let item else { return }
         pathField.stringValue = item.folder.path
+        pathControl.url = item.folder
         scrollView.isHidden = item.needsAccess
         accessPrompt.isHidden = !item.needsAccess
         let request = accessRequest
@@ -234,8 +242,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     }
 
     @objc func browserGoToFolder(_ sender: Any?) {
-        view.window?.makeFirstResponder(pathField)
-        pathField.currentEditor()?.selectAll(nil)
+        editPath()
     }
 
     @objc func pathEntered(_ sender: NSTextField) {
@@ -266,7 +273,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     }
 
     @objc func browserGrantAccess(_ sender: Any?) {
-        guard let item, let window = view.window else { return }
+        guard item != nil, let window = view.window else { return }
         let panel = NSOpenPanel()
         panel.message = "Choose a folder to let Twin Panes browse it and everything inside it."
         panel.prompt = "Grant Access"

@@ -142,8 +142,16 @@ struct SmokeTest {
         }
 
         // The path field inside the browser: Tab must fall through to the key-view loop.
+        // The path bar (M4, D-h): its folders are shown; ⇧⌘G swaps in the editable field.
+        let bar = Self.view(in: browser.viewController.view, id: "browserPathBar") as? NSPathControl
+        check(
+            bar?.isHidden == false
+                && bar?.pathItems.last?.title == browser.folder.lastPathComponent,
+            "the path bar shows the folder's path")
         if let path = Self.view(in: browser.viewController.view, id: "browserPath") {
-            window.makeFirstResponder(path)
+            window.makeFirstResponder(browser.preferredFirstResponder)
+            check(dispatch(KeyChord("g", [.command, .shift]), in: window), "⇧⌘G dispatched")
+            check(!path.isHidden && bar?.isHidden == true, "⇧⌘G swaps the field in for the bar")
             chain = FocusChain.scopes(in: window)
             check(resolve(.tab, chain) == nil, "Tab in path field is not intercepted")
             check(resolve(.function(3), chain) == .browserView, "F3 in path field → browser.view")

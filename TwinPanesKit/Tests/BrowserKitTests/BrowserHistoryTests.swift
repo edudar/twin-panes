@@ -147,3 +147,57 @@ import Testing
         #expect(request.directory == folder && request.button == "Grant Access…")
     }
 }
+
+/// The path bar (docs/plans/M4.md, D-h, step 11).
+@MainActor
+@Suite struct BrowserPathBarTests {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("BrowserPathBarTests-\(UUID().uuidString)", isDirectory: true)
+        .standardizedFileURL
+
+    @Test func theBarShowsThePathAndItsFoldersNavigate() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("a/b"), withIntermediateDirectories: true)
+        let grants = FolderGrants(
+            defaults: UserDefaults(suiteName: root.appendingPathComponent("a/d").path)!)
+        let item = BrowserItem(folder: root.appendingPathComponent("a/b"), grants: grants) { _, _ in
+        }
+        let controller = item.controller
+        _ = controller.view
+        await item.listed()
+        #expect(controller.pathControl.url?.path == item.folder.path)
+        #expect(!controller.pathControl.isHidden && controller.pathField.isHidden)
+        #expect(controller.pathControl.pathItems.last?.title == "b")
+
+        controller.goToPathComponent(root)  // two folders up, selecting the one on the way
+        await item.listed()
+        #expect(item.folder.path == root.path && controller.selectedEntry?.name == "a")
+        #expect(item.canGoBack)
+    }
+
+    @Test func goToFolderSwapsInTheFieldAndEscapeSwapsBack() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let grants = FolderGrants(
+            defaults: UserDefaults(suiteName: root.appendingPathComponent("d").path)!)
+        let item = BrowserItem(folder: root, grants: grants) { _, _ in }
+        let controller = item.controller
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 300), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        defer { window.close() }
+        await item.listed()
+        controller.browserGoToFolder(nil)
+        #expect(controller.isEditingPath && controller.pathControl.isHidden)
+        #expect(controller.pathField.stringValue == root.path)
+        let editor = try #require(controller.pathField.currentEditor() as? NSTextView)
+        #expect(
+            controller.control(
+                controller.pathField, textView: editor,
+                doCommandBy: #selector(NSResponder.cancelOperation(_:))))
+        #expect(!controller.isEditingPath && !controller.pathControl.isHidden)
+    }
+}
