@@ -147,6 +147,11 @@ extension SmokeTest {
         check(menu(save, key: "s", in: window), "File › Save (⌘S) reaches the editor")
         await saved()
         check(!hex.isDirty && disk(0x20..<0x21) == [0x7E], "the save reaches the file")
+        let undo = #selector(HexEditorActions.undo(_:))
+        check(menu(undo, key: "z", in: window) && hex.isDirty, "undo after a save is unsaved")
+        check(menu(save, key: "s", in: window), "and File › Save saves it")
+        await saved()
+        check(disk(0x20..<0x21) == [0x20], "which puts the original byte back")
 
         // Save As: the menu item is there with ⇧⌘S; the panel itself can't be driven
         // here, so the tab's saveAs stands in for its OK button.
@@ -167,6 +172,7 @@ extension SmokeTest {
         let copy = url.deletingLastPathComponent()
             .appendingPathComponent("smoke-save-as-\(UUID().uuidString).bin")
         defer { try? FileManager.default.removeItem(at: copy) }
+        hex.hexView.go(to: 0x21)
         type("11", in: window)
         do { try await hex.saveAs(to: copy) } catch { check(false, "Save As: \(error)") }
         check(
@@ -176,6 +182,32 @@ extension SmokeTest {
         check(
             app.recentFiles.entries.contains { $0.url.lastPathComponent == copy.lastPathComponent },
             "the new file is a recent file")
+
+        // Closing with unsaved edits: the real close sheet, and its Save button.
+        type("22", in: window)
+        controller.layout.select(hex.id)
+        check(dispatch(KeyChord("w", .command), in: window), "⌘W closes the edited tab")
+        var sheet: NSWindow?
+        for _ in 0..<50 where sheet == nil {
+            await settle(milliseconds: 20)
+            sheet = window.attachedSheet
+        }
+        let button = sheet.flatMap { Self.button("Save", in: $0.contentView) }
+        check(button != nil, "the close sheet offers Save")
+        button?.performClick(nil)
+        for _ in 0..<100 where controller.layout.item(hex.id) != nil {
+            await settle(milliseconds: 20)
+        }
+        check(
+            controller.layout.item(hex.id) == nil && (try? Data(contentsOf: copy))?[0x22] == 0x22,
+            "Save in the close sheet saves, then closes the tab")
+    }
+
+    /// The button titled `title` under `view`, for pressing a sheet's buttons.
+    static func button(_ title: String, in view: NSView?) -> NSButton? {
+        guard let view else { return nil }
+        if let button = view as? NSButton, button.title == title { return button }
+        return view.subviews.lazy.compactMap { button(title, in: $0) }.first
     }
 
     /// A file without write permission opens read-only (M3b, D-b): typing changes
@@ -217,6 +249,16 @@ extension SmokeTest {
         item.hexView.go(to: last)
         type("7F", in: window)
         check((try? item.read(last..<item.length)) == Data([0x7F]), "edit at the end of 4 GiB")
+        // Saving clones the 4 GiB file and patches one byte: near-instant.
+        var saveError: Error?
+        let saving = await ContinuousClock().measure {
+            do { try await item.save() } catch { saveError = error }
+        }
+        print("  info saving one byte of a 4 GiB file took \(saving)")
+        check(
+            saveError == nil && !item.isDirty,
+            "save at the end of 4 GiB: \(saveError.map { "\($0)" } ?? "ok")")
+        check(saving < .seconds(2), "and it is near-instant (\(saving))")
 
         // Move to 1 GiB and warm its page before starting the scan so typing overlaps it.
         item.hexView.go(to: 1 << 30)
