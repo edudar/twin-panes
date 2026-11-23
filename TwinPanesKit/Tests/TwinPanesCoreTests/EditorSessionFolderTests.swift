@@ -90,11 +90,17 @@ private struct NoCloneFileSystem: FileSystem {
         #expect(try session.snapshot.read(4..<7) == Data([4, 0xAA, 6]))
     }
 
-    /// A clean session whose file changed before the first edit starts from the new bytes.
+    /// A clean session whose file changed before the first edit reloads and rejects the
+    /// stale edit, so the next edit starts from the new bytes.
     @Test func aFileChangedBeforeTheFirstEditIsReloaded() throws {
         defer { cleanUp() }
         let session = try session()
         try rewrite(0x11)
+        #expect(throws: EditorSessionError.reloadedBeforeEdit) {
+            try type(session, 0xAA, at: 5)
+        }
+        #expect(session.folder == nil && !session.isDirty)
+        #expect(try session.snapshot.read(4..<7) == Data([0x11, 0x11, 0x11]))
         try type(session, 0xAA, at: 5)
         #expect(try session.snapshot.read(4..<7) == Data([0x11, 0xAA, 0x11]))
         #expect(try session.folder?.manifest().identity == FileIdentity(url: url))

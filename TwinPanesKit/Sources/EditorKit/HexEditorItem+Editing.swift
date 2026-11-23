@@ -52,6 +52,10 @@ extension HexEditorItem {
         } catch EditorSessionError.readOnly(let reason) {
             host?.showStatus("“\(title)” is read-only: \(reason)")
             return false
+        } catch EditorSessionError.reloadedBeforeEdit {
+            controller.bytesChanged()
+            host?.showStatus("“\(title)” changed on disk and was reloaded")
+            return false
         } catch {
             host?.showStatus("Can't change the byte at \(Self.hex(offset)): \(error)")
             return false

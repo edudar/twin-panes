@@ -2,13 +2,20 @@ import Foundation
 
 /// The session folder and the clone made at the first edit (docs/plans/M3c.md, D-a).
 extension EditorSession {
-    /// Before the first edit: if the file changed since it was opened, reload it (the
-    /// session is still clean); then make the folder, clone the file into it and switch
-    /// the original pieces to the clone, so nothing another app does to the file can
-    /// change the bytes under the edits. A clone that fails leaves the session narrowed.
+    /// Before the first edit: if the file changed since it was opened, reload it and throw
+    /// `EditorSessionError.reloadedBeforeEdit` so the stale edit is dropped; otherwise make
+    /// the folder, clone the file into it and switch the original pieces to the clone, so
+    /// nothing another app does to the file can change the bytes under the edits. A clone
+    /// that fails leaves the session narrowed.
     func protectBeforeFirstEdit() throws {
         guard folder == nil, let root = sessionsRoot else { return }
-        if try !FileIdentity(url: url).isUnchanged(from: identity) { try reloadFromDisk() }
+        if try !FileIdentity(url: url).isUnchanged(from: identity) {
+            try reloadFromDisk()
+            fileState = .unchanged
+            lastOutsideChange = nil
+            watcher?.watch(url)
+            throw EditorSessionError.reloadedBeforeEdit
+        }
         let bookmark = try? url.bookmarkData(
             options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
         let made = try SessionFolder.create(

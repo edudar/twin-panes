@@ -5,11 +5,15 @@ public enum EditorSessionError: Error, Equatable, CustomStringConvertible {
     case readOnly(AccessMode.ReadOnlyReason)
     /// A reload can't discard edits while a save is running or queued.
     case saveInProgress
+    /// The file changed on disk before the first edit; the session reloaded it instead of
+    /// applying an edit computed from stale bytes.
+    case reloadedBeforeEdit
 
     public var description: String {
         switch self {
         case .readOnly(let reason): return "The file is read-only: \(reason)"
         case .saveInProgress: return "A save is already in progress"
+        case .reloadedBeforeEdit: return "The file changed on disk and was reloaded"
         }
     }
 }
@@ -183,8 +187,8 @@ public final class EditorSession {
 
     /// Overwrites `bytes` at `offset` and records an undo step from `selectionBefore` to
     /// `selectionAfter`; with `coalescing`, it extends the last step instead (a typing
-    /// burst). Throws `EditorSessionError.readOnly` or `ByteSourceError.truncated`
-    /// without changing anything.
+    /// burst). Throws `EditorSessionError.readOnly`, `.reloadedBeforeEdit` or
+    /// `ByteSourceError.truncated` without changing anything.
     public func overwrite(
         _ bytes: Data, at offset: UInt64, selectionBefore: Range<UInt64>,
         selectionAfter: Range<UInt64>, coalescing: Bool = false

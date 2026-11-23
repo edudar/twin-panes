@@ -40,7 +40,11 @@ extension HexEditorViewController {
     /// inspector redraw from the new version.
     func bytesChanged() {
         clearFindResults()
-        hexView.needsDisplay = true
+        if let item, hexView.layout.length != item.length {
+            hexView.contentLengthDidChange()
+        } else {
+            hexView.needsDisplay = true
+        }
         item?.updateStatus()
         updateInspector()
     }

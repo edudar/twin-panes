@@ -136,11 +136,27 @@ public final class HexView: NSView {
     /// Call after the data source's content changed.
     public func reloadData() {
         selection = HexSelection(length: length)
+        horizontalOffset = 0
+        finishReload(keepingRow: false)
+    }
+
+    /// Call after the data source's length changed while keeping the scroll position.
+    public func contentLengthDidChange() {
+        let previous = selection
+        var clamped = HexSelection(length: length)
+        if length > 0 {
+            clamped.move(to: previous.anchor)
+            clamped.move(to: previous.cursor, extending: previous.anchor != previous.cursor)
+        }
+        selection = clamped
+        finishReload(keepingRow: true)
+    }
+
+    private func finishReload(keepingRow: Bool) {
         pendingPrefetch = nil
         failedPrefetch = nil
         pendingNibble = nil
-        horizontalOffset = 0
-        relayout(keepingRow: false)
+        relayout(keepingRow: keepingRow)
         delegate?.hexViewSelectionDidChange(self)
     }
 
