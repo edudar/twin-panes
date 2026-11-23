@@ -9,6 +9,49 @@ final class FileListTableView: NSTableView, CommandScopeProviding {
     var commandScopes: [BindingScope] { [.item(.browser, part: "fileList")] }
 }
 
+/// A file-list cell: an optional 16-point icon and a label, laid out by frame: Auto
+/// Layout made building the first screenful of rows cost about 100 ms in Debug builds.
+final class FileCell: NSTableCellView {
+    init(icon: Bool) {
+        super.init(frame: .zero)
+        let label = NSTextField(labelWithString: "")
+        label.lineBreakMode = .byTruncatingMiddle
+        addSubview(label)
+        textField = label
+        if icon {
+            let image = NSImageView()
+            image.imageScaling = .scaleProportionallyDown
+            addSubview(image)
+            imageView = image
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func layout() {
+        super.layout()
+        var x: CGFloat = 2
+        if let imageView {
+            place(imageView, NSRect(x: x, y: (bounds.height - 16) / 2, width: 16, height: 16))
+            x += 22
+        }
+        guard let textField else { return }
+        let height = textField.intrinsicContentSize.height
+        place(
+            textField,
+            NSRect(
+                x: x, y: (bounds.height - height) / 2, width: max(0, bounds.width - x - 2),
+                height: height))
+    }
+
+    /// Layout runs again and again as the table rebuilds key-view loops: setting a frame
+    /// that hasn't changed still makes an image view work out its drawing rect.
+    private func place(_ view: NSView, _ frame: NSRect) {
+        if view.frame != frame { view.frame = frame }
+    }
+}
+
 /// Row icons, by type (docs/plans/M4.md, D-b). Applications have icons of their own, so
 /// they are looked up by path and the last few hundred kept.
 @MainActor
@@ -19,16 +62,24 @@ final class IconCache {
     private var pathOrder: [String] = []
     let pathLimit = 256
 
+    /// A 16-point copy: the workspace's icons carry every size, which an image view
+    /// weighs up each time it lays out.
+    static func small(_ icon: NSImage) -> NSImage {
+        let copy = icon.copy() as? NSImage ?? icon
+        copy.size = NSSize(width: 16, height: 16)
+        return copy
+    }
+
     func icon(for entry: DirectoryEntry) -> NSImage {
         guard entry.type.conforms(to: .application) else {
             if let icon = byType[entry.type] { return icon }
-            let icon = NSWorkspace.shared.icon(for: entry.type)
+            let icon = Self.small(NSWorkspace.shared.icon(for: entry.type))
             byType[entry.type] = icon
             return icon
         }
         let path = entry.url.path
         if let icon = byPath[path] { return icon }
-        let icon = NSWorkspace.shared.icon(forFile: path)
+        let icon = Self.small(NSWorkspace.shared.icon(forFile: path))
         byPath[path] = icon
         pathOrder.append(path)
         if pathOrder.count > pathLimit { byPath[pathOrder.removeFirst()] = nil }
@@ -112,35 +163,38 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         else { return nil }
         if showsParentRow, row == 0 { return parentCell(column) }
         guard let entry = entry(atRow: row) else { return nil }
-        let label = NSTextField(labelWithString: text(for: entry, column))
-        label.lineBreakMode = .byTruncatingMiddle
-        if column != .name {
-            label.textColor = .secondaryLabelColor
-            label.alignment = column == .size ? .right : .left
-            return label
+        let cell = reusableCell(column == .name ? "name" : "detail", icon: column == .name)
+        cell.textField?.stringValue = text(for: entry, column)
+        if column == .name {
+            cell.imageView?.image = IconCache.shared.icon(for: entry)
+        } else {
+            cell.textField?.alignment = column == .size ? .right : .left
         }
-        let icon = NSImageView(image: IconCache.shared.icon(for: entry))
-        icon.imageScaling = .scaleProportionallyDown
-        icon.widthAnchor.constraint(equalToConstant: 16).isActive = true
-        icon.heightAnchor.constraint(equalToConstant: 16).isActive = true
-        let stack = NSStackView(views: [icon, label])
-        stack.spacing = 6
-        return stack
+        return cell
     }
 
     /// The ".." row: a folder icon and ".." in the name column, the rest blank.
     private func parentCell(_ column: Column) -> NSView? {
         guard column == .name else { return nil }
-        let label = NSTextField(labelWithString: "..")
-        label.setAccessibilityLabel("Parent folder")
-        let icon = NSImageView(image: NSWorkspace.shared.icon(for: .folder))
-        icon.imageScaling = .scaleProportionallyDown
-        icon.widthAnchor.constraint(equalToConstant: 16).isActive = true
-        icon.heightAnchor.constraint(equalToConstant: 16).isActive = true
-        let stack = NSStackView(views: [icon, label])
-        stack.spacing = 6
-        stack.setAccessibilityIdentifier("parentRow")
-        return stack
+        let cell = reusableCell("parent", icon: true)
+        cell.textField?.stringValue = ".."
+        cell.textField?.setAccessibilityLabel("Parent folder")
+        cell.imageView?.image = NSWorkspace.shared.icon(for: .folder)
+        cell.setAccessibilityIdentifier("parentRow")
+        return cell
+    }
+
+    /// A cell from the table's reuse queue, or a new one (docs/plans/M4.md, step 13:
+    /// building every cell afresh cost tens of milliseconds per reload of 100k rows).
+    private func reusableCell(_ id: String, icon: Bool) -> FileCell {
+        let identifier = NSUserInterfaceItemIdentifier(id)
+        if let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? FileCell {
+            return cell
+        }
+        let cell = FileCell(icon: icon)
+        cell.identifier = identifier
+        if id == "detail" { cell.textField?.textColor = .secondaryLabelColor }
+        return cell
     }
 
     private func text(for entry: DirectoryEntry, _ column: Column) -> String {

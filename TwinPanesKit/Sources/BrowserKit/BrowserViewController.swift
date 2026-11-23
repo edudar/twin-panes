@@ -112,9 +112,11 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         pathControl.url = item.folder
         scrollView.isHidden = item.needsAccess
         accessPrompt.isHidden = !item.needsAccess
-        let request = accessRequest
-        accessLabel.stringValue = request.message
-        grantButton.title = request.button
+        if item.needsAccess {  // resolving the saved grants isn't free: only when shown
+            let request = accessRequest
+            accessLabel.stringValue = request.message
+            grantButton.title = request.button
+        }
         wantedSelection = name
         tableView.reloadData()
         restoreSelection(nil, parentRow: true)
@@ -137,7 +139,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         accessPrompt.isHidden = !item.needsAccess
         let selected = selectedName
         let onParent = selectedParentRow
-        tableView.reloadData()
+        refreshRows()
         if let wanted = wantedSelection, let row = row(named: wanted) {
             wantedSelection = nil
             restoreSelection(row, parentRow: false)
@@ -148,6 +150,23 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
                 tableView.scrollRowToVisible(tableView.selectedRow)
             }
         }
+    }
+
+    /// Shows the item's rows again. reloadData would build every visible row view anew
+    /// (with its key-view loop): tens of milliseconds for each sort of a big folder. The
+    /// table only needs the new count and fresh cells in the row views it already has.
+    func refreshRows() {
+        // A big change in the count (most of a folder deleted) is slower this way than
+        // a plain reload: NSTableView then reworks its row data from scratch.
+        guard abs(tableView.numberOfRows - numberOfRows(in: tableView)) <= 1_000 else {
+            return tableView.reloadData()
+        }
+        tableView.noteNumberOfRowsChanged()
+        var rows = IndexSet()
+        tableView.enumerateAvailableRowViews { _, row in rows.insert(row) }
+        let valid = rows.filteredIndexSet { $0 < tableView.numberOfRows }
+        tableView.reloadData(
+            forRowIndexes: valid, columnIndexes: IndexSet(0..<tableView.numberOfColumns))
     }
 
     /// The names whose rows a reload needs: the selected entry and the one to select.
