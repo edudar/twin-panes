@@ -80,7 +80,7 @@ public struct FolderListing: Sendable {
     public var hiddenCount: Int { showsHidden ? 0 : entries.count - rows.count }
 
     /// Above this many entries, sorting and merging belong off the main actor.
-    public static let mainActorLimit = 5_000
+    public static let mainActorLimit = 500
 
     /// Adds a batch from the lister: sorts it, then merges it into place.
     public func merging(_ batch: [DirectoryEntry]) -> FolderListing {

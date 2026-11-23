@@ -58,10 +58,13 @@ import Testing
         makeFiles(10, in: dir.appendingPathComponent("sub"))  // not listed: one level only
         FileManager.default.createFile(
             atPath: dir.appendingPathComponent(".dot").path, contents: nil)
-        let recorder = await run(FolderLister(folder: dir, batchSize: 1_000))
+        // A long interval, so batches are cut by size alone: 100, 400, 1,000, 1,000…
+        let recorder = await run(
+            FolderLister(folder: dir, batchSize: 100, maxBatchSize: 1_000, interval: .seconds(10)))
         let names = Set(recorder.batches.joined().map(\.name))
         #expect(names.count == 2_502 && names.contains("sub") && names.contains(".dot"))
-        #expect(recorder.batches.count >= 3 && recorder.batches.allSatisfy { $0.count <= 1_000 })
+        #expect(recorder.batches.map(\.count).prefix(3) == [100, 400, 1_000])
+        #expect(recorder.batches.allSatisfy { $0.count <= 1_000 })
         #expect(recorder.events.last == .done)
         #expect(recorder.batches.joined().first { $0.name == ".dot" }?.isHidden == true)
     }

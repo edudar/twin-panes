@@ -20,15 +20,23 @@ public final class FolderLister: Sendable {
 
     public let folder: URL
     let batchSize: Int
+    let maxBatchSize: Int
     let interval: Duration
     private let cancelled = Mutex(false)
     private let group = DispatchGroup()
 
-    /// A batch goes out at `batchSize` entries or when `interval` has passed since the
-    /// last one, whichever comes first.
-    public init(folder: URL, batchSize: Int = 2_000, interval: Duration = .milliseconds(50)) {
+    /// A batch goes out at its size or when `interval` has passed since the last one,
+    /// whichever comes first. The first is `batchSize`, so the first rows show at once;
+    /// each next one may be four times bigger, up to `maxBatchSize`, so a huge folder
+    /// arrives in a few deliveries rather than a stream of them queueing on the main
+    /// actor (docs/plans/M4.md, step 13).
+    public init(
+        folder: URL, batchSize: Int = 500, maxBatchSize: Int = 20_000,
+        interval: Duration = .milliseconds(50)
+    ) {
         self.folder = folder.standardizedFileURL
         self.batchSize = batchSize
+        self.maxBatchSize = max(batchSize, maxBatchSize)
         self.interval = interval
     }
 
@@ -68,11 +76,13 @@ public final class FolderLister: Sendable {
         var batch: [DirectoryEntry] = []
         let clock = ContinuousClock()
         var last = clock.now
+        var size = batchSize
         for case let url as URL in enumerator {
             if isCancelled { return }
             batch.append(DirectoryReader.entry(url))
-            if batch.count >= batchSize || clock.now - last >= interval {
+            if batch.count >= size || clock.now - last >= interval {
                 send(.batch(batch))
+                size = min(size * 4, maxBatchSize)
                 batch.removeAll(keepingCapacity: true)
                 last = clock.now
             }
