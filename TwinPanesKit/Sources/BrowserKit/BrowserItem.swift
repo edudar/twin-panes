@@ -126,6 +126,8 @@ public final class BrowserItem: WorkspaceItem {
 
     @discardableResult
     func navigate(to url: URL?, selecting name: String?, recording: Bool, quietly: Bool) -> Bool {
+        let step = StepTiming.start("navigate")
+        defer { step?.end() }
         let target = (url ?? folder).standardizedFileURL
         // Still under the same grant: keep the token rather than start access again.
         let grant = grants.grant(covering: target)
@@ -219,6 +221,8 @@ public final class BrowserItem: WorkspaceItem {
     }
 
     func received(_ event: FolderLister.Event) {
+        let step = StepTiming.start("batch")
+        defer { step?.end() }
         switch event {
         case .batch(let batch):
             pendingBatch += batch
@@ -312,6 +316,8 @@ public final class BrowserItem: WorkspaceItem {
     }
 
     private func show(_ applied: Applied, resorted: Bool) {
+        let step = StepTiming.start("show")
+        defer { step?.end() }
         replaceListing(with: applied.listing)
         if resorted || !(applied.changes.map(controller.applyRowChanges) ?? false) {
             controller.reloadKeepingSelection(
@@ -379,6 +385,8 @@ public final class BrowserItem: WorkspaceItem {
     public func willClose() { stopListing() }
 
     func updateStatus() {
+        let step = StepTiming.start("status")
+        defer { step?.end() }
         if let notice {
             host?.showStatus(notice)
         } else if needsAccess {

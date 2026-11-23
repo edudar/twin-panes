@@ -10,10 +10,13 @@ final class Heartbeat {
     private var timer: Timer?
     private var last = ContinuousClock.now
     private(set) var worst = Duration.zero
+    /// When the worst gap ended.
+    private(set) var worstEnd = ContinuousClock.now
 
     func start() {
         last = .now
         worst = .zero
+        worstEnd = last
         let timer = Timer(timeInterval: 0.005, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.beat() }
         }
@@ -23,7 +26,7 @@ final class Heartbeat {
 
     private func beat() {
         let now = ContinuousClock.now
-        worst = max(worst, now - last)
+        if now - last > worst { (worst, worstEnd) = (now - last, now) }
         last = now
     }
 
@@ -50,11 +53,16 @@ extension SmokeTest {
         defer { browser.go(to: before) }  // where the rest of the smoke test expects it
         let limit = 50.0
         let heart = Heartbeat()
+        let recorder = StepRecorder()
+        StepTiming.recorder = recorder
+        defer { StepTiming.recorder = nil }
         func gate(_ what: String, _ body: () async -> Void) async {
+            recorder.reset()
             heart.start()
             await body()
             let worst = heart.stop()
             print("  info \(what): worst main-thread gap \(String(format: "%.1f", worst)) ms")
+            if worst > limit { printSteps(recorder, during: heart) }
             check(worst <= limit, "\(what) never stalls the main thread over 50 ms")
         }
         let table = browser.preferredFirstResponder as? NSTableView
@@ -114,6 +122,22 @@ extension SmokeTest {
             browser.folder.path == folder.deletingLastPathComponent().standardizedFileURL.path,
             "a folder moved away sends the tab to its parent")
         await Task.detached { try? FileManager.default.removeItem(at: trashed) }.value
+    }
+
+    /// What the app's timed steps did during the heartbeat's worst gap; time not listed
+    /// was spent elsewhere (AppKit layout and display, or the system).
+    func printSteps(_ recorder: StepRecorder, during heart: Heartbeat) {
+        func ms(_ duration: Duration) -> String {
+            let (seconds, attoseconds) = duration.components
+            return String(format: "%.1f", Double(seconds) * 1_000 + Double(attoseconds) / 1e15)
+        }
+        let steps = recorder.steps(from: heart.worstEnd - heart.worst, to: heart.worstEnd)
+        guard !steps.isEmpty else { return print("       in the worst gap: no timed steps") }
+        for step in steps.prefix(8) {
+            print(
+                "       in the worst gap: \(step.name) ×\(step.count), \(ms(step.total)) ms"
+                    + " (longest \(ms(step.longest)) ms)")
+        }
     }
 
     /// Waits up to 10 s for `condition`, letting the run loop turn.

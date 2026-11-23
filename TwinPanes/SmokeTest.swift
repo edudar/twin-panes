@@ -19,6 +19,10 @@ struct SmokeTest {
         // the dev Mac and over 30 s on a hosted macOS 27 runner, before M4's 100k-file
         // folder (created and deleted in the run).
         let started = ContinuousClock.now
+        // App Nap would throttle the heartbeat timer of the M4 stall checks; the app
+        // in use is frontmost, which keeps it from napping too.
+        let activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .latencyCritical], reason: "smoke test")
         DispatchQueue.main.asyncAfter(deadline: .now() + 240) {
             print("SMOKE FAIL: timed out after 240 s")
             if ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true" {
@@ -42,6 +46,7 @@ struct SmokeTest {
                 Notification(name: NSApplication.willTerminateNotification))
             app.recentFiles.cleanUp()
             print("  info the smoke test took \(ContinuousClock.now - started)")
+            ProcessInfo.processInfo.endActivity(activity)
             print(failures.isEmpty ? "SMOKE OK" : "SMOKE FAIL: \(failures.count) check(s)")
             exit(failures.isEmpty ? 0 : 1)
         }

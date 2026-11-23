@@ -109,6 +109,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// A new folder: empties the list (it fills as batches arrive), selects the first
     /// row, and remembers `name` to select once it's listed.
     func startShowing(selecting name: String?) {
+        let step = StepTiming.start("start showing")
+        defer { step?.end() }
         guard isViewLoaded, let item else { return }
         pathField.stringValue = item.folder.path
         showPath(item.folder)
@@ -158,6 +160,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// (with its key-view loop): tens of milliseconds for each sort of a big folder. The
     /// table only needs the new count and fresh cells in the row views it already has.
     func refreshRows() {
+        let step = StepTiming.start("refresh rows")
+        defer { step?.end() }
         // A big change in the count (most of a folder deleted) is slower this way than
         // a plain reload: NSTableView then reworks its row data from scratch.
         guard abs(tableView.numberOfRows - numberOfRows(in: tableView)) <= 1_000 else {
@@ -179,6 +183,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// changed, so the scroll position, the selection and the other rows' views stay.
     /// The changes were worked out with the listing; false if there's no view to update.
     func applyRowChanges(_ changes: RowChanges) -> Bool {
+        let step = StepTiming.start("row changes")
+        defer { step?.end() }
         guard isViewLoaded, let item, !item.needsAccess else { return false }
         let offset = showsParentRow ? 1 : 0
         // Changes worked out against other rows than the table shows would make

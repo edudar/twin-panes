@@ -37,6 +37,8 @@ final class FileCell: NSTableCellView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        let step = StepTiming.start("cell draw")
+        defer { step?.end() }
         var x: CGFloat = 2
         if let icon {
             icon.draw(in: NSRect(x: x, y: (bounds.height - 16) / 2, width: 16, height: 16))
@@ -88,13 +90,17 @@ final class IconCache {
     func icon(for entry: DirectoryEntry) -> NSImage {
         guard entry.type.conforms(to: .application) else {
             if let icon = byType[entry.type] { return icon }
-            let icon = Self.small(NSWorkspace.shared.icon(for: entry.type))
+            let icon = StepTiming.measure("icon lookup") {
+                Self.small(NSWorkspace.shared.icon(for: entry.type))
+            }
             byType[entry.type] = icon
             return icon
         }
         let path = entry.url.path
         if let icon = byPath[path] { return icon }
-        let icon = Self.small(NSWorkspace.shared.icon(forFile: path))
+        let icon = StepTiming.measure("icon lookup") {
+            Self.small(NSWorkspace.shared.icon(forFile: path))
+        }
         byPath[path] = icon
         pathOrder.append(path)
         if pathOrder.count > pathLimit { byPath[pathOrder.removeFirst()] = nil }
@@ -195,6 +201,8 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
     )
         -> NSView?
     {
+        let step = StepTiming.start("cell config")
+        defer { step?.end() }
         guard let id = tableColumn?.identifier.rawValue, let column = Column(rawValue: id)
         else { return nil }
         if showsParentRow, row == 0 { return parentCell(column) }

@@ -29,6 +29,8 @@ extension BrowserItem {
     }
 
     func folderChanged(_ change: FolderWatcher.Change) {
+        let step = StepTiming.start("folder changed")
+        defer { step?.end() }
         switch change {
         case .names(let names):
             // The lister may still deliver these: read them once it's done instead.

@@ -25,6 +25,8 @@ extension BrowserViewController: NSTextFieldDelegate {
     /// icon: setting the control's `url` looks up every folder's own icon, 50-90 ms per
     /// navigation on a busy system.
     func showPath(_ folder: URL) {
+        let step = StepTiming.start("path bar")
+        defer { step?.end() }
         let parts = folder.standardizedFileURL.pathComponents
         pathURLs = parts.indices.map { i in
             URL(
