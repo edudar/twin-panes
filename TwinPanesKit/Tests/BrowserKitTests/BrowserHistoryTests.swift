@@ -114,3 +114,36 @@ import Testing
         #expect(enabled(#selector(BrowserViewController.browserForward(_:))))
     }
 }
+
+/// The access prompt asks for as much as the user means (docs/plans/M4.md, D-g).
+@Suite struct AccessRequestTests {
+    let home = URL(fileURLWithPath: "/Users/someone", isDirectory: true)
+
+    @Test func anExternalVolumeAsksForTheWholeVolume() {
+        let request = AccessRequest.for(
+            folder: URL(fileURLWithPath: "/Volumes/Backup Disk/Photos/2026"), lost: nil, home: home)
+        #expect(request.directory.path == "/Volumes/Backup Disk")
+        #expect(request.button == "Grant Access to “Backup Disk”…")
+        #expect(request.message.contains("“2026” is on “Backup Disk”"))
+    }
+
+    @Test func insideHomeAsksForHome() {
+        let request = AccessRequest.for(
+            folder: home.appendingPathComponent("Code/project"), lost: nil, home: home)
+        #expect(request.directory == home && request.message.contains("Desktop, Documents"))
+    }
+
+    @Test func aLostGrantIsAskedForAgainWhereItWas() {
+        let lost = URL(fileURLWithPath: "/Volumes/Old Name", isDirectory: true)
+        let request = AccessRequest.for(
+            folder: lost.appendingPathComponent("inner"), lost: lost, home: home)
+        #expect(request.directory == lost && request.button == "Grant Access Again…")
+        #expect(request.message.contains("lost it"))
+    }
+
+    @Test func elsewhereAsksForTheFolder() {
+        let folder = URL(fileURLWithPath: "/opt/data")
+        let request = AccessRequest.for(folder: folder, lost: nil, home: home)
+        #expect(request.directory == folder && request.button == "Grant Access…")
+    }
+}

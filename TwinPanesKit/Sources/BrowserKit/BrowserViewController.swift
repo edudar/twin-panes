@@ -12,6 +12,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     private let scrollView = NSScrollView()
     private let accessPrompt = NSStackView()
     private let accessLabel = NSTextField(wrappingLabelWithString: "")
+    let grantButton = NSButton()
 
     init(item: BrowserItem) {
         self.item = item
@@ -38,9 +39,12 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         scrollView.autohidesScrollers = true
 
         accessLabel.alignment = .center
-        let grant = NSButton(
-            title: "Grant Access…", target: self, action: #selector(browserGrantAccess(_:)))
+        let grant = grantButton
+        grant.bezelStyle = .push
+        grant.target = self
+        grant.action = #selector(browserGrantAccess(_:))
         grant.keyEquivalent = "\r"
+        grant.setAccessibilityIdentifier("grantAccess")
         accessPrompt.orientation = .vertical
         accessPrompt.spacing = 12
         accessPrompt.addArrangedSubview(accessLabel)
@@ -100,9 +104,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         pathField.stringValue = item.folder.path
         scrollView.isHidden = item.needsAccess
         accessPrompt.isHidden = !item.needsAccess
-        accessLabel.stringValue =
-            "Twin Panes needs your permission to show “\(item.title)”.\n"
-            + "Grant access once and it’s remembered."
+        let request = accessRequest
+        accessLabel.stringValue = request.message
+        grantButton.title = request.button
         wantedSelection = name
         tableView.reloadData()
         restoreSelection(nil, parentRow: true)
@@ -251,6 +255,16 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         }
     }
 
+    /// What the access prompt asks for in the current folder.
+    var accessRequest: AccessRequest {
+        guard let item else {
+            return AccessRequest(directory: URL(fileURLWithPath: "/"), button: "", message: "")
+        }
+        return AccessRequest.for(
+            folder: item.folder, lost: item.grants.lostGrant(covering: item.folder),
+            home: DirectoryReader.realHomeDirectory)
+    }
+
     @objc func browserGrantAccess(_ sender: Any?) {
         guard let item, let window = view.window else { return }
         let panel = NSOpenPanel()
@@ -258,7 +272,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         panel.prompt = "Grant Access"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
-        panel.directoryURL = item.folder
+        panel.directoryURL = accessRequest.directory
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
             self?.item?.granted(url)
