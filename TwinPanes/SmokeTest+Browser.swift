@@ -42,8 +42,11 @@ final class Heartbeat {
 
 extension SmokeTest {
     /// Done-when for M4 (docs/plans/M4.md): a 100k-file folder is listed, sorted, filtered,
-    /// scrolled and updated live in the real tab with no main-thread gap over 50 ms.
+    /// scrolled and updated live in the real tab with no main-thread gap over 50 ms on the
+    /// dev Mac, scaled to this machine (`stallLimit()`).
     func bigFolder(_ check: (Bool, String) -> Void, browser: BrowserItem, window: NSWindow) async {
+        // Measured first, while the machine is quiet.
+        let stall = Self.stallLimit()
         let count = 100_000
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("smoke-big-\(UUID().uuidString)", isDirectory: true)
@@ -51,7 +54,8 @@ extension SmokeTest {
         guard made else { return check(false, "create a 100k-file folder") }
         let before = browser.folder
         defer { browser.go(to: before) }  // where the rest of the smoke test expects it
-        let limit = 50.0
+        let limit = Self.milliseconds(stall.limit)
+        let limitText = String(format: "%.0f", limit)
         let heart = Heartbeat()
         let recorder = StepRecorder()
         StepTiming.recorder = recorder
@@ -63,7 +67,7 @@ extension SmokeTest {
             let worst = heart.stop()
             print("  info \(what): worst main-thread gap \(String(format: "%.1f", worst)) ms")
             if worst > limit { printSteps(recorder, during: heart) }
-            check(worst <= limit, "\(what) never stalls the main thread over 50 ms")
+            check(worst <= limit, "\(what) never stalls the main thread over \(limitText) ms")
         }
         let table = browser.preferredFirstResponder as? NSTableView
 
@@ -140,12 +144,63 @@ extension SmokeTest {
         await Task.detached { try? FileManager.default.removeItem(at: trashed) }.value
     }
 
+    static func milliseconds(_ duration: Duration) -> Double {
+        let (seconds, attoseconds) = duration.components
+        return Double(seconds) * 1_000 + Double(attoseconds) / 1e15
+    }
+
+    /// The reference workload's time on the dev Mac (M1 Pro, Debug build), fastest of 5.
+    static let referenceTime = Duration.milliseconds(48)
+
+    /// 50 ms on the dev Mac, scaled by how much slower this Mac runs the reference
+    /// workload (docs/plans/M4.md, performance pass): the same work stalls a slower
+    /// machine for longer, so CI's runners and slower Macs get a longer limit, and the
+    /// check means the same everywhere.
+    static func stallLimit() -> StallLimit {
+        let measured = StallLimit.fastest(of: 5) { referenceWork() }
+        let stall = StallLimit(
+            base: .milliseconds(50), measured: measured, reference: referenceTime)
+        print(
+            String(
+                format:
+                    "  info reference work: %.1f ms here, %.0f on the dev Mac; stall limit %.0f ms",
+                milliseconds(measured), milliseconds(referenceTime), milliseconds(stall.limit)))
+        return stall
+    }
+
+    /// Main-thread work like the browser's: a screenful of names and icons drawn into a
+    /// bitmap, and names compared as a sort by name does.
+    static func referenceWork() {
+        guard
+            let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 800, pixelsHigh: 800, bitsPerSample: 8,
+                samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                bytesPerRow: 0, bitsPerPixel: 0)
+        else { return }
+        rep.size = NSSize(width: 400, height: 400)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
+            .foregroundColor: NSColor.labelColor,
+        ]
+        let icon = NSWorkspace.shared.icon(for: .plainText)
+        for i in 0..<200 {
+            let y = CGFloat(i % 20) * 20
+            icon.draw(in: NSRect(x: 2, y: y, width: 16, height: 16))
+            ("file-\(i)-of-the-reference-work.txt" as NSString).draw(
+                at: NSPoint(x: 24, y: y), withAttributes: attributes)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        var names = (0..<5_000).map { "file\($0 * 7_919 % 5_000).txt" }
+        names.sort { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     /// What the app's timed steps did during the heartbeat's worst gap; time not listed
     /// was spent elsewhere (AppKit layout and display, or the system).
     func printSteps(_ recorder: StepRecorder, during heart: Heartbeat) {
         func ms(_ duration: Duration) -> String {
-            let (seconds, attoseconds) = duration.components
-            return String(format: "%.1f", Double(seconds) * 1_000 + Double(attoseconds) / 1e15)
+            String(format: "%.1f", Self.milliseconds(duration))
         }
         let steps = recorder.steps(from: heart.worstEnd - heart.worst, to: heart.worstEnd)
         guard !steps.isEmpty else { return print("       in the worst gap: no timed steps") }

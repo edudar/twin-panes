@@ -35,8 +35,11 @@ swift test --package-path TwinPanesKit
 The smoke test drives the built app. It opens two windows, browses a real
 folder, and opens a 4 GiB sparse file to check open time, frame time and memory.
 It also creates a 100,000-file folder and fails if listing, sorting, filtering,
-scrolling or live-updating it ever stalls the main thread for more than 50 ms
-(each step prints its worst gap). The run takes one to two and a half minutes:
+scrolling or live-updating it ever stalls the main thread for longer than its limit
+(each step prints its worst gap). The limit is 50 ms on the dev Mac, scaled to the
+machine: the smoke test first times a fixed drawing-and-sorting workload, and a Mac
+that runs it slower gets a proportionally longer limit, up to 4 times (200 ms). It
+prints both times and the limit. The run takes one to two and a half minutes:
 
 ```bash
 build/DerivedData/Build/Products/Debug/Twin\ Panes.app/Contents/MacOS/Twin\ Panes --smoke-test

@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.22 (2026-11-23). Living document; requirements will keep growing.
+Status: draft v0.23 (2026-11-23). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -1093,10 +1093,14 @@ byte histogram.
     the smoke test's editor undo checks once failed with the tab watching that
     folder. The smoke test moves the folder away instead (as Finder's Delete does).
     Revisit with M6's operations, which delete large trees themselves.
-  - *The 50 ms gate on CI*: CI crossed it on all three runners before the
-    performance pass (D44); the pass hasn't run on CI yet. A failing gate now prints
-    its slowest steps. Whether CI needs its own limit (hosted runners render without
-    a GPU, and the smoke test runs a Debug build) is decided with those numbers.
+  - *The stall gate on slower machines*: after the performance pass (D44), CI still
+    crossed 50 ms in three steps (listing 102–362 ms, scrolling 57–120 ms, switching
+    to dark 73–114 ms). The limit is now scaled to the machine rather than set per
+    environment: 50 ms times how much slower this Mac runs a fixed reference
+    workload than the dev Mac (48 ms there), capped at 4×. If CI still fails, its
+    printed factor and the slowest steps say whether the workload under-measures a
+    GPU-less runner or the step is truly slow (macOS 15's 362 ms listing gap had no
+    timed step in it).
   - *Volumes in the sidebar* and the global hidden-files default: M5 and M10.
   - *External volumes by hand*: granting a whole drive and a renamed volume asking
     again aren't automated (they need real drives), like the M3c volume spike.
