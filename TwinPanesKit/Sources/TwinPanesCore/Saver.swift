@@ -9,7 +9,8 @@ import Foundation
 public struct Saver: Sendable {
     public enum SaveError: Error, Equatable, CustomStringConvertible {
         /// The file has other hard links; a replace would break them (and the sandbox
-        /// refuses it). Strategy B, in place, comes in M3c.
+        /// refuses it), and writing in place (strategy B) needs the session's clone and a
+        /// ranged plan.
         case hardLinked
         /// The volume can't clone and has no room for a full copy.
         case notEnoughSpace(needed: UInt64, available: UInt64)
@@ -17,7 +18,7 @@ public struct Saver: Sendable {
         public var description: String {
             switch self {
             case .hardLinked:
-                return "The file has hard links, so it can’t be saved in place yet; use Save As"
+                return "The file has hard links and can’t be saved in place here; use Save As"
             case .notEnoughSpace(let needed, let available):
                 let format = { (bytes: UInt64) in
                     ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
@@ -38,14 +39,21 @@ public struct Saver: Sendable {
     }
 
     /// Writes `plan`'s ranges of `version` over the file at `url` and returns the file's
-    /// new identity (a replace gives it a new inode).
+    /// new identity (a replace gives it a new inode). A hard-linked file is written in
+    /// place (strategy B) when `inPlaceJournal` says where its save journal goes and the
+    /// plan has ranges; otherwise it's refused.
     public func save(
-        _ version: some ByteReading, plan: SavePlan, to url: URL
+        _ version: some ByteReading, plan: SavePlan, to url: URL, inPlaceJournal: URL? = nil
     ) throws
         -> FileIdentity
     {
         let identity = try FileIdentity(url: url)
-        guard identity.linkCount <= 1 else { throw SaveError.hardLinked }
+        guard identity.linkCount <= 1 else {
+            guard let journal = inPlaceJournal, !plan.writesWholeFile else {
+                throw SaveError.hardLinked
+            }
+            return try saveInPlace(version, plan: plan, to: url, as: identity, journal: journal)
+        }
         let folder = try fileSystem.replacementDirectory(for: url)
         defer { fileSystem.removeItem(at: folder) }
         let staged = folder.appendingPathComponent(url.lastPathComponent)
@@ -67,6 +75,31 @@ public struct Saver: Sendable {
         }
         fileSystem.close(descriptor)
         try fileSystem.replaceItem(at: url, with: staged)
+        return try FileIdentity(url: url)
+    }
+
+    /// Strategy B: journal the old bytes, write the ranges into the file itself, commit.
+    /// A failure rolls the file back at once; a crash leaves the journal for recovery.
+    private func saveInPlace(
+        _ version: some ByteReading, plan: SavePlan, to url: URL, as identity: FileIdentity,
+        journal: URL
+    ) throws -> FileIdentity {
+        try SaveJournal.begin(
+            journal, file: url, identity: identity, ranges: plan.ranges, fileSystem: fileSystem)
+        do {
+            let descriptor = try fileSystem.openForWriting(url)
+            do {
+                try write(plan.ranges, of: version, length: plan.length, to: descriptor, url.path)
+            } catch {
+                fileSystem.close(descriptor)
+                throw error
+            }
+            fileSystem.close(descriptor)
+            try SaveJournal.commit(journal, fileSystem: fileSystem)
+        } catch {
+            _ = try? SaveJournal.rollBackIfNeeded(journal, fileSystem: fileSystem)
+            throw error
+        }
         return try FileIdentity(url: url)
     }
 

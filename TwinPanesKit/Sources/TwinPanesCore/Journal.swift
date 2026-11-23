@@ -82,11 +82,11 @@ public enum JournalFormat {
         }
     }
 
-    private static func append<T: FixedWidthInteger>(_ value: T, to bytes: inout [UInt8]) {
+    static func append<T: FixedWidthInteger>(_ value: T, to bytes: inout [UInt8]) {
         withUnsafeBytes(of: value.littleEndian) { bytes += $0 }
     }
 
-    private static func read<T: FixedWidthInteger>(
+    static func read<T: FixedWidthInteger>(
         _: T.Type, _ bytes: some RandomAccessCollection<UInt8>, _ at: Int
     ) -> T {
         var value: T = 0

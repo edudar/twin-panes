@@ -8,11 +8,13 @@ import Testing
 /// The real file system, except where a test makes a step fail.
 private final class FaultyFileSystem: FileSystem {
     let real = RealFileSystem()
-    let failSync: Bool, failClone: Bool, capacity: UInt64?
+    /// Which flush fails (1 = the first), if any.
+    let failSyncAt: Int?, failClone: Bool, capacity: UInt64?
     let opened = Mutex<[URL]>([])
+    let syncs = Mutex(0)
 
-    init(failSync: Bool = false, failClone: Bool = false, capacity: UInt64? = nil) {
-        (self.failSync, self.failClone, self.capacity) = (failSync, failClone, capacity)
+    init(failSyncAt: Int? = nil, failClone: Bool = false, capacity: UInt64? = nil) {
+        (self.failSyncAt, self.failClone, self.capacity) = (failSyncAt, failClone, capacity)
     }
 
     func replacementDirectory(for url: URL) throws -> URL {
@@ -37,7 +39,10 @@ private final class FaultyFileSystem: FileSystem {
         try real.truncate(descriptor, to: length, path: path)
     }
     func fullSync(_ descriptor: Int32, path: String) throws {
-        if failSync { throw FileSystemError("flush", path, errno: EIO) }
+        let count = syncs.withLock {
+            $0 += 1; return $0
+        }
+        if count == failSyncAt { throw FileSystemError("flush", path, errno: EIO) }
         try real.fullSync(descriptor, path: path)
     }
     func close(_ descriptor: Int32) { real.close(descriptor) }
@@ -124,7 +129,7 @@ struct SaverTests {
         let before = try FileIdentity(url: url)
         let (buffer, opened) = try edited()
         let plan = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: true)
-        let failing = FaultyFileSystem(failSync: true)
+        let failing = FaultyFileSystem(failSyncAt: 1)
         #expect(throws: FileSystemError.self) {
             try Saver(fileSystem: failing).save(buffer.snapshot(), plan: plan, to: url)
         }
@@ -157,5 +162,67 @@ struct SaverTests {
         #expect(try Data(contentsOf: url) == original)
         let left = try FileManager.default.contentsOfDirectory(atPath: folder.path)
         #expect(Set(left) == ["file.bin", "copy.bin", "other.bin", "add"])
+    }
+
+    // MARK: Strategy B (M3c)
+
+    @Test func savesAHardLinkedFileInPlace() throws {
+        defer { cleanUp() }
+        let link = folder.appendingPathComponent("link")
+        try FileManager.default.linkItem(at: url, to: link)
+        let before = try FileIdentity(url: url)
+        let (buffer, opened) = try edited()
+        let plan = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: true)
+        let journal = folder.appendingPathComponent("save-journal.bin")
+        let identity = try Saver().save(
+            buffer.snapshot(), plan: plan, to: url, inPlaceJournal: journal)
+        let wanted = try buffer.snapshot().read(0..<300_000)
+        #expect(try Data(contentsOf: url) == wanted && Data(contentsOf: link) == wanted)
+        #expect(identity.key == before.key && identity.linkCount == 2)
+        #expect(!FileManager.default.fileExists(atPath: journal.path))
+        // A whole-file plan would journal the whole file: refused, Save As instead.
+        let whole = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: false)
+        #expect(throws: Saver.SaveError.hardLinked) {
+            try Saver().save(buffer.snapshot(), plan: whole, to: url, inPlaceJournal: journal)
+        }
+    }
+
+    /// A save that stops after writing into the file: in the app it's rolled back at once
+    /// (the flush failed), after a crash by recovery (the journal has no commit mark).
+    @Test func anUncommittedInPlaceSaveRollsBack() throws {
+        defer { cleanUp() }
+        try FileManager.default.linkItem(at: url, to: folder.appendingPathComponent("link"))
+        let (buffer, opened) = try edited()
+        let plan = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: true)
+        let journal = folder.appendingPathComponent("save-journal.bin")
+        // Flush 1 is the journal's, flush 2 the file's.
+        #expect(throws: FileSystemError.self) {
+            try Saver(fileSystem: FaultyFileSystem(failSyncAt: 2)).save(
+                buffer.snapshot(), plan: plan, to: url, inPlaceJournal: journal)
+        }
+        #expect(try Data(contentsOf: url) == original)
+        #expect(!FileManager.default.fileExists(atPath: journal.path))
+
+        // A crash right after the writes: journal written, file changed, no mark.
+        let fs = RealFileSystem()
+        try SaveJournal.begin(
+            journal, file: url, identity: try FileIdentity(url: url), ranges: plan.ranges,
+            fileSystem: fs)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.write(contentsOf: Data(repeating: 0xEE, count: 300_000))
+        try handle.close()
+        #expect(try SaveJournal.rollBackIfNeeded(journal, fileSystem: fs))
+        let back = try Data(contentsOf: url)
+        #expect(back[10..<12] == original[10..<12] && back[299_990...] == original[299_990...])
+        #expect(!FileManager.default.fileExists(atPath: journal.path))
+
+        // A journal cut short never got to the writes: nothing to undo.
+        try SaveJournal.begin(
+            journal, file: url, identity: try FileIdentity(url: url), ranges: plan.ranges,
+            fileSystem: fs)
+        try FileHandle(forWritingTo: journal).truncate(atOffset: 20)
+        let untouched = try Data(contentsOf: url)
+        #expect(try !SaveJournal.rollBackIfNeeded(journal, fileSystem: fs))
+        #expect(try Data(contentsOf: url) == untouched)
     }
 }
