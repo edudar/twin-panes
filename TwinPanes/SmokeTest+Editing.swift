@@ -93,19 +93,19 @@ extension SmokeTest {
             let alert = app.makeCloseAlert(for: session)
             let titles = alert.buttons.map(\.title)
             check(
-                titles == ["Discard Changes", "Cancel"],
-                "close prompt offers Discard/Cancel: \(titles)")
+                titles == ["Save", "Cancel", "Don’t Save"],
+                "a writable file's close prompt offers Save: \(titles)")
             check(
-                alert.buttons[0].hasDestructiveAction
-                    && alert.buttons[0].keyEquivalent == "d"
-                    && alert.buttons[0].keyEquivalentModifierMask == .command,
-                "Discard button is destructive with ⌘D")
-            check(alert.buttons[1].keyEquivalent == "\u{1b}", "Cancel button binds Escape")
+                alert.buttons[2].hasDestructiveAction && alert.buttons[2].keyEquivalent == "d"
+                    && alert.buttons[2].keyEquivalentModifierMask == .command,
+                "Don’t Save is destructive with ⌘D")
             check(
-                AppDelegate.closeDecision(for: .alertFirstButtonReturn, canSave: false) == .discard
-                    && AppDelegate.closeDecision(for: .alertSecondButtonReturn, canSave: false)
-                        == .cancel,
-                "Discard alert responses map to discard/cancel")
+                AppDelegate.closeDecision(for: .alertFirstButtonReturn, canSave: true) == .save
+                    && AppDelegate.closeDecision(for: .alertThirdButtonReturn, canSave: true)
+                        == .discard
+                    && AppDelegate.closeDecision(for: .alertFirstButtonReturn, canSave: false)
+                        == .discard,
+                "close prompt responses map to save, discard and cancel")
         }
         hex.discardChanges()
         check(!hex.isDirty && bytes(0x10..<0x11) == [0x10], "Discard drops the edits")

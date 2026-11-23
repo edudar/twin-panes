@@ -45,7 +45,7 @@ private final class StatusSpy: WorkspaceHost {
         item.hexView.insertText("ABCD")
         #expect(try byte(item, 0x10) == 0xAB && byte(item, 0x11) == 0xCD)
         #expect(item.isDirty && changes > 0)
-        #expect(item.statusText.hasSuffix("Modified (saving comes in M3b)"))
+        #expect(item.statusText.hasSuffix(" · Modified"))
         #expect(item.modifiedRanges(in: 0..<256) == [0x10..<0x12])
         // One burst of typing is one undo step, which restores bytes and cursor.
         item.controller.undo(nil)
@@ -60,7 +60,7 @@ private final class StatusSpy: WorkspaceHost {
     @Test func discardingDropsEditsAndHistory() throws {
         defer { try? FileManager.default.removeItem(at: url) }
         let item = try makeItem()
-        #expect(!item.canSave)
+        #expect(item.canSave)
         item.hexView.insertText("F")  // leaves pending high nibble at offset 0
         item.hexView.highlights = [0..<2]
         item.discardChanges()
@@ -246,7 +246,7 @@ private final class StatusSpy: WorkspaceHost {
         try item.session.overwrite(
             Data([0xEE]), at: 0x20, selectionBefore: 0x20..<0x21, selectionAfter: 0x21..<0x22)
         #expect(changes == 1 && item.hexView.highlights.isEmpty)
-        #expect(host.messages.last?.hasSuffix("Modified (saving comes in M3b)") == true)
+        #expect(host.messages.last?.hasSuffix(" · Modified") == true)
 
         item.hexView.go(to: 0x30)
         item.hexView.insertText("A")  // half a byte typed, then the session reverts

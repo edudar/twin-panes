@@ -75,8 +75,10 @@ public final class HexEditorItem: WorkspaceItem {
         parts.append("Size \(Self.byteCount(length))")
         if case .readOnly(let reason) = session.access {
             parts.append("Read-only: \(reason)")
+        } else if session.isSaving {
+            parts.append("Saving…")
         } else if isDirty {
-            parts.append("Modified (saving comes in M3b)")
+            parts.append("Modified")
         }
         return parts.joined(separator: " · ")
     }

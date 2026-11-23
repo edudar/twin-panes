@@ -7,6 +7,8 @@ import WorkspaceKit
 @objc public protocol HexEditorActions {
     @objc optional func undo(_ sender: Any?)
     @objc optional func redo(_ sender: Any?)
+    @objc optional func editorSave(_ sender: Any?)
+    @objc optional func editorRevertToSaved(_ sender: Any?)
     @objc optional func goToOffset(_ sender: Any?)
     @objc optional func copyAsHex(_ sender: Any?)
     @objc optional func copyAsText(_ sender: Any?)
@@ -50,6 +52,10 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     var allMatches: (pattern: SearchPattern, result: Searcher.AllMatches)?
     /// True between `hexView(_:overwrite:...)` and its matching `hexViewSelectionDidChange`.
     var applyingTypingEdit = false
+    /// Asks whether to revert the file named by the argument; a sheet unless a test
+    /// replaces it.
+    var confirmRevert: @MainActor (HexEditorViewController, String) async -> Bool =
+        HexEditorViewController.askToRevert
 
     init(item: HexEditorItem) {
         self.item = item

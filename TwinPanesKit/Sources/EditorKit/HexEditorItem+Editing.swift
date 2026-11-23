@@ -10,8 +10,11 @@ extension HexEditorItem {
     static let typingPause: Duration = .seconds(2)
 
     public var isDirty: Bool { session.isDirty }
-    /// Saving comes later in M3b; until then closing can only discard.
-    public var canSave: Bool { false }
+    /// A read-only file can't be saved; its close sheet offers only Discard.
+    public var canSave: Bool { session.access.isWritable }
+
+    /// Saves the session (File › Save, and Save in the close sheet).
+    public func save() async throws { try await session.save() }
     public var canUndo: Bool { session.canUndo }
     public var canRedo: Bool { session.canRedo }
 
@@ -60,6 +63,11 @@ extension HexEditorItem {
     /// hex view then moves the cursor, which refreshes the status line and inspector
     /// once. Anything else also ends the typing burst and drops a half-typed byte.
     func sessionChanged(_ change: EditorSession.Change) {
+        guard change == .edited else {  // a save started, finished or landed
+            updateStatus()
+            onChange?()
+            return
+        }
         let ownTyping = controller.applyingTypingEdit
         if !ownTyping { lastTyping = nil }
         if controller.isViewLoaded {
