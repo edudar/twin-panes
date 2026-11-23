@@ -23,6 +23,10 @@ public final class EditorSession {
     public enum Change: Equatable, Sendable {
         /// The bytes changed: an edit, undo, redo or revert.
         case edited
+        /// A save finished: the saved version, and maybe the file's identity, changed.
+        case saved
+        /// `isSaving` changed.
+        case saving
     }
 
     public let id = UUID()
@@ -31,11 +35,16 @@ public final class EditorSession {
     public let scope: SecurityScope?
     public let buffer: EditBuffer
     /// The file as last opened or saved.
-    public private(set) var identity: FileIdentity
+    public internal(set) var identity: FileIdentity
     public let access: AccessMode
     /// The version that is on disk.
-    public private(set) var savedTree: PieceTree
+    public internal(set) var savedTree: PieceTree
     public private(set) var undoStack = UndoStack()
+    /// Writes the file (see `save()`); a test can give it another `FileSystem`.
+    public let saver: Saver
+    /// The last save started or queued, and how many are running or queued (at most 2).
+    var saveTail: Task<Void, Error>?
+    var savesPending = 0
     private var observers: [Observer] = []
 
     private struct Observer {
@@ -44,9 +53,12 @@ public final class EditorSession {
     }
 
     /// Opens `url`. Throws `ByteSourceError` for anything but a readable regular file.
-    public init(url: URL, scope: SecurityScope? = nil, addDirectory: URL? = nil) throws {
+    public init(
+        url: URL, scope: SecurityScope? = nil, addDirectory: URL? = nil, saver: Saver = Saver()
+    ) throws {
         self.url = url
         self.scope = scope
+        self.saver = saver
         let source = try ByteSource(url: url)
         buffer = try EditBuffer(original: source, addDirectory: addDirectory)
         identity = source.identity
@@ -104,7 +116,7 @@ public final class EditorSession {
         return state
     }
 
-    private func notify(_ change: Change) {
+    func notify(_ change: Change) {
         observers.removeAll { $0.owner == nil }
         for observer in observers { observer.handler(change) }
     }

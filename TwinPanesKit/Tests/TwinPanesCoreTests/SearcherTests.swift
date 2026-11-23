@@ -14,7 +14,7 @@ final class Flag: Sendable {
 
 /// One-shot async signal backed by `Mutex` + `CheckedContinuation`, so tests await
 /// worker entry without spinning Swift's cooperative pool or blocking it on a semaphore.
-private final class SearchSignal: Sendable {
+final class SearchSignal: Sendable {
     private struct State: Sendable {
         var signaled = false
         var waiters: [CheckedContinuation<Void, Never>] = []
