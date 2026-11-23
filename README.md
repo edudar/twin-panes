@@ -34,14 +34,14 @@ Twin Panes is early and changing quickly. Right now it can:
   decode the bytes under the cursor in the data inspector (⌥⌘I).
 - **Navigate bytes**: go to an offset (⌘L), select ranges, and copy them as hex
   or text. A selection can also be saved to its own file.
-- **Overwrite bytes** by typing hex digits or text, with changed bytes
-  highlighted and unlimited undo and redo. Edits stay instant on a 4 GB file,
-  even while a search is running. Saving them comes next.
+- **Edit and save**: overwrite bytes by typing hex digits or text, with changed
+  bytes highlighted and unlimited undo and redo. Save (⌘S) writes only what
+  changed, so saving an edit to a 4 GB file takes a fraction of a second; Save As
+  and Revert to Saved work too. Read-only and locked files open for viewing and
+  say why they can't be edited.
 - **Change the view**: offsets in hex or decimal, byte grouping, and an ASCII or
   Latin-1 text column.
 - **Use Safari-style tabs**, each with a file icon and a close button.
-
-Edits can't be saved yet: closing an edited tab asks before discarding them.
 
 It runs in the macOS App Sandbox. It sees only the folders you grant it, and it
 remembers those grants.
@@ -50,8 +50,8 @@ remembers those grants.
 
 In rough order:
 
-1. **Saving**: saves that are near-instant and crash-safe, so edits made today
-   can be written back. Unsaved edits survive the app crashing.
+1. **Safer editing**: unsaved edits survive the app crashing or another app
+   changing the file, and hard-linked files can be saved in place.
 2. **The full file manager**: two panels, a sidebar, a Quick Look preview pane,
    an F-key bar, and copy, move, rename and trash with progress and conflict
    handling.

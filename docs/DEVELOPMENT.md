@@ -63,7 +63,7 @@ point one way only, enforced by `Package.swift`:
 
 | Module | Purpose | Depends on |
 |---|---|---|
-| `TwinPanesCore` | Byte source and page cache, directory listing, folder grants, security scopes. Foundation only. | none |
+| `TwinPanesCore` | Byte source and page cache, search, the edit model (piece tree, add buffer, undo), editor sessions and saving, directory listing, folder grants, security scopes. Foundation only. | none |
 | `WorkspaceKit` | The main window, slots, tabs, command registry and close workflow. | TwinPanesCore |
 | `HexViewKit` | The virtualized hex view, layout, selection and copy. | WorkspaceKit, TwinPanesCore |
 | `TextEditKit` | Text and Markdown modes (later milestones). | WorkspaceKit, TwinPanesCore |

@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.18 (2026-11-22). Living document; requirements will keep growing.
+Status: draft v0.19 (2026-11-22). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -42,7 +42,11 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D26 | **Piece tree = persistent AVL with join/split** (M3a, 2026-11-22) | Immutable `final class` nodes caching height, length and piece count; every edit is split + join, copying O(log n) nodes, so a snapshot or undo entry is an old root. Adjacent pieces that continue each other in one source merge. Chosen over a treap (random shape, harder to replay) and a B-tree (more code). See §4.2. |
 | D27 | **The add buffer is a file from M3a on** | An append-only temp file with the open partial page and an LRU of full pages in memory; bytes never change once written, so snapshots read it from any thread. M3c moves it into the session folder. See §4.2. |
 | D28 | **Edit model in TwinPanesCore, undo held by the tab** | `EditBuffer` (original + add buffer + current tree) hands out `Sendable` `EditSnapshot`s that are `ByteReading`; the `UndoStack` sits on the editor item because entries carry its selection. Undo/Redo are ordinary `undo:`/`redo:` actions on the editor's view controller, not `NSUndoManager`. M3b's `EditorSession` wraps these. |
-| D29 | **Closing an edited tab before saving exists** | `WorkspaceItem.canSave` (default true); when false the close sheet offers only Discard Changes and Cancel. The hex editor returns false until M3b. |
+| D29 | **Closing an edited tab before saving exists** | `WorkspaceItem.canSave` (default true); when false the close sheet offers only Discard Changes and Cancel. Since M3b the hex editor returns false only for read-only files. |
+| D30 | **`EditorSession` owns a file; `SessionRegistry` keeps one per file** (M3b) | The session holds the `EditBuffer`, the `UndoStack` (moved off the tab), `savedTree`, the file's `FileIdentity`, `AccessMode` and scope, and notifies observers; tabs keep presentation. The registry keys sessions by device and inode, holds them weakly, and follows a session to its new inode after a save; opening an open file brings its tab forward. |
+| D31 | **A save writes where the saved and current versions differ** (M3b) | `SavePlan` walks both piece trees side by side and writes every stretch taken from a different source or offset; that covers undone edits (undo after a save restores the original) and skips edits already saved. The whole file is written when the disk no longer matches the saved identity, size and mtime, or the length changed. Planned as the union of modified ranges; the exact comparison is as cheap. |
+| D32 | **Saving: strategy A behind a `FileSystem` seam, off the main actor, one at a time** (M3b) | `Saver` clones (or copies, after a free-space check) into `itemReplacementDirectory`, patches, `F_FULLFSYNC`s and swaps the file in with a coordinated replace. Every write goes through `FileSystem`, for M3c's fault injection. Saves run on a dispatch queue over a snapshot; edits typed meanwhile stay unsaved (`savedTree` = the version written). A save asked for while one runs is queued once. Hard-linked files get Save As until M3c's strategy B. |
+| D33 | **No rebasing after a save** (M3b) | Pieces keep pointing at the file as opened: after a replace the session reads the old inode through its open descriptor, so undo across saves needs no remapping. M3c moves the original pieces onto a clone made at the first edit. Save As moves the session (URL, scope, identity, access) to the new file and keeps its undo history. |
 
 ## 3. Constraints that drive the design
 
@@ -107,8 +111,10 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `AddBuffer` | M3a | append-only file of typed and pasted bytes, with in-memory recent pages (D27) |
 | `EditBuffer`, `EditSnapshot` | M3a | one file's original + add buffer + current tree; immutable `Sendable` snapshots that implement `ByteReading` (D28) |
 | `UndoStack` | M3a | stack of earlier piece-tree roots plus selection, with coalescing |
-| `EditorSession`, `SessionRegistry` | M3b, M3c | per-file session: dirty state, save/revert, file identity, security scope (M3b); backing generations, crash journal (M3c) |
-| `Saver` | M3b, M3c | save strategy A (clone, patch, replace) in M3b and B (in place + journal) in M3c (§4.3) |
+| `FileIdentity`, `AccessMode` | M3b | which file (device, inode) and how it looked (size, mtime, links); writable or read-only with the reason |
+| `EditorSession`, `SessionRegistry` | M3b, M3c | per-file session: undo, saved version, save, Save As, revert, file identity, access, security scope (M3b, D30); backing generations, crash journal (M3c) |
+| `SavePlan` | M3b | the ranges a save writes, or the whole file (D31) |
+| `Saver`, `FileSystem` | M3b, M3c | save strategy A (clone, patch, replace) and Save As in M3b, B (in place + journal) in M3c (§4.3, D32); every write goes through the `FileSystem` seam |
 
 - **Project layout (D20):**
 
@@ -340,6 +346,16 @@ volume/grant capability matrix (M0 spike, §5).
   file instead of a range patch; no separate save path.
 - Files without write permission, locked (`uchg`) or root-owned files open read-only
   (D14); "Save As…" is still available.
+- **As built (M3b):** strategy A only (D32). `EditorSession.save()` plans with
+  `SavePlan` (D31), runs `Saver` on a dispatch queue over a snapshot and, when it lands,
+  sets `savedTree` to the version written and takes the file's new identity; the
+  registry re-keys the session. One save runs at a time and one more can queue; quitting
+  waits for both (`finishSaving`). `AccessMode` reads a read-only volume, then a lock
+  (`uchg`/`schg`), then write permission; read-only tabs refuse typing with the reason
+  in the status line. Save As stages the whole version next to the target and moves or
+  swaps it in. Hard-linked files are refused with a pointer to Save As until M3c. The
+  4 GiB smoke save (clone, one byte, swap) takes about 70 ms. Undo across saves needs no
+  remapping because the session keeps reading the inode it opened (D33).
 
 ### 4.4 View: `HexView` (AppKit)
 - Custom `NSView` drawing only visible rows with Core Text, using pre-shaped glyphs for
@@ -977,8 +993,17 @@ byte histogram.
   - *Lazy `AddBuffer` creation*: open the backing file on first edit instead of at tab
     open; lands in M3c when `AddBuffer` moves into the session folder (created on the
     first edit, docs/plans/M3c.md).
-  - *`UndoStack`, multi-view observation, and `EditBuffer` actor isolation*: move
-    `UndoStack` from `HexEditorItem` onto `EditorSession` (with observer fan-out for
-    sibling views and enforced isolation on `EditBuffer`) in M3b.
+  - ~~*`UndoStack`, multi-view observation, and `EditBuffer` actor isolation*~~: done in
+    M3b. The undo stack lives on `EditorSession`, which notifies observers and is
+    main-actor isolated with its `EditBuffer`.
   - *Chunked `readSequential` for fragmented piece trees*: coalesce dense `.original`
     spans into chunked reads instead of one `F_NOCACHE` `pread` per piece in M8.
+- **From M3b (2026-11-22):**
+  - *Two tabs on one session*: the registry brings an open file's tab forward, so the
+    app never shows a session twice yet. When it does (M7 quick view, M11), find,
+    typing and the inspector must work per view: forcing two tabs onto one session
+    broke 31 smoke checks.
+  - *Smoke coverage*: typing during a save needs a held save, so it is a unit test
+    only; the Save As panel is stood in for by `saveAs(to:)`.
+  - *`AddBuffer` writes through `FileSystem`*: only `Saver` uses the seam in M3b; the
+    add buffer and the journal join it in M3c.
