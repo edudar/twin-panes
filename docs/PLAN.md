@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.21 (2026-11-23). Living document; requirements will keep growing.
+Status: draft v0.22 (2026-11-23). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -57,6 +57,7 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D41 | **Per-tab history, hidden files and sort order** (M4) | Back/Forward (⌘[ ⌘]) with the selection kept; ⇧⌘. filters without listing again; header clicks sort. All outlive navigation; tab restore keeps them in M5. |
 | D42 | **Access asks for as much as the user means** (M4) | The prompt asks for a whole external volume, the home folder, or a grant that stopped resolving (kept as lost, with its last path). Recent files that moved stay in the menu and offer to find them. A tab keeps its access token while it stays under one grant. |
 | D43 | **Path bar, packages** (M4) | A clickable `NSPathControl` (items built with the cached folder icon) that ⇧⌘G turns into the path field. Packages list as files, as in Finder; Show Package Contents (⌥⌘↓) enters one (§9 question 2). |
+| D44 | **Row drawing is cached; icon lookups never run on the main actor** (M4 performance pass) | Each icon is drawn once into a bitmap per type (or app path), screen scale and appearance, on the cache's own queue; until it's ready a cell has none. Each cell keeps its laid-out text line until its text, width or style changes, and takes its colour when drawn. The rows on screen are refreshed in place, and each row draws its cells into one layer. Kind is stored with each entry. See docs/plans/M4.md, "Performance pass". |
 
 ## 3. Constraints that drive the design
 
@@ -557,6 +558,16 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   access token under one grant. The smoke test lists, sorts, filters, scrolls and
   live-updates a real 100k-file folder with a main-thread heartbeat and fails on any
   gap over 50 ms (worst on the dev Mac: about 30–48 ms while listing).
+- **As built (M4 performance pass, docs/plans/M4.md):** D44. CI failed the 50 ms gate
+  on all three runners (listing up to 915 ms). A Time Profiler pass found cell drawing
+  (text layout, icons resampled from 1024 px), full row rebuilds per listing batch, a
+  lock shared by the Kind sort and the Kind column, and icon lookups on the main
+  actor. Fixed in that order of cost; the smoke test also found, through its new
+  stall report, a 20–50 ms loop added by the icon cache itself (fixed). `StepTiming`
+  times the tab's main-actor steps, and a gate over 50 ms prints what ran during its
+  worst gap. Cached size and date formatters were measured and dropped (under 0.1 ms
+  a screenful). Dev Mac, worst gaps over several runs: listing 20–41 ms (was 31–52),
+  scrolling 12–16 ms (was 23–37), the folder moved away 18–36 ms (was 29–67).
 
 ### 4.8 Single main frame: workspace model (D7)
 
@@ -1064,9 +1075,10 @@ byte histogram.
     the smoke test's editor undo checks once failed with the tab watching that
     folder. The smoke test moves the folder away instead (as Finder's Delete does).
     Revisit with M6's operations, which delete large trees themselves.
-  - *The 50 ms gate on CI*: on the dev Mac the worst gap is about 30-48 ms (listing
-    100k). Hosted runners are slower; if they cross it, look at the first rows'
-    drawing before loosening the gate.
+  - *The 50 ms gate on CI*: CI crossed it on all three runners before the
+    performance pass (D44); the pass hasn't run on CI yet. A failing gate now prints
+    its slowest steps. Whether CI needs its own limit (hosted runners render without
+    a GPU, and the smoke test runs a Debug build) is decided with those numbers.
   - *Volumes in the sidebar* and the global hidden-files default: M5 and M10.
   - *External volumes by hand*: granting a whole drive and a renamed volume asking
     again aren't automated (they need real drives), like the M3c volume spike.

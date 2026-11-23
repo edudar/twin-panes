@@ -449,6 +449,19 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
     }
 
+    /// True when every name cell on screen shows the icon for the table's current scale
+    /// and appearance (asking draws any that are missing). For tests and the smoke test.
+    var shownIconsAreCurrent: Bool {
+        var current = true
+        tableView.enumerateAvailableRowViews { rowView, row in
+            guard let cell = rowView.view(atColumn: 0) as? FileCell, let entry = entry(atRow: row)
+            else { return }
+            let wanted = icon(for: entry)
+            if wanted == nil || cell.icon !== wanted { current = false }
+        }
+        return current
+    }
+
     /// A cell from the table's reuse queue, or a new one.
     private func reusableCell(_ id: String) -> FileCell {
         let identifier = NSUserInterfaceItemIdentifier(id)

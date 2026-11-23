@@ -113,6 +113,8 @@ public final class BrowserItem: WorkspaceItem {
     public var icon: NSImage? { IconCache.shared.folder }
     public var viewController: NSViewController { controller }
     public var preferredFirstResponder: NSView? { controller.tableView }
+    /// Whether the rows on screen show the icons for the tab's scale and appearance.
+    public var shownIconsAreCurrent: Bool { controller.shownIconsAreCurrent }
 
     /// Lists `url` (default: the current folder again). On success the tab moves
     /// there and the rows arrive in batches; if access is needed the tab moves there and

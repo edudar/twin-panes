@@ -104,6 +104,16 @@ extension SmokeTest {
             recorder.steps(from: .now - .seconds(600), to: .now)
             .first { $0.name == "cell draw" }?.count ?? 0
         check(drawn >= 100, "scrolling draws the rows' cells (\(drawn) drawn)")
+        // Icons are drawn per appearance (performance pass, step 3): switching gives the
+        // rows on screen new ones, and the text is laid out again, without a stall.
+        for appearance in [NSAppearance.Name.darkAqua, .aqua] {
+            await gate("switching 100k rows to \(appearance.rawValue)") {
+                window.appearance = NSAppearance(named: appearance)
+                await waitFor { browser.shownIconsAreCurrent }
+            }
+            check(browser.shownIconsAreCurrent, "rows show \(appearance.rawValue) icons")
+        }
+        window.appearance = nil
         await gate("100 outside changes in a 100k folder") {
             await Task.detached { Self.changeOutside(folder) }.value
             // 25 deleted, one more removed, 50 created (renames keep the count). The

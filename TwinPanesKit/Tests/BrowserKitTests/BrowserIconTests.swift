@@ -136,7 +136,7 @@ import UniformTypeIdentifiers
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         FileManager.default.createFile(
-            atPath: root.appendingPathComponent("a.txt").path, contents: nil)
+            atPath: root.appendingPathComponent("a.twinpanes-icon-test").path, contents: nil)
         let prefs = root.appendingPathComponent("prefs").path
         let item = BrowserItem(
             folder: root, grants: FolderGrants(defaults: UserDefaults(suiteName: prefs)!)
@@ -153,13 +153,15 @@ import UniformTypeIdentifiers
         await item.listed()
         let table = item.controller.tableView
         window.contentView?.layoutSubtreeIfNeeded()
-        let row = try #require(item.controller.row(named: "a.txt"))
-        let entry = try #require(item.entries.first { $0.name == "a.txt" })
+        let row = try #require(item.controller.row(named: "a.twinpanes-icon-test"))
+        let entry = try #require(item.entries.first { $0.name == "a.twinpanes-icon-test" })
         let shared = IconCache.shared
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
             window.appearance = NSAppearance(named: appearance)
             window.contentView?.layoutSubtreeIfNeeded()
             let scale = window.backingScaleFactor
+            // No other test has this type: its dark icon isn't drawn yet.
+            if appearance == .darkAqua { #expect(!item.shownIconsAreCurrent) }
             // Each didChange reaches the table first, which gives its cells their icons.
             while true {
                 let wanted = shared.icon(for: entry, scale: scale, appearance: appearance)
@@ -167,6 +169,7 @@ import UniformTypeIdentifiers
                 if let wanted, cell?.icon === wanted { break }
                 await changed(shared, in: .default)
             }
+            #expect(item.shownIconsAreCurrent)
         }
     }
 }
