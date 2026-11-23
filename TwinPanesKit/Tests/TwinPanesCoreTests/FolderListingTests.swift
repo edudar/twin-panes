@@ -86,6 +86,25 @@ import UniformTypeIdentifiers
         #expect(rows == ["Ångström", "apple", "Banana", "img2.png", "img10.png"])
     }
 
+    /// A live update: remove the old versions, merge the new ones; the order holds.
+    @Test(arguments: orders)
+    func updatesKeepTheOrder(order: ListingOrder) {
+        let all = Self.entries(300, seed: 13)
+        let listing = FolderListing(order: order, showsHidden: true).merging(all)
+        let gone = Set(all.prefix(40).map(\.name))
+        let replaced = all.dropFirst(40).prefix(20).map { old in
+            DirectoryEntry(
+                url: old.url, name: old.name, isDirectory: old.isDirectory, isPackage: false,
+                isSymbolicLink: false, isHidden: old.isHidden, size: (old.size ?? 0) + 7_777,
+                modified: nil, type: old.type)
+        }
+        let updated = listing.removing(names: gone.union(replaced.map(\.name))).merging(replaced)
+        let expected = FolderListing(order: order, showsHidden: true)
+            .merging(Array(all.dropFirst(60)) + replaced)
+        #expect(updated.entries == expected.entries)
+        #expect(listing.removing(names: []).entries == listing.entries)
+    }
+
     @Test func hiddenEntriesAreFilteredNotDropped() {
         let all = Self.entries(400, seed: 5)
         let hidden = all.filter(\.isHidden).count

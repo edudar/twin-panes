@@ -64,6 +64,18 @@ import UniformTypeIdentifiers
         #expect(entries.allSatisfy { $0.kind.first?.isUppercase == true })
     }
 
+    @Test func anEntryIsReadAgainOnlyIfItIsThere() throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(DirectoryReader.entryIfPresent(dir.appendingPathComponent("file2.bin"))?.size == 2)
+        #expect(DirectoryReader.entryIfPresent(dir.appendingPathComponent("gone")) == nil)
+        try FileManager.default.createSymbolicLink(
+            at: dir.appendingPathComponent("dangling"),
+            withDestinationURL: dir.appendingPathComponent("nowhere"))
+        #expect(
+            DirectoryReader.entryIfPresent(dir.appendingPathComponent("dangling"))?.isSymbolicLink
+                == true)
+    }
+
     @Test func hiddenFilesOnRequest() throws {
         defer { try? FileManager.default.removeItem(at: dir) }
         let all = try DirectoryReader.entries(of: dir, includeHidden: true)

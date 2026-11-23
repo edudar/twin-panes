@@ -93,6 +93,13 @@ public enum DirectoryReader {
         return urls.map(entry).sorted(by: Self.finderOrder)
     }
 
+    /// The entry at `url` read again, or nil if nothing is there now (D-f).
+    public static func entryIfPresent(_ url: URL) -> DirectoryEntry? {
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else { return nil }
+        return entry(url)
+    }
+
     static func entry(_ url: URL) -> DirectoryEntry {
         let values = try? url.resourceValues(forKeys: Set(keys))
         let isLink = values?.isSymbolicLink ?? false

@@ -96,6 +96,16 @@ public struct FolderListing: Sendable {
         return copy
     }
 
+    /// Drops the entries called any of `names` (D-f: a live update removes an entry's
+    /// old version, then merges the new one, if any, as a batch).
+    public func removing(names: Set<String>) -> FolderListing {
+        guard !names.isEmpty else { return self }
+        var copy = self
+        copy.entries.removeAll { names.contains($0.name) }
+        copy.filter()
+        return copy
+    }
+
     public func sorted(by order: ListingOrder) -> FolderListing {
         var copy = self
         copy.order = order
