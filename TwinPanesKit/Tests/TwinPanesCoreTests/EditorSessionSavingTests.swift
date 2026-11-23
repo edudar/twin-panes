@@ -9,14 +9,14 @@ import Testing
 /// made to fail there. Counts the staged files it opens (one per save).
 final class GatedFileSystem: FileSystem {
     let real = RealFileSystem()
-    let holding: Bool
+    let holding: Mutex<Bool>
     let failing = Mutex(false)
     let makeMovedReadOnly = Mutex(false)
     let saves = Mutex(0)
     let entered = SearchSignal()
     private let gate = DispatchSemaphore(value: 0)
 
-    init(holding: Bool = false) { self.holding = holding }
+    init(holding: Bool = false) { self.holding = Mutex(holding) }
 
     func release() { gate.signal() }
 
@@ -47,7 +47,7 @@ final class GatedFileSystem: FileSystem {
         try real.truncate(descriptor, to: length, path: path)
     }
     func fullSync(_ descriptor: Int32, path: String) throws {
-        if holding, !path.hasSuffix("journal.bin") {
+        if holding.withLock({ $0 }), !path.hasSuffix("journal.bin") {
             entered.signal()
             gate.wait()  // on the save queue, not a Swift concurrency thread
         }
@@ -137,9 +137,19 @@ final class GatedFileSystem: FileSystem {
         let first = Task { try await session.save() }
         await fs.entered.wait()
         try type(session, 2, at: 2)
-        let second = Task { try await session.save() }
-        let third = Task { try await session.save() }
-        await Task.yield()
+        let secondQueued = SearchSignal()
+        let second = Task { @MainActor in
+            secondQueued.signal()
+            try await session.save()
+        }
+        await secondQueued.wait()
+        #expect(session.savesPending == 2)
+        let thirdQueued = SearchSignal()
+        let third = Task { @MainActor in
+            thirdQueued.signal()
+            try await session.save()
+        }
+        await thirdQueued.wait()
         try type(session, 3, at: 3)
         fs.release()
         fs.release()
@@ -179,6 +189,7 @@ final class GatedFileSystem: FileSystem {
     /// Quitting waits for running and queued saves before it closes anything.
     @Test func finishSavingWaitsForQueuedSaves() async throws {
         defer { cleanUp() }
+        @MainActor final class Finished { var value = false }
         let fs = GatedFileSystem(holding: true)
         let session = try session(fs)
         await session.finishSaving()  // nothing running: returns at once
@@ -186,18 +197,26 @@ final class GatedFileSystem: FileSystem {
         let first = Task { try await session.save() }
         await fs.entered.wait()
         try type(session, 2, at: 2)
-        let second = Task { try await session.save() }
-        let finished = Mutex(false)
-        let waiting = Task { @MainActor in
-            await session.finishSaving()
-            finished.withLock { $0 = true }
+        let secondQueued = SearchSignal()
+        let second = Task { @MainActor in
+            secondQueued.signal()
+            try await session.save()
         }
-        await Task.yield()
-        #expect(!finished.withLock { $0 } && session.isSaving)
+        await secondQueued.wait()
+        #expect(session.savesPending == 2)
+        let finished = Finished()
+        let waitingStarted = SearchSignal()
+        let waiting = Task { @MainActor in
+            waitingStarted.signal()
+            await session.finishSaving()
+            finished.value = true
+        }
+        await waitingStarted.wait()
+        #expect(!finished.value && session.isSaving)
         fs.release()
         fs.release()
         await waiting.value
-        #expect(finished.withLock { $0 } && !session.isSaving)
+        #expect(finished.value && !session.isSaving)
         #expect(try disk(1) == 1 && disk(2) == 2)
         try await first.value
         try await second.value

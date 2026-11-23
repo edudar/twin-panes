@@ -56,7 +56,7 @@ struct SaverTests {
     let folder = FileManager.default.temporaryDirectory
         .appendingPathComponent("SaverTests-\(UUID().uuidString)")
     let url: URL
-    let original = Data((0..<300_000).map { UInt8(truncatingIfNeeded: $0 &* 7) })
+    let original = Data((0..<1_200_000).map { UInt8(truncatingIfNeeded: $0 &* 7) })
 
     init() throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -73,7 +73,7 @@ struct SaverTests {
             original: ByteSource(url: url), addDirectory: folder.appendingPathComponent("add"))
         let opened = buffer.tree
         try buffer.overwrite(at: 10, with: Data([0xAA, 0xBB]))
-        try buffer.overwrite(at: 299_990, with: Data(repeating: 0xCC, count: 10))
+        try buffer.overwrite(at: 1_199_990, with: Data(repeating: 0xCC, count: 10))
         return (buffer, opened)
     }
 
@@ -87,13 +87,14 @@ struct SaverTests {
         let before = try FileIdentity(url: url)
         let (buffer, opened) = try edited()
         let plan = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: true)
-        #expect(plan.ranges == [10..<12, 299_990..<300_000])
+        #expect(plan.ranges == [10..<12, 1_199_990..<1_200_000])
 
         let identity = try Saver().save(buffer.snapshot(), plan: plan, to: url)
-        #expect(try Data(contentsOf: url) == buffer.snapshot().read(0..<300_000))
+        #expect(try Data(contentsOf: url) == buffer.snapshot().read(0..<1_200_000))
         #expect(identity == (try FileIdentity(url: url)) && identity.key != before.key)
         var value = [UInt8](repeating: 0, count: 8)
-        #expect(getxattr(url.path, "test.saver", &value, 8, 0, 0) == 4)
+        let length = getxattr(url.path, "test.saver", &value, 8, 0, 0)
+        #expect(length == 4 && Data(value.prefix(4)) == Data("kept".utf8))
         let resources = try url.resourceValues(forKeys: [.tagNamesKey, .creationDateKey])
         #expect(resources.tagNames == ["Saver"] && resources.creationDate == created)
         let mode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions]
@@ -105,10 +106,10 @@ struct SaverTests {
     @Test func aWholeFilePlanRewritesEverything() throws {
         defer { cleanUp() }
         let (buffer, opened) = try edited()
-        try Data(repeating: 0x11, count: 400_000).write(to: url)
+        try Data(repeating: 0x11, count: 1_300_000).write(to: url)
         let plan = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: false)
         _ = try Saver().save(buffer.snapshot(), plan: plan, to: url)
-        #expect(try Data(contentsOf: url) == buffer.snapshot().read(0..<300_000))
+        #expect(try Data(contentsOf: url) == buffer.snapshot().read(0..<1_200_000))
     }
 
     @Test func refusesHardLinkedFiles() throws {
@@ -135,15 +136,19 @@ struct SaverTests {
         }
         let staged = try #require(failing.opened.withLock { $0.first })
         #expect(!FileManager.default.fileExists(atPath: staged.deletingLastPathComponent().path))
+        #expect(try Data(contentsOf: url) == original)
+        #expect(try FileIdentity(url: url) == before)
 
         let full = FaultyFileSystem(failClone: true, capacity: 1000)
-        #expect(throws: Saver.SaveError.notEnoughSpace(needed: 300_000, available: 1000)) {
+        #expect(throws: Saver.SaveError.notEnoughSpace(needed: 1_200_000, available: 1000)) {
             try Saver(fileSystem: full).save(buffer.snapshot(), plan: plan, to: url)
         }
+        #expect(try Data(contentsOf: url) == original)
+        #expect(try FileIdentity(url: url) == before)
         // No room needed check passes when there is room: the copy path saves.
         let copying = FaultyFileSystem(failClone: true)
         _ = try Saver(fileSystem: copying).save(buffer.snapshot(), plan: plan, to: url)
-        #expect(try Data(contentsOf: url) == buffer.snapshot().read(0..<300_000))
+        #expect(try Data(contentsOf: url) == buffer.snapshot().read(0..<1_200_000))
         #expect(try FileIdentity(url: url).key != before.key)
     }
 
@@ -151,12 +156,12 @@ struct SaverTests {
     @Test func writesAWholeVersionToAnotherFile() throws {
         defer { cleanUp() }
         let (buffer, _) = try edited()
-        let wanted = try buffer.snapshot().read(0..<300_000)
+        let wanted = try buffer.snapshot().read(0..<1_200_000)
         let fresh = folder.appendingPathComponent("copy.bin")
         let identity = try Saver().write(buffer.snapshot(), to: fresh)
         #expect(try Data(contentsOf: fresh) == wanted && identity == FileIdentity(url: fresh))
         let other = folder.appendingPathComponent("other.bin")
-        try Data(repeating: 7, count: 500_000).write(to: other)
+        try Data(repeating: 7, count: 1_300_000).write(to: other)
         _ = try Saver().write(buffer.snapshot(), to: other)
         #expect(try Data(contentsOf: other) == wanted)
         #expect(try Data(contentsOf: url) == original)
@@ -176,7 +181,7 @@ struct SaverTests {
         let journal = folder.appendingPathComponent("save-journal.bin")
         let identity = try Saver().save(
             buffer.snapshot(), plan: plan, to: url, inPlaceJournal: journal)
-        let wanted = try buffer.snapshot().read(0..<300_000)
+        let wanted = try buffer.snapshot().read(0..<1_200_000)
         #expect(try Data(contentsOf: url) == wanted && Data(contentsOf: link) == wanted)
         #expect(identity.key == before.key && identity.linkCount == 2)
         #expect(!FileManager.default.fileExists(atPath: journal.path))
@@ -209,11 +214,11 @@ struct SaverTests {
             journal, file: url, identity: try FileIdentity(url: url), ranges: plan.ranges,
             fileSystem: fs)
         let handle = try FileHandle(forWritingTo: url)
-        try handle.write(contentsOf: Data(repeating: 0xEE, count: 300_000))
+        try handle.write(contentsOf: Data(repeating: 0xEE, count: 1_200_000))
         try handle.close()
         #expect(try SaveJournal.rollBackIfNeeded(journal, fileSystem: fs))
         let back = try Data(contentsOf: url)
-        #expect(back[10..<12] == original[10..<12] && back[299_990...] == original[299_990...])
+        #expect(back[10..<12] == original[10..<12] && back[1_199_990...] == original[1_199_990...])
         #expect(!FileManager.default.fileExists(atPath: journal.path))
 
         // A journal cut short never got to the writes: nothing to undo.

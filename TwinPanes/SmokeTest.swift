@@ -39,6 +39,7 @@ struct SmokeTest {
             // `exit` skips teardown: close sessions as quitting does.
             app.applicationWillTerminate(
                 Notification(name: NSApplication.willTerminateNotification))
+            app.recentFiles.cleanUp()
             print("  info the smoke test took \(ContinuousClock.now - started)")
             print(failures.isEmpty ? "SMOKE OK" : "SMOKE FAIL: \(failures.count) check(s)")
             exit(failures.isEmpty ? 0 : 1)
@@ -105,7 +106,10 @@ struct SmokeTest {
         check(
             opened.contains { $0.url.lastPathComponent == "data.bin" },
             "F4 opens the file in a hex editor tab")
-        for item in opened { first.layout.remove(item.id) }
+        for item in opened {
+            item.willClose()
+            first.layout.remove(item.id)
+        }
         first.layout.select(browser.id)
 
         // Dropping a folder onto the second window opens a browser tab in that window
@@ -364,7 +368,10 @@ struct SmokeTest {
         defer { try? FileManager.default.removeItem(at: url) }
         guard (try? Data(count: 200_000).write(to: url)) != nil, let hex = app.openFile(url)
         else { return check(false, "open a sample to truncate") }
-        defer { app.controller(containing: hex.id)?.layout.remove(hex.id) }
+        defer {
+            hex.willClose()
+            app.controller(containing: hex.id)?.layout.remove(hex.id)
+        }
         await settle()
         hex.session.stopWatching()
         do { try FileHandle(forWritingTo: url).truncate(atOffset: 1000) } catch {

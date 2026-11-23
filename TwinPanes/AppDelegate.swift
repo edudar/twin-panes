@@ -17,7 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             await self?.presentCloseSaveError(error, session: session)
         })
     lazy var spike = SandboxSpike(app: self)
-    let recentFiles = RecentFiles()
+    let recentFiles: RecentFiles =
+        ["--smoke-test", "--bench"].contains(where: CommandLine.arguments.contains)
+        ? .isolated() : RecentFiles()
     /// One session per open file (docs/plans/M3b.md, D-a).
     let sessions = SessionRegistry(sessionsRoot: SessionFolder.defaultRoot)
 

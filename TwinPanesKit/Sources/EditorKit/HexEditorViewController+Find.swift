@@ -174,6 +174,7 @@ extension HexEditorViewController {
         searchGeneration += 1
         findBar.setProgress(nil)
         findBar.show("Cancelled")
+        onSearchFinished?()
     }
 
     /// Runs `work` on the search queue, showing progress in the bar, then calls `done`
@@ -220,6 +221,7 @@ extension HexEditorViewController {
             case .failure(is CancellationError): self.findBar.show("Cancelled")
             case .failure(let error): self.findBar.show("Search failed: \(error)", isError: true)
             }
+            self.onSearchFinished?()
         }
     }
 }

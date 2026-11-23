@@ -143,10 +143,12 @@ private final class StatusLog: WorkspaceHost {
             url: url, sessionsRoot: folder.appendingPathComponent("Sessions"))
         session.startWatching()
         let item = HexEditorItem(session: session)
+        defer { item.willClose() }
         _ = item.controller.view
         let asked = AsyncSignal(), reloaded = AsyncSignal()
         final class Owner {}
         let owner = Owner()
+        defer { withExtendedLifetime(owner) {} }
         item.controller.askAboutOutsideChange = { _, title in
             #expect(title == "file.bin")
             asked.signal()
@@ -157,6 +159,8 @@ private final class StatusLog: WorkspaceHost {
         let handle = try FileHandle(forWritingTo: url)
         try handle.write(contentsOf: Data(repeating: 0x22, count: 256))
         try handle.close()
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(2)], ofItemAtPath: url.path)
         await asked.wait()
         if keepMine {
             #expect(try item.isDirty && item.read(0..<2) == Data([0xFF, 1]))
@@ -166,7 +170,6 @@ private final class StatusLog: WorkspaceHost {
             #expect(try !item.isDirty && item.read(0..<2) == Data([0x22, 0x22]))
             #expect(!item.statusText.contains("Changed on disk"))
         }
-        item.willClose()
     }
 
     @Test func readOnlyTabsCantSave() throws {

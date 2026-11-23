@@ -33,8 +33,9 @@ struct FileIdentityTests {
         let descriptor = handle.fileDescriptor
         #expect(try FileIdentity(descriptor: descriptor, path: url.path) == identity)
         try handle.close()
+        // Not the closed descriptor: a parallel test may have been given its number.
         #expect(throws: ByteSourceError.openFailed(path: url.path, errno: EBADF)) {
-            try FileIdentity(descriptor: descriptor, path: url.path)
+            try FileIdentity(descriptor: -1, path: url.path)
         }
         let other = try FileIdentity(url: try file("b.bin"))
         #expect(other.key != identity.key)
@@ -103,6 +104,7 @@ struct FileIdentityTests {
     /// A read-only volume can't be mounted in a test, so the order of the reasons is
     /// checked on the decision itself.
     @Test func reasonsAreReportedVolumeFirst() {
+        defer { cleanUp() }
         let locked = UInt32(UF_IMMUTABLE), systemLocked = UInt32(SF_IMMUTABLE)
         #expect(
             AccessMode.classify(volumeReadOnly: true, fileFlags: locked, canWrite: false)

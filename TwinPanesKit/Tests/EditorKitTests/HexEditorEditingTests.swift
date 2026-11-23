@@ -29,10 +29,12 @@ private final class StatusSpy: WorkspaceHost {
         try #require(try item.read(offset..<(offset + 1)).first)
     }
 
-    func waitForSearch(_ controller: HexEditorViewController) async throws {
-        for _ in 0..<400 where controller.isSearching {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+    func waitForSearch(_ controller: HexEditorViewController) async {
+        guard controller.isSearching else { return }
+        let finished = AsyncSignal()
+        controller.onSearchFinished = { finished.signal() }
+        defer { controller.onSearchFinished = nil }
+        await finished.wait()
     }
 
     @Test func typingEditsMarksDirtyAndUndoes() throws {
@@ -128,7 +130,7 @@ private final class StatusSpy: WorkspaceHost {
         controller.findBar.kind = .hex
         controller.findBar.field.stringValue = "20"
         controller.findAll()
-        try await waitForSearch(controller)
+        await waitForSearch(controller)
         #expect(item.hexView.highlights == [0x20..<0x21])
         item.hexView.go(to: 0x40)
         item.hexView.insertText("0")
@@ -157,7 +159,7 @@ private final class StatusSpy: WorkspaceHost {
 
         gated.release()
         await gated.waitUntilFinished()
-        try await waitForSearch(controller)
+        await waitForSearch(controller)
         // Stale pre-edit results must not overwrite the cursor, highlights, or cache.
         #expect(controller.allMatches == nil)
         #expect(item.hexView.highlights.isEmpty)
@@ -167,7 +169,7 @@ private final class StatusSpy: WorkspaceHost {
         // A follow-up Find Next searches the edited snapshot (where "30 31" is now gone).
         controller.searchSourceOverride = nil
         controller.find(.forward)
-        try await waitForSearch(controller)
+        await waitForSearch(controller)
         #expect(controller.findBar.statusLabel.stringValue == "Not found")
     }
 
@@ -207,12 +209,12 @@ private final class StatusSpy: WorkspaceHost {
         controller.findBar.kind = .hex
         controller.findBar.field.stringValue = "DE AD"
         controller.findAll()
-        try await waitForSearch(controller)
+        await waitForSearch(controller)
         #expect(item.hexView.highlights == [0x20..<0x22])
 
         controller.findBar.field.stringValue = "20 21"
         controller.find(.forward)
-        try await waitForSearch(controller)
+        await waitForSearch(controller)
         #expect(controller.findBar.statusLabel.stringValue == "Not found")
     }
 

@@ -8,15 +8,50 @@ import TwinPanesCore
 final class RecentFiles: NSObject, NSMenuDelegate {
     static let limit = 10
     private let store: BookmarkStore
+    private let recordSystemRecents: Bool
+    private let isolatedFolder: URL?
+    private let isolatedSuite: String?
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        recordSystemRecents: Bool = true,
+        isolatedFolder: URL? = nil,
+        isolatedSuite: String? = nil
+    ) {
+        self.recordSystemRecents = recordSystemRecents
+        self.isolatedFolder = isolatedFolder
+        self.isolatedSuite = isolatedSuite
         store = BookmarkStore(defaults: defaults, key: "RecentFiles.bookmarks", limit: Self.limit)
+    }
+
+    /// Ephemeral store in a temporary folder that does not touch user preferences or
+    /// system recents (for `--smoke-test` / `--bench`).
+    static func isolated() -> RecentFiles {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("smoke-recents-\(UUID().uuidString)", isDirectory: true)
+            .resolvingSymlinksInPath()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let suite = dir.appendingPathComponent("defaults").path
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            preconditionFailure("Unable to create isolated UserDefaults suite at \(suite)")
+        }
+        return RecentFiles(
+            defaults: defaults,
+            recordSystemRecents: false,
+            isolatedFolder: dir,
+            isolatedSuite: suite)
+    }
+
+    /// Removes the temporary preferences domain and folder created by `isolated()`.
+    func cleanUp() {
+        if let isolatedSuite { UserDefaults().removePersistentDomain(forName: isolatedSuite) }
+        if let isolatedFolder { try? FileManager.default.removeItem(at: isolatedFolder) }
     }
 
     /// Records `url` at the top of the list. Call while access to it is active.
     func note(_ url: URL) {
         guard (try? store.add(url)) != nil else { return }
-        NSDocumentController.shared.noteNewRecentDocumentURL(url)
+        if recordSystemRecents { NSDocumentController.shared.noteNewRecentDocumentURL(url) }
     }
 
     func clear() { store.removeAll() }

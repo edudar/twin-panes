@@ -18,9 +18,9 @@ import Testing
 
     func cleanUp() { try? FileManager.default.removeItem(at: folder) }
 
-    func session() throws -> EditorSession {
+    func session(saver: Saver = Saver()) throws -> EditorSession {
         let session = try EditorSession(
-            url: url, sessionsRoot: folder.appendingPathComponent("Sessions"))
+            url: url, saver: saver, sessionsRoot: folder.appendingPathComponent("Sessions"))
         session.startWatching()
         return session
     }
@@ -35,6 +35,8 @@ import Testing
         let handle = try FileHandle(forWritingTo: url)
         try handle.write(contentsOf: Data(repeating: byte, count: 64))
         try handle.close()
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(2)], ofItemAtPath: url.path)
     }
 
     final class Waiter {
@@ -55,6 +57,10 @@ import Testing
     @Test func aCleanSessionReloadsSilently() async throws {
         defer { cleanUp() }
         let session = try session()
+        defer {
+            session.stopWatching()
+            session.close()
+        }
         let waiter = await wait(for: .edited, from: session)
         try rewrite(0x11)
         await waiter.signal.wait()
@@ -67,6 +73,10 @@ import Testing
     @Test func unsavedEditsSurviveAnOutsideChange() async throws {
         defer { cleanUp() }
         let session = try session()
+        defer {
+            session.stopWatching()
+            session.close()
+        }
         try type(session, 0xAA, at: 5)
         let waiter = await wait(for: .fileChanged, from: session)
         try rewrite(0xEE)
@@ -81,12 +91,25 @@ import Testing
     /// Done-when for M3c: our own saves never count as outside changes.
     @Test func savingRaisesNothing() async throws {
         defer { cleanUp() }
-        let session = try session()
-        try type(session, 0xAA, at: 5)
-        try await session.save()
-        try type(session, 0xBB, at: 6)
-        try await session.save()
+        let fs = GatedFileSystem(holding: true)
+        let session = try session(saver: Saver(fileSystem: fs))
+        defer {
+            session.stopWatching()
+            session.close()
+        }
         let waiter = await wait(for: .fileChanged, from: session)
+        try type(session, 0xAA, at: 5)
+        let saving = Task { try await session.save() }
+        await fs.entered.wait()
+        try type(session, 0xBB, at: 6)  // typed mid-save: isDirty stays true when save finishes
+        fs.release()
+        try await saving.value
+        #expect(session.isDirty && session.fileState == .unchanged && waiter.fileChanges == 0)
+
+        fs.holding.withLock { $0 = false }
+        try await session.save()
+        #expect(!session.isDirty && waiter.fileChanges == 0)
+
         try type(session, 0xCC, at: 7)
         try rewrite(0xEE)  // the first outside change: only it is reported
         await waiter.signal.wait()
@@ -96,6 +119,10 @@ import Testing
     @Test func aDeletedFileIsWrittenBackBySave() async throws {
         defer { cleanUp() }
         let session = try session()
+        defer {
+            session.stopWatching()
+            session.close()
+        }
         try type(session, 0xAA, at: 5)
         let waiter = await wait(for: .fileChanged, from: session)
         try FileManager.default.removeItem(at: url)
@@ -109,6 +136,10 @@ import Testing
     @Test func reloadDropsTheEditsForTheFileOnDisk() async throws {
         defer { cleanUp() }
         let session = try session()
+        defer {
+            session.stopWatching()
+            session.close()
+        }
         try type(session, 0xAA, at: 5)
         let made = try #require(session.folder)
         let waiter = await wait(for: .fileChanged, from: session)

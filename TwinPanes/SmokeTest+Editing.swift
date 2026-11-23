@@ -28,11 +28,15 @@ extension SmokeTest {
     /// and performs it. (The smoke-test app isn't frontmost, so its window never becomes
     /// key and the menu's own key-equivalent path has no target.) Finds the item by its
     /// action, since validation may retitle it ("Undo Typing"), and checks its key.
-    func menu(_ action: Selector, key: String, in window: NSWindow) -> Bool {
+    func menu(
+        _ action: Selector, key: String, modifiers: NSEvent.ModifierFlags = .command,
+        in window: NSWindow
+    ) -> Bool {
         guard
             let item = NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items)
                 .first(where: { $0.action == action }),
-            item.keyEquivalent.lowercased() == key
+            item.keyEquivalent.lowercased() == key,
+            item.keyEquivalentModifierMask == modifiers
         else { return false }
         var responder = window.firstResponder
         while let current = responder, !current.responds(to: action) {
@@ -88,7 +92,9 @@ extension SmokeTest {
         check(bytes(0x11..<0x13) == [0x11, 0x12], "Undo reverts the text-column typing")
         check(menu(undo, key: "z", in: window), "Undo again")
         check(bytes(0x10..<0x11) == [0x10] && !hex.isDirty, "Undo again reverts the hex typing")
-        check(menu(redo, key: "z", in: window), "Edit › Redo (⇧⌘Z) reaches the editor")
+        check(
+            menu(redo, key: "z", modifiers: [.command, .shift], in: window),
+            "Edit › Redo (⇧⌘Z) reaches the editor")
         check(bytes(0x10..<0x11) == [0xAB], "Redo brings the hex typing back")
 
         let dirty = app.closeCoordinator.dirtySessions(closing: [hex])
@@ -129,7 +135,10 @@ extension SmokeTest {
         guard let hex = app.openFile(url), let controller = app.controller(containing: hex.id),
             let window = controller.window
         else { return check(false, "the save sample opens") }
-        defer { controller.layout.remove(hex.id) }
+        defer {
+            hex.willClose()
+            controller.layout.remove(hex.id)
+        }
         check(window === target, "it opens in the window under test")
         await settle()
         window.makeFirstResponder(hex.hexView)
@@ -323,7 +332,10 @@ extension SmokeTest {
             let window = controller.window
         else { return check(false, "a read-only file opens") }
         check(window === target, "it opens in the window under test")
-        defer { controller.layout.remove(item.id) }
+        defer {
+            item.willClose()
+            controller.layout.remove(item.id)
+        }
         await settle()
         window.makeFirstResponder(item.hexView)
         type("FF", in: window)

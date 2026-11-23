@@ -47,6 +47,8 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     var searchSource: (any ByteReading)? { searchSourceOverride ?? item?.snapshot }
     var searchTask: Task<Void, Never>?
     var searchGeneration = 0
+    /// Internal test seam called on the main actor when the active search finishes or cancels.
+    var onSearchFinished: (@MainActor () -> Void)?
     /// The match the last find selected; "next" starts after it.
     var lastMatch: Range<UInt64>?
     /// The result of the last Find All, while its pattern is still the bar's pattern.
