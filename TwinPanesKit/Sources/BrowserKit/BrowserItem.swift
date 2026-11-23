@@ -124,7 +124,11 @@ public final class BrowserItem: WorkspaceItem {
     @discardableResult
     func navigate(to url: URL?, selecting name: String?, recording: Bool, quietly: Bool) -> Bool {
         let target = (url ?? folder).standardizedFileURL
-        let newScope = grants.scope(covering: target)
+        // Still under the same grant: keep the token rather than start access again.
+        let grant = grants.grant(covering: target)
+        let newScope =
+            grant != nil && grant?.standardizedFileURL == scope?.url.standardizedFileURL
+            ? scope : grants.scope(covering: target)
         let problem = FolderLister.check(target)
         if let problem, !problem.needsAccess {
             if !quietly {

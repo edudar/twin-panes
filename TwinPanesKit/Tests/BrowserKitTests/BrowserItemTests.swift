@@ -119,6 +119,26 @@ import Testing
         #expect(opened.files.last?.1?.url.standardizedFileURL.path == root.path)
     }
 
+    /// Moving around inside one grant keeps the tab's access token instead of starting
+    /// access again on every navigation.
+    @Test func navigatingUnderOneGrantKeepsItsToken() async throws {
+        defer { cleanUp() }
+        try grants.add(root)
+        let item = browser(at: root)
+        item.go()
+        await item.listed()
+        let first = try #require(item.scope)
+        item.go(to: root.appendingPathComponent("sub"))
+        await item.listed()
+        #expect(item.scope === first)
+        #expect(
+            grants.grant(covering: root.appendingPathComponent("sub/inner"))?.path == first.url.path
+        )
+        item.go(to: URL(fileURLWithPath: "/"))
+        await item.listed()
+        #expect(item.scope == nil)
+    }
+
     @Test func openingAFolderGoesIntoIt() async throws {
         defer { cleanUp() }
         let item = browser(at: root)

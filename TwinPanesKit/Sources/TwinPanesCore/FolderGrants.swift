@@ -23,6 +23,21 @@ public final class FolderGrants {
     /// Starts access through the most specific grant that contains `url`, refreshing
     /// its bookmark if stale. Nil when no grant covers it.
     public func scope(covering url: URL) -> SecurityScope? {
+        guard let best = best(covering: url) else { return nil }
+        let scope = SecurityScope(url: best.url)
+        if best.stale {
+            try? store.refresh(best.url)
+            cachedEntries = nil
+        }
+        return scope
+    }
+
+    /// The granted folder whose access `scope(covering:)` would start for `url`, without
+    /// starting it: starting access is a call into the sandbox, slow on a busy system,
+    /// so a tab keeps its token while it stays under the same grant.
+    public func grant(covering url: URL) -> URL? { best(covering: url)?.url }
+
+    private func best(covering url: URL) -> (url: URL, stale: Bool)? {
         let target = url.standardizedFileURL.pathComponents
         var best: (url: URL, stale: Bool, depth: Int)?
         for entry in resolvedEntries() {
@@ -31,13 +46,7 @@ public final class FolderGrants {
                 best = (entry.url, entry.stale, parts.count)
             }
         }
-        guard let best else { return nil }
-        let scope = SecurityScope(url: best.url)
-        if best.stale {
-            try? store.refresh(best.url)
-            cachedEntries = nil
-        }
-        return scope
+        return best.map { ($0.url, $0.stale) }
     }
 
     /// The most specific granted folder containing `url` whose bookmark no longer
