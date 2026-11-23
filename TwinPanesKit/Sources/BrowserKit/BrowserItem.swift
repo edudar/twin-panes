@@ -236,10 +236,11 @@ public final class BrowserItem: WorkspaceItem {
         }
         isMerging = true
         let wanted = generation
+        let box = WeakItem(self)  // a strong capture would keep a closed tab alive
         Task.detached(priority: .userInitiated) {
             let merged = work()
-            await MainActor.run { [weak self] in
-                guard let self, self.generation == wanted else { return }
+            await MainActor.run {
+                guard let self = box.item, self.generation == wanted else { return }
                 self.isMerging = false
                 self.show(merged, resorted: order != nil)
             }

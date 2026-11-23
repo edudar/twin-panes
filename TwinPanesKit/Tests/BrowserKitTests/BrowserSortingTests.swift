@@ -92,6 +92,31 @@ import TwinPanesCore
     }
 }
 
+/// Work running off the main actor never keeps a closed tab alive.
+@MainActor
+@Suite struct BrowserLifetimeTests {
+    @Test func aClosedTabIsNotKeptAliveByASort() async throws {
+        let big = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrowserLifetimeTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: big) }
+        try FileManager.default.createDirectory(at: big, withIntermediateDirectories: true)
+        for i in 0..<(FolderListing.mainActorLimit + 100) {
+            FileManager.default.createFile(
+                atPath: big.appendingPathComponent("f\(i)").path, contents: nil)
+        }
+        let grants = FolderGrants(
+            defaults: UserDefaults(suiteName: big.appendingPathComponent("defaults").path)!)
+        var item: BrowserItem? = BrowserItem(folder: big, grants: grants) { _, _ in }
+        _ = item?.viewController.view
+        await item?.listed()
+        item?.willClose()
+        item?.sort(by: ListingOrder(ascending: false))  // off the main actor: a big folder
+        let closed = WeakItem(try #require(item))
+        item = nil
+        #expect(closed.item == nil)
+    }
+}
+
 /// The hidden-files toggle (docs/plans/M4.md, D-e, step 6).
 @MainActor
 @Suite struct BrowserHiddenFilesTests {
