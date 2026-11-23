@@ -64,8 +64,16 @@ extension BrowserItem {
     }
 
     /// FSEvents lost track: list the whole folder again in the background and swap it
-    /// in as one update, so the rows never empty out and the selection holds.
+    /// in as one update, so the rows never empty out and the selection holds. FSEvents
+    /// says so to every stream when heavy activity anywhere overflows it, so re-lists
+    /// run one at a time, and requests meanwhile become a single one after a pause.
     func relist() {
+        guard !isRelisting else {
+            relistRequested = true
+            return
+        }
+        isRelisting = true
+        relistsStarted += 1
         let wanted = generation
         let lister = FolderLister(folder: folder)
         var all: [DirectoryEntry] = []
@@ -73,10 +81,30 @@ extension BrowserItem {
         lister.start { [weak self] event in
             guard let self, self.generation == wanted else { return }
             switch event {
-            case .batch(let batch): all += batch
+            case .batch(let batch):
+                all += batch
+                return
             case .done: self.apply(removing: Set(self.listing.entries.map(\.name)), adding: all)
             case .failed: self.apply(removing: [], adding: [])
             }
+            self.relistFinished(generation: wanted)
+        }
+    }
+
+    static let relistPause: Duration = .seconds(1)
+
+    private func relistFinished(generation wanted: Int) {
+        isRelisting = false
+        guard relistRequested else { return }
+        relistRequested = false
+        isRelisting = true  // until the pause is over, more requests wait too
+        readsInFlight += 1
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.relistPause)
+            guard let self, self.generation == wanted else { return }
+            self.readsInFlight -= 1
+            self.isRelisting = false
+            self.relist()
         }
     }
 

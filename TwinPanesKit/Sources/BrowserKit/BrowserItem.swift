@@ -68,6 +68,11 @@ public final class BrowserItem: WorkspaceItem {
     /// Live-update reads (and a full re-list) still running off the main actor.
     var readsInFlight = 0
     var isReadingChanges: Bool { readsInFlight > 0 }
+    /// One full re-list at a time; requests meanwhile become one more, a little later.
+    var isRelisting = false
+    var relistRequested = false
+    /// Re-lists started, for tests.
+    var relistsStarted = 0
     /// Why the tab moved on its own, shown until the next navigation.
     var notice: String?
     private var hasPending: Bool {
@@ -167,6 +172,8 @@ public final class BrowserItem: WorkspaceItem {
         pendingRemovals = []
         changedWhileListing = []
         readsInFlight = 0
+        isRelisting = false
+        relistRequested = false
         notice = nil
         pendingOrder = nil
         pendingHidden = nil

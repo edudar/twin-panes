@@ -97,6 +97,18 @@ import Testing
         #expect(names == ["sub", "b.txt", "d.txt", "e.txt"])
     }
 
+    /// FSEvents tells every stream it dropped events when anything overflows it: a burst
+    /// of re-list requests runs one re-list and, after a pause, one more.
+    @Test func aBurstOfRelistsRunsTwice() async throws {
+        defer { cleanUp() }
+        for _ in 0..<20 { item.folderChanged(.relist) }
+        #expect(item.relistsStarted == 1)
+        await until { item.relistsStarted == 2 }
+        await item.listed()
+        #expect(
+            item.relistsStarted == 2 && !item.isRelisting && names == ["sub", "b.txt", "d.txt"])
+    }
+
     @Test func closingTheTabStopsWatching() async throws {
         defer { cleanUp() }
         #expect(item.watcher != nil)
