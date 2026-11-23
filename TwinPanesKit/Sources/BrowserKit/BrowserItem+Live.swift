@@ -7,6 +7,13 @@ final class WeakItem: Sendable {
     @MainActor init(_ item: BrowserItem) { self.item = item }
 }
 
+/// Holds the last reference to something big, so it's freed wherever `empty()` runs.
+final class Garbage<Value>: @unchecked Sendable {
+    private var value: Value?
+    init(_ value: Value) { self.value = value }
+    func empty() { value = nil }
+}
+
 /// Live updates (docs/plans/M4.md, D-f): the shown folder is watched with FSEvents, and
 /// what changed is read again off the main actor and merged into the rows through the
 /// same pipeline as the listing, so the order and the selection hold.
@@ -84,7 +91,10 @@ extension BrowserItem {
             case .batch(let batch):
                 all += batch
                 return
-            case .done: self.apply(removing: Set(self.listing.entries.map(\.name)), adding: all)
+            case .done:
+                self.readsInFlight -= 1
+                self.pendingReplacement = all  // swapped in off the main actor
+                self.applyPending()
             case .failed: self.apply(removing: [], adding: [])
             }
             self.relistFinished(generation: wanted)

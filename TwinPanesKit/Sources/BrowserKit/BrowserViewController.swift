@@ -123,8 +123,16 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
 
     /// Shows the item's current rows, keeping the selected entry selected by name;
     /// after a re-sort, also in view. Batches don't scroll.
-    func reloadKeepingSelection(scrolling: Bool = false) {
+    func reloadKeepingSelection(
+        scrolling: Bool = false, asked: Set<String> = [], found: [String: Int] = [:]
+    ) {
         guard isViewLoaded, let item else { return }
+        // The rows of the names asked about were found off the main actor; only a name
+        // that wasn't asked about (the selection moved meanwhile) is searched for here.
+        func row(named name: String) -> Int? {
+            guard asked.contains(name) else { return self.row(named: name) }
+            return found[name].map { $0 + (showsParentRow ? 1 : 0) }
+        }
         scrollView.isHidden = item.needsAccess
         accessPrompt.isHidden = !item.needsAccess
         let selected = selectedName
@@ -142,25 +150,18 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         }
     }
 
-    /// A live update (D-f): removes, inserts and reloads just the rows that changed
-    /// between `before` and the item's rows, so the scroll position, the selection and
-    /// the other rows' views stay. False (nothing done) when the change is too big.
-    func updateRows(from before: [DirectoryEntry], touching names: Set<String>) -> Bool {
+    /// The names whose rows a reload needs: the selected entry and the one to select.
+    var namesToKeep: Set<String> { Set([selectedName, wantedSelection].compactMap { $0 }) }
+
+    /// A small live update (D-f): removes, inserts and reloads just the rows that
+    /// changed, so the scroll position, the selection and the other rows' views stay.
+    /// The changes were worked out with the listing; false if there's no view to update.
+    func applyRowChanges(_ changes: RowChanges) -> Bool {
         guard isViewLoaded, let item, !item.needsAccess else { return false }
-        let after = item.listing.rows
-        let oldNames = Set(before.map(\.name))
-        let newNames = Set(after.map(\.name))
         let offset = showsParentRow ? 1 : 0
-        let removed = IndexSet(
-            before.indices.filter { !newNames.contains(before[$0].name) }.map { $0 + offset })
-        let inserted = IndexSet(
-            after.indices.filter { !oldNames.contains(after[$0].name) }.map { $0 + offset })
-        let changed = IndexSet(
-            after.indices.filter {
-                names.contains(after[$0].name) && oldNames.contains(after[$0].name)
-            }
-            .map { $0 + offset })
-        guard removed.count + inserted.count + changed.count <= 100 else { return false }
+        let removed = IndexSet(changes.removed.map { $0 + offset })
+        let inserted = IndexSet(changes.inserted.map { $0 + offset })
+        let changed = IndexSet(changes.changed.map { $0 + offset })
         let selected = tableView.selectedRow
         tableView.beginUpdates()
         tableView.removeRows(at: removed, withAnimation: [])

@@ -60,6 +60,8 @@ public final class BrowserItem: WorkspaceItem {
     private var pendingHidden: Bool?
     /// Names a live update removes before merging their new versions (D-f).
     var pendingRemovals: Set<String> = []
+    /// A full re-list's entries, replacing all of them.
+    var pendingReplacement: [DirectoryEntry]?
     /// Names that changed while the folder was still listing, read once it's done.
     var changedWhileListing: Set<String> = []
     var watcher: FolderWatcher?
@@ -77,7 +79,7 @@ public final class BrowserItem: WorkspaceItem {
     var notice: String?
     private var hasPending: Bool {
         !pendingBatch.isEmpty || pendingOrder != nil || pendingHidden != nil
-            || !pendingRemovals.isEmpty
+            || !pendingRemovals.isEmpty || pendingReplacement != nil
     }
     private var isMerging = false
     private var listedWaiters: [CheckedContinuation<Void, Never>] = []
@@ -136,7 +138,7 @@ public final class BrowserItem: WorkspaceItem {
         let order = self.order
         stopListing()
         needsAccess = problem != nil
-        listing = FolderListing(order: order, showsHidden: showsHidden)
+        replaceListing(with: FolderListing(order: order, showsHidden: showsHidden))
         folder = target
         scope = newScope
         hasListed = true
@@ -170,6 +172,7 @@ public final class BrowserItem: WorkspaceItem {
         generation += 1
         pendingBatch = []
         pendingRemovals = []
+        pendingReplacement = nil
         changedWhileListing = []
         readsInFlight = 0
         isRelisting = false
@@ -212,7 +215,7 @@ public final class BrowserItem: WorkspaceItem {
             applyPending()
         case .done:
             isListing = false
-            if !isMerging { listingFinished() }
+            if !isMerging { listingFinished(reloading: false) }  // the last batch is shown
         case .failed(let error):
             isListing = false
             needsAccess = error.needsAccess
@@ -233,38 +236,58 @@ public final class BrowserItem: WorkspaceItem {
         pendingRemovals = []
         pendingOrder = nil
         pendingHidden = nil
+        let replacement = pendingReplacement
+        pendingReplacement = nil
         let base = listing
-        let work: @Sendable () -> FolderListing = {
-            var result = order.map { base.sorted(by: $0) } ?? base
+        let keep = controller.namesToKeep
+        // Everything that walks the rows happens here, off the main actor when big.
+        let work: @Sendable () -> Applied = {
+            var result =
+                replacement.map {
+                    FolderListing(order: base.order, showsHidden: base.showsHidden).merging($0)
+                } ?? base
+            if let order { result = result.sorted(by: order) }
             if let hidden { result = result.showingHidden(hidden) }
             result = result.removing(names: removals)
-            return batch.isEmpty ? result : result.merging(batch)
+            if !batch.isEmpty { result = result.merging(batch) }
+            let live = order == nil && hidden == nil && replacement == nil && !removals.isEmpty
+            return Applied(
+                listing: result,
+                changes: live ? result.rowChanges(from: base, touching: removals, limit: 100) : nil,
+                asked: keep, found: result.rows(named: keep))
         }
-        if base.entries.count + batch.count <= FolderListing.mainActorLimit {
-            return show(work(), resorted: order != nil, updated: removals)
+        let size = base.entries.count + batch.count + (replacement?.count ?? 0)
+        if size <= FolderListing.mainActorLimit {
+            return show(work(), resorted: order != nil)
         }
         isMerging = true
         let wanted = generation
         let box = WeakItem(self)  // a strong capture would keep a closed tab alive
         Task.detached(priority: .userInitiated) {
-            let merged = work()
+            let applied = work()
             await MainActor.run {
                 guard let self = box.item, self.generation == wanted else { return }
                 self.isMerging = false
-                self.show(merged, resorted: order != nil, updated: removals)
+                self.show(applied, resorted: order != nil)
             }
         }
     }
 
-    /// `updated`: the names a live update touched, so a small change can update the
-    /// table row by row.
-    private func show(_ merged: FolderListing, resorted: Bool, updated: Set<String>) {
-        let before = listing.rows
-        listing = merged
-        if resorted || updated.isEmpty
-            || !controller.updateRows(from: before, touching: updated)
-        {
-            controller.reloadKeepingSelection(scrolling: resorted)
+    /// One run of the pipeline, with what the table needs worked out alongside.
+    struct Applied: Sendable {
+        let listing: FolderListing
+        /// A small live update's row changes, to apply row by row.
+        let changes: RowChanges?
+        /// The names the selection needs back, and the rows found for them.
+        let asked: Set<String>
+        let found: [String: Int]
+    }
+
+    private func show(_ applied: Applied, resorted: Bool) {
+        replaceListing(with: applied.listing)
+        if resorted || !(applied.changes.map(controller.applyRowChanges) ?? false) {
+            controller.reloadKeepingSelection(
+                scrolling: resorted, asked: applied.asked, found: applied.found)
         }
         if hasPending {
             applyPending()
@@ -273,6 +296,14 @@ public final class BrowserItem: WorkspaceItem {
         } else {
             updateStatus()
         }
+    }
+
+    /// Swaps in `new`; the old listing is freed off the main actor, since freeing 100k
+    /// entries there takes tens of milliseconds.
+    func replaceListing(with new: FolderListing) {
+        let old = Garbage(listing)
+        listing = new
+        DispatchQueue.global(qos: .utility).async { old.empty() }
     }
 
     func listingFinished(reloading: Bool = true) {
@@ -327,7 +358,7 @@ public final class BrowserItem: WorkspaceItem {
         } else if isListing {
             host?.showStatus("\(folder.path) · Listing… \(listing.entries.count.formatted()) items")
         } else {
-            let folders = entries.filter(\.isDirectory).count
+            let folders = listing.folderCount
             let hidden = listing.hiddenCount
             host?.showStatus(
                 "\(folder.path) · \(entries.count.formatted()) items (\(folders.formatted()) folders)"
