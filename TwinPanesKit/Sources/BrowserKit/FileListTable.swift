@@ -364,6 +364,7 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
 
     func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
         rowView.backgroundColor = stripe(row)
+        rowView.canDrawSubviewsIntoLayer = true
     }
 
     /// Rows moved under their row views (a refresh, a live update): colour them again.

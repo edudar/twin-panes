@@ -98,6 +98,12 @@ extension SmokeTest {
                 await settle(milliseconds: 1)
             }
         }
+        // Rows draw their cells into one layer each (docs/plans/M4.md, performance pass,
+        // step 7): the cells must still be drawn, not skipped.
+        let drawn =
+            recorder.steps(from: .now - .seconds(600), to: .now)
+            .first { $0.name == "cell draw" }?.count ?? 0
+        check(drawn >= 100, "scrolling draws the rows' cells (\(drawn) drawn)")
         await gate("100 outside changes in a 100k folder") {
             await Task.detached { Self.changeOutside(folder) }.value
             // 25 deleted, one more removed, 50 created (renames keep the count). The

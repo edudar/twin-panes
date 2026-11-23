@@ -128,3 +128,22 @@ import Testing
             size?.text == ByteCountFormatter.string(fromByteCount: 2_000_000, countStyle: .file))
     }
 }
+
+extension BrowserRefreshTests {
+    /// Each row draws its cells into its own layer: four layers a row cost more to
+    /// commit (docs/plans/M4.md, performance pass, step 7).
+    @Test func cellsDrawIntoTheirRowsLayer() async throws {
+        defer { cleanUp() }
+        window.contentView?.wantsLayer = true
+        layOut()
+        var cells = 0
+        table.enumerateAvailableRowViews { rowView, _ in
+            for column in 0..<table.numberOfColumns {
+                guard let cell = rowView.view(atColumn: column) as? FileCell else { continue }
+                cells += 1
+                #expect(cell.layer == nil)
+            }
+        }
+        #expect(cells > 0)
+    }
+}
