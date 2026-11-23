@@ -12,6 +12,10 @@ extension BrowserViewController: NSTextFieldDelegate {
         pathControl.target = self
         pathControl.action = #selector(pathBarClicked(_:))
         pathControl.setAccessibilityIdentifier("browserPathBar")
+        // Items set by hand ask for their full width; the bar truncates rather than
+        // widening the tab (which squeezed the other panel's layout).
+        pathControl.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        pathControl.setContentHuggingPriority(.defaultLow, for: .horizontal)
         pathField.isHidden = true
     }
 
