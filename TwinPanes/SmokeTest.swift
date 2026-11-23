@@ -355,7 +355,9 @@ struct SmokeTest {
 
     /// Review bug 1: the file gets shorter while it's open. Scrolling past the new end
     /// must draw placeholders and report the problem, not trap. A tab of its own: once
-    /// edited, a tab reads its clone (M3c), which an outside truncation can't reach.
+    /// edited, a tab reads its clone (M3c), which an outside truncation can't reach. The
+    /// tab stops watching first: a clean tab reloads on the change (checked by the
+    /// outside-change check), and that would race the read this check is about.
     private func truncation(_ check: (Bool, String) -> Void) async {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("smoke-truncate-\(UUID().uuidString).bin")
@@ -364,6 +366,7 @@ struct SmokeTest {
         else { return check(false, "open a sample to truncate") }
         defer { app.controller(containing: hex.id)?.layout.remove(hex.id) }
         await settle()
+        hex.session.stopWatching()
         do { try FileHandle(forWritingTo: url).truncate(atOffset: 1000) } catch {
             return check(false, "truncate the sample file: \(error)")
         }
