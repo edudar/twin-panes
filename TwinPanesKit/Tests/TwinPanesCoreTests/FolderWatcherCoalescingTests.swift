@@ -29,6 +29,11 @@ import Testing
                 == .relist)
         let dropped = FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs)
         #expect(watcher.change(paths: [path], flags: [dropped]) == .relist)
+        #expect(watcher.change(paths: ["/"], flags: [dropped]) == .relist)  // an ancestor
+        // Below it: only the subfolder itself is read again.
+        #expect(watcher.change(paths: ["\(path)/sub/"], flags: [dropped]) == .names(["sub"]))
+        let kernel = FSEventStreamEventFlags(kFSEventStreamEventFlagKernelDropped)
+        #expect(watcher.change(paths: ["/elsewhere"], flags: [kernel]) == .relist)
         #expect(watcher.change(paths: ["\(path)/sub/x"], flags: [file]) == nil)
         let root = FSEventStreamEventFlags(kFSEventStreamEventFlagRootChanged)
         #expect(watcher.change(paths: [path], flags: [root]) == .folderGone)

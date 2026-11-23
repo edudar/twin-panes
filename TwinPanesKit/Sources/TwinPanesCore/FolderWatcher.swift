@@ -127,11 +127,17 @@ public final class FolderWatcher: Sendable {
             if flag & (kFSEventStreamEventFlagRootChanged | kFSEventStreamEventFlagUnmount) != 0 {
                 return .folderGone
             }
-            if flag
-                & (kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagUserDropped
-                    | kFSEventStreamEventFlagKernelDropped) != 0
+            if flag & (kFSEventStreamEventFlagUserDropped | kFSEventStreamEventFlagKernelDropped)
+                != 0
             {
                 relist = true
+            } else if flag & kFSEventStreamEventFlagMustScanSubDirs != 0 {
+                // "Rescan this path and below": only the folder's business when the path
+                // is the folder or above it, not one of its subfolders.
+                let scan = path.hasSuffix("/") ? String(path.dropLast()) : path
+                if self.path == scan || self.path.hasPrefix(scan + "/") || scan.isEmpty {
+                    relist = true
+                }
             }
             let url = URL(fileURLWithPath: path)
             if path == self.path {
