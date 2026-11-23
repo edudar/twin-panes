@@ -138,10 +138,20 @@ final class IconCache {
         announce()
     }
 
-    /// The entry at `path` changed (a new icon pasted in Get Info, say).
-    func forget(path: String) {
-        for key in pathOrder where key.id == path { icons[key] = nil }
-        pathOrder.removeAll { $0.id == path }
+    /// These entries of `folder` changed (a new icon pasted in Get Info, say). Walks the
+    /// few cached app icons, not `names`: a live update while a big folder lists can
+    /// name tens of thousands of entries, and building a path for each one took 20-50 ms
+    /// of the main thread (docs/plans/M4.md, performance pass).
+    func forget(_ names: Set<String>, in folder: URL) {
+        let parent = folder.path
+        func changed(_ key: Key) -> Bool {
+            let path = key.id as NSString
+            return path.deletingLastPathComponent == parent
+                && names.contains(path.lastPathComponent)
+        }
+        guard pathOrder.contains(where: changed) else { return }
+        for key in pathOrder where changed(key) { icons[key] = nil }
+        pathOrder.removeAll(where: changed)
     }
 
     /// The icon for `entry`, or nil until it's been drawn.

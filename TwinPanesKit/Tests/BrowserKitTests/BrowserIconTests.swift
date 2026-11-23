@@ -107,9 +107,26 @@ import UniformTypeIdentifiers
         #expect(app.isApplication && !entry("a.txt", .plainText).isApplication)
         let icon = await loaded(cache, app)
         #expect(cache.icon(for: app, scale: 2, appearance: .aqua) === icon)
-        cache.forget(path: app.url.path)
+        cache.forget(["Tool.app"], in: URL(fileURLWithPath: "/tmp"))
         #expect(cache.icon(for: app, scale: 2, appearance: .aqua) == nil)
         #expect(await loaded(cache, app) !== icon)
+    }
+
+    /// A live update's names, up to tens of thousands while a big folder lists, are
+    /// checked against the few cached app icons, not the other way round.
+    @Test func forgettingNamesTouchesOnlyThatFolder() async {
+        let cache = IconCache(center: center)
+        let app = entry("Tool.app", .application)
+        let elsewhere = DirectoryEntry(
+            url: URL(fileURLWithPath: "/elsewhere/Tool.app"), name: "Tool.app",
+            isDirectory: false, isPackage: true, isSymbolicLink: false, isHidden: false,
+            size: nil, modified: nil, type: .application)
+        let (here, there) = (await loaded(cache, app), await loaded(cache, elsewhere))
+        let names = Set((0..<100_000).map { "f\($0)" }).union(["Tool.app"])
+        cache.forget(names, in: URL(fileURLWithPath: "/tmp"))
+        #expect(cache.icon(for: app, scale: 2, appearance: .aqua) == nil)
+        #expect(cache.icon(for: elsewhere, scale: 2, appearance: .aqua) === there)
+        #expect(here !== there)
     }
 
     /// A visible cell gets the icon for the table's appearance when it changes.
