@@ -31,6 +31,8 @@ private final class GatedFileSystem: FileSystem {
         saves.withLock { $0 += 1 }
         return try real.openForWriting(url)
     }
+    func create(_ url: URL) throws -> Int32 { try real.create(url) }
+    func move(_ source: URL, to destination: URL) throws { try real.move(source, to: destination) }
     func write(_ data: Data, to descriptor: Int32, at offset: UInt64, path: String) throws {
         try real.write(data, to: descriptor, at: offset, path: path)
     }
@@ -192,5 +194,41 @@ private final class GatedFileSystem: FileSystem {
         #expect(try disk(1) == 1 && disk(2) == 2)
         try await first.value
         try await second.value
+    }
+
+    /// Save As moves the session to the new file: later saves go there, the old file
+    /// stays as it was, undo still works, and the registry finds it by its new file.
+    @Test func saveAsMovesTheSessionToTheNewFile() async throws {
+        defer { cleanUp() }
+        let registry = SessionRegistry()
+        let session = try registry.open(url, addDirectory: folder.appendingPathComponent("a"))
+            .session
+        try type(session, 0xAA, at: 5)
+        let copy = folder.appendingPathComponent("copy.bin")
+        try await session.saveAs(to: copy)
+        #expect(session.url == copy && !session.isDirty && session.access == .writable)
+        #expect(try session.identity == FileIdentity(url: copy))
+        #expect(try Data(contentsOf: copy)[5] == 0xAA && disk(5) == 5)
+        #expect(registry.session(for: copy) === session && registry.session(for: url) == nil)
+        _ = session.undo()
+        try await session.save()
+        #expect(try Data(contentsOf: copy)[5] == 5)
+    }
+
+    /// A read-only file can be saved elsewhere, and then the session can edit and save.
+    @Test func saveAsFromAReadOnlyFile() async throws {
+        defer { cleanUp() }
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
+        let session = try session()
+        let copy = folder.appendingPathComponent("copy.bin")
+        try await session.saveAs(to: copy)
+        #expect(session.access == .writable)
+        try type(session, 0xAA, at: 5)
+        try await session.save()
+        #expect(try Data(contentsOf: copy)[5] == 0xAA)
+        await #expect(throws: (any Error).self) {
+            try await session.saveAs(to: folder.appendingPathComponent("no/such/dir/x.bin"))
+        }
+        #expect(session.url == copy && !session.isSaving)
     }
 }

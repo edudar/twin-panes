@@ -30,13 +30,17 @@ public final class EditorSession {
     }
 
     public let id = UUID()
-    public let url: URL
+    /// The file; Save As moves the session to another one.
+    public internal(set) var url: URL
     /// Keeps sandbox access to `url` for as long as the session lives (PLAN.md §5).
-    public let scope: SecurityScope?
+    public internal(set) var scope: SecurityScope?
+    /// Scopes of files the session edited before a Save As; kept, since the original
+    /// pieces still read the file it opened.
+    var earlierScopes: [SecurityScope] = []
     public let buffer: EditBuffer
     /// The file as last opened or saved.
     public internal(set) var identity: FileIdentity
-    public let access: AccessMode
+    public internal(set) var access: AccessMode
     /// The version that is on disk.
     public internal(set) var savedTree: PieceTree
     public private(set) var undoStack = UndoStack()

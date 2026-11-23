@@ -30,6 +30,10 @@ public protocol FileSystem: Sendable {
     /// Free bytes on `url`'s volume, if known.
     func availableCapacity(for url: URL) -> UInt64?
     func openForWriting(_ url: URL) throws -> Int32
+    /// Creates `url`, which must not exist, and opens it for writing.
+    func create(_ url: URL) throws -> Int32
+    /// Moves `source` to `destination`, which must not exist.
+    func move(_ source: URL, to destination: URL) throws
     func write(_ data: Data, to descriptor: Int32, at offset: UInt64, path: String) throws
     func truncate(_ descriptor: Int32, to length: UInt64, path: String) throws
     /// `F_FULLFSYNC`: on macOS only this flushes the drive's cache.
@@ -69,6 +73,18 @@ public struct RealFileSystem: FileSystem {
         let descriptor = open(url.path, O_WRONLY | O_CLOEXEC)
         guard descriptor >= 0 else { throw FileSystemError("open", url.path, errno: errno) }
         return descriptor
+    }
+
+    public func create(_ url: URL) throws -> Int32 {
+        let descriptor = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o644)
+        guard descriptor >= 0 else { throw FileSystemError("create", url.path, errno: errno) }
+        return descriptor
+    }
+
+    public func move(_ source: URL, to destination: URL) throws {
+        guard renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 else {
+            throw FileSystemError("move", destination.path, errno: errno)
+        }
     }
 
     public func write(_ data: Data, to descriptor: Int32, at offset: UInt64, path: String) throws {

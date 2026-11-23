@@ -60,7 +60,7 @@ public struct Saver: Sendable {
         }
         let descriptor = try fileSystem.openForWriting(staged)
         do {
-            try patch(staged.path, descriptor, from: version, plan: plan)
+            try write(plan.ranges, of: version, length: plan.length, to: descriptor, staged.path)
         } catch {
             fileSystem.close(descriptor)
             throw error
@@ -70,11 +70,37 @@ public struct Saver: Sendable {
         return try FileIdentity(url: url)
     }
 
-    /// Writes the planned ranges in chunks, sets the length and flushes.
-    private func patch(
-        _ path: String, _ descriptor: Int32, from version: some ByteReading, plan: SavePlan
+    /// Writes all of `version` to `url` (Save As): staged in a new file next to it, then
+    /// moved in, or swapped in for a file already there. Returns the file's identity.
+    public func write(_ version: some ByteReading, to url: URL) throws -> FileIdentity {
+        let folder = try fileSystem.replacementDirectory(for: url.deletingLastPathComponent())
+        defer { fileSystem.removeItem(at: folder) }
+        let staged = folder.appendingPathComponent(url.lastPathComponent)
+        let descriptor = try fileSystem.create(staged)
+        let length = version.length
+        do {
+            try write(
+                length > 0 ? [0..<length] : [], of: version, length: length, to: descriptor,
+                staged.path)
+        } catch {
+            fileSystem.close(descriptor)
+            throw error
+        }
+        fileSystem.close(descriptor)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try fileSystem.replaceItem(at: url, with: staged)
+        } else {
+            try fileSystem.move(staged, to: url)
+        }
+        return try FileIdentity(url: url)
+    }
+
+    /// Writes `ranges` of `version` in chunks, sets the length and flushes.
+    private func write(
+        _ ranges: [Range<UInt64>], of version: some ByteReading, length: UInt64,
+        to descriptor: Int32, _ path: String
     ) throws {
-        for range in plan.ranges {
+        for range in ranges {
             var at = range.lowerBound
             while at < range.upperBound {
                 let end = min(range.upperBound, at + UInt64(Self.chunkSize))
@@ -87,7 +113,7 @@ public struct Saver: Sendable {
                 at = end
             }
         }
-        try fileSystem.truncate(descriptor, to: plan.length, path: path)
+        try fileSystem.truncate(descriptor, to: length, path: path)
         try fileSystem.fullSync(descriptor, path: path)
     }
 }

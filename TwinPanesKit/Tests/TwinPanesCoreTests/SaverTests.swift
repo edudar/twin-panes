@@ -28,6 +28,8 @@ private final class FaultyFileSystem: FileSystem {
         opened.withLock { $0.append(url) }
         return try real.openForWriting(url)
     }
+    func create(_ url: URL) throws -> Int32 { try real.create(url) }
+    func move(_ source: URL, to destination: URL) throws { try real.move(source, to: destination) }
     func write(_ data: Data, to descriptor: Int32, at offset: UInt64, path: String) throws {
         try real.write(data, to: descriptor, at: offset, path: path)
     }
@@ -138,5 +140,22 @@ struct SaverTests {
         _ = try Saver(fileSystem: copying).save(buffer.snapshot(), plan: plan, to: url)
         #expect(try Data(contentsOf: url) == buffer.snapshot().read(0..<300_000))
         #expect(try FileIdentity(url: url).key != before.key)
+    }
+
+    /// Save As: a new file, or over another file, with no staging file left behind.
+    @Test func writesAWholeVersionToAnotherFile() throws {
+        defer { cleanUp() }
+        let (buffer, _) = try edited()
+        let wanted = try buffer.snapshot().read(0..<300_000)
+        let fresh = folder.appendingPathComponent("copy.bin")
+        let identity = try Saver().write(buffer.snapshot(), to: fresh)
+        #expect(try Data(contentsOf: fresh) == wanted && identity == FileIdentity(url: fresh))
+        let other = folder.appendingPathComponent("other.bin")
+        try Data(repeating: 7, count: 500_000).write(to: other)
+        _ = try Saver().write(buffer.snapshot(), to: other)
+        #expect(try Data(contentsOf: other) == wanted)
+        #expect(try Data(contentsOf: url) == original)
+        let left = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        #expect(Set(left) == ["file.bin", "copy.bin", "other.bin", "add"])
     }
 }

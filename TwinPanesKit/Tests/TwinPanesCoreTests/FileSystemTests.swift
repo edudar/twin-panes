@@ -62,6 +62,19 @@ struct FileSystemTests {
         #expect(throws: FileSystemError("open", missing.path, errno: ENOENT)) {
             try fs.openForWriting(missing)
         }
+        // create and move never replace a file that's there.
+        let there = folder.appendingPathComponent("there.bin")
+        let descriptor = try? fs.create(there)
+        #expect(descriptor != nil)
+        descriptor.map(fs.close)
+        #expect(throws: FileSystemError("create", there.path, errno: EEXIST)) {
+            try fs.create(there)
+        }
+        let other = folder.appendingPathComponent("other.bin")
+        FileManager.default.createFile(atPath: other.path, contents: Data([1]))
+        #expect(throws: FileSystemError("move", there.path, errno: EEXIST)) {
+            try fs.move(other, to: there)
+        }
         #expect(
             FileSystemError("open", "/x", errno: ENOENT).description
                 == "Can't open /x: No such file or directory")

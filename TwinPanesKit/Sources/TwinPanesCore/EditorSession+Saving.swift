@@ -16,16 +16,53 @@ extension EditorSession {
     public func save() async throws {
         if case .readOnly(let reason) = access { throw EditorSessionError.readOnly(reason) }
         if savesPending >= 2, let queued = saveTail { return try await queued.value }
+        try await enqueueSave { try await self.performSave() }
+    }
+
+    /// Runs `perform` after the saves already running or queued, as one more save.
+    private func enqueueSave(
+        _ perform: @escaping @MainActor () async throws -> Void
+    )
+        async throws
+    {
         let previous = saveTail
         savesPending += 1
         if savesPending == 1 { notify(.saving) }
         let task = Task { @MainActor in
             _ = try? await previous?.value
             defer { self.finishSave() }
-            try await self.performSave()
+            try await perform()
         }
         saveTail = task
         try await task.value
+    }
+
+    /// Writes the current version to `target` and makes it the session's file (Save As):
+    /// `url`, `scope`, identity and access follow it, the version becomes the saved one,
+    /// and the undo history stays. Waits its turn behind running saves like `save()`.
+    /// On failure nothing changes.
+    public func saveAs(to target: URL, scope: SecurityScope? = nil) async throws {
+        try await enqueueSave {
+            let (version, saver, snapshot) = (self.buffer.tree, self.saver, self.buffer.snapshot())
+            let written = try await Self.offMain {
+                try withExtendedLifetime(scope) { try saver.write(snapshot, to: target) }
+            }
+            if let old = self.scope { self.earlierScopes.append(old) }
+            (self.url, self.scope, self.identity) = (target, scope, written)
+            self.access = AccessMode.of(target)
+            self.savedTree = version
+            self.notify(.saved)
+        }
+    }
+
+    /// Runs `body` on a dispatch queue, not Swift concurrency's few threads: a save
+    /// blocks on disk I/O, for long when a volume can't clone and the file is copied.
+    static func offMain<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(with: Result { try body() })
+            }
+        }
     }
 
     /// Returns once no save is running or queued (quitting waits for this); a failed
@@ -54,17 +91,8 @@ extension EditorSession {
             return notify(.saved)
         }
         let (saver, url, scope, snapshot) = (saver, url, scope, buffer.snapshot())
-        // A dispatch queue, not Swift concurrency's few threads: a save blocks on disk
-        // I/O, for long when a volume can't clone and the file is copied.
-        identity = try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(
-                    with: Result {
-                        try withExtendedLifetime(scope) {
-                            try saver.save(snapshot, plan: plan, to: url)
-                        }
-                    })
-            }
+        identity = try await Self.offMain {
+            try withExtendedLifetime(scope) { try saver.save(snapshot, plan: plan, to: url) }
         }
         savedTree = version
         notify(.saved)
