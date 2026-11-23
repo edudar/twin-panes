@@ -1,8 +1,8 @@
 import AppKit
 import Testing
-import TwinPanesCore
 
 @testable import BrowserKit
+@testable import TwinPanesCore
 
 /// BrowserItem navigation on a temp folder tree (from the review's missing tests).
 @MainActor
@@ -337,6 +337,25 @@ import TwinPanesCore
         #expect(item.controller.isParentRowSelected)  // nothing listed yet
         await item.listed()
         #expect(item.controller.selectedEntry?.name == "sub")
+    }
+
+    /// Rows arriving above the selected one leave the same entry selected, not whatever
+    /// lands on its old row.
+    @Test func aBatchAboveTheSelectionKeepsIt() async throws {
+        defer { cleanUp() }
+        let item = browser(at: root)
+        _ = item.viewController.view
+        await item.listed()
+        let table = item.controller.tableView
+        table.selectRowIndexes(
+            [try #require(item.controller.row(named: "file.txt"))], byExtendingSelection: false)
+        let early = DirectoryEntry(
+            url: root.appendingPathComponent("a-early"), name: "a-early", isDirectory: true,
+            isPackage: false, isSymbolicLink: false, isHidden: false, size: nil, modified: nil,
+            type: .folder)
+        item.received(.batch([early]))
+        #expect(item.entries.map(\.name) == ["a-early", "sub", "file.txt"])
+        #expect(item.controller.selectedEntry?.name == "file.txt")
     }
 
     static func labels(in view: NSView?) -> [String] {

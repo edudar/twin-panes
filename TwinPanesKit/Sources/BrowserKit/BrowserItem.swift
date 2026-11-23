@@ -121,7 +121,7 @@ public final class BrowserItem: WorkspaceItem {
         isListing = false
     }
 
-    private func received(_ event: FolderLister.Event) {
+    func received(_ event: FolderLister.Event) {
         switch event {
         case .batch(let batch):
             pendingBatch += batch

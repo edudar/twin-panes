@@ -87,6 +87,10 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     private var wantedSelection: String?
     /// Set while the selection is changed here rather than by the user.
     private(set) var isRestoringSelection = false
+    /// What's selected, recorded as it changes: by the time the table reloads, the
+    /// item's rows may already be new, so its old row no longer names the entry.
+    private var selectedName: String?
+    private var selectedParentRow = false
 
     /// A new folder: empties the list (it fills as batches arrive), selects the first
     /// row, and remembers `name` to select once it's listed.
@@ -109,8 +113,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         guard isViewLoaded, let item else { return }
         scrollView.isHidden = item.needsAccess
         accessPrompt.isHidden = !item.needsAccess
-        let selected = selectedEntry?.name
-        let onParent = isParentRowSelected
+        let selected = selectedName
+        let onParent = selectedParentRow
         tableView.reloadData()
         if let wanted = wantedSelection, let row = row(named: wanted) {
             wantedSelection = nil
@@ -136,8 +140,11 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         }
     }
 
-    /// The user moved the selection: the folder you came from no longer wins it back.
-    func selectionMovedByUser() {
+    /// The selection changed: records it, and if the user moved it, the folder you came
+    /// from no longer wins it back.
+    func selectionChanged() {
+        selectedName = selectedEntry?.name
+        selectedParentRow = isParentRowSelected
         if !isRestoringSelection { wantedSelection = nil }
     }
 

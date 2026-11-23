@@ -136,7 +136,7 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard let item else { return }
-        selectionMovedByUser()
+        selectionChanged()
         if isParentRowSelected {
             let parent = item.folder.deletingLastPathComponent().path
             item.host?.showStatus("Parent folder: \(parent)")
