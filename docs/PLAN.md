@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.20 (2026-11-22). Living document; requirements will keep growing.
+Status: draft v0.21 (2026-11-23). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -51,6 +51,12 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D35 | **Strategy B for hard-linked files, needing the clone** (M3c) | Old bytes and the file's identity go to a save journal, the ranges are written in place, a commit mark is appended; recovery rolls back an uncommitted one. Whole-file plans and narrowed sessions still get Save As. |
 | D36 | **Outside changes by vnode watch, our saves told apart by identity** (M3c) | A `DispatchSource` on the file instead of `NSFilePresenter` (which only hears coordinated writes); an event leaving the file as last saved is ignored. Clean tabs reload; dirty ones ask Keep Mine / Reload / Save As. |
 | D37 | **Narrowed sessions keep no journal, for now** (M3c) | Replaying against the live file after a save would bring back saved bytes where an undo had restored the opened ones. Until the external-volume spike, a session without a clone isn't recoverable and says so. |
+| D38 | **Folders list off the main actor in growing batches** (M4) | `FolderLister` enumerates with cheap keys only (Finder's type descriptions made 100k entries take 7.5 s, now 0.73 s); kind and icon come from the name's `UTType`, cached per type. Batches start at 500 entries and grow to 20,000, and every navigation supersedes the last listing. See docs/plans/M4.md, D-a, D-b. |
+| D39 | **The folder model is a `Sendable` value; 100k-row work never runs on the main actor** (M4) | `FolderListing` sorts (`ListingOrder`, folders on top), filters hidden entries, merges batches and live updates, and works out a live update's `RowChanges` and the selection's rows. Past 500 entries a run happens off the main actor; the main actor only applies the result. Old listings are freed off it too. |
+| D40 | **Live updates by FSEvents, row by row when small** (M4) | `FolderWatcher` streams one folder's direct changes (paths by `realpath`); changed names are read again and merged; dropped events or over 1,000 names mean one full re-list at a time, never during the listing. Up to 100 rows change in place; the folder going away sends the tab to the nearest folder above. |
+| D41 | **Per-tab history, hidden files and sort order** (M4) | Back/Forward (⌘[ ⌘]) with the selection kept; ⇧⌘. filters without listing again; header clicks sort. All outlive navigation; tab restore keeps them in M5. |
+| D42 | **Access asks for as much as the user means** (M4) | The prompt asks for a whole external volume, the home folder, or a grant that stopped resolving (kept as lost, with its last path). Recent files that moved stay in the menu and offer to find them. A tab keeps its access token while it stays under one grant. |
+| D43 | **Path bar, packages** (M4) | A clickable `NSPathControl` (items built with the cached folder icon) that ⇧⌘G turns into the path field. Packages list as files, as in Finder; Show Package Contents (⌥⌘↓) enters one (§9 question 2). |
 
 ## 3. Constraints that drive the design
 
@@ -80,7 +86,7 @@ content; the `M0` rows exist now.
 | WorkspaceKit | `TwinPanesKit/Sources/WorkspaceKit` | M0 | the single main frame, independent of item types: `WorkspaceItem`, `MainFrameLayout` and its view controller, main window and controller, tab bar, close workflow, workspace registry, command registry and dispatcher, focus chain, menu bindings (§4.8, §4.11) |
 | HexViewKit | `TwinPanesKit/Sources/HexViewKit` | M1 | virtualized hex/text view, selection, inspector UI |
 | EditorKit | `TwinPanesKit/Sources/EditorKit` | M1 | the editor item: mode switcher, find bar; hosts the mode views over one `EditorSession` |
-| BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b | the browser tab: folder listing, navigation, folder access; later (M4–M7) async listing, live updates, tabs per panel, operations queue, preview pane |
+| BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b, M4 | the browser tab: async listing, sorting, hidden files, history, live updates, path bar, folder access (M1b, M4); later (M5–M7) tabs per panel, operations queue, preview pane |
 | TextEditKit | `TwinPanesKit/Sources/TextEditKit` | M9 | plain-text and Markdown modes, large-text viewer |
 | SandboxProbe | `TwinPanesKit/Sources/SandboxProbe` | M0, M3c | Foundation-only probes for the sandbox spike (§5); only the app's Debug menu uses it. Stays until the M3c volume checks (external drives) are done, then goes away with that menu |
 
@@ -121,6 +127,10 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `Saver`, `FileSystem`, `SaveJournal` | M3b, M3c | save strategy A (clone, patch, replace) and Save As in M3b, B (in place + save journal) in M3c (§4.3, D32, D35); the saver and journal write through the `FileSystem` seam |
 | `SessionFolder`, `SessionJournal`, `JournalFormat` | M3c | the session's folder and manifest, its operation journal and its format and replay (D34) |
 | `FileWatcher` | M3c | the vnode watch behind outside-change handling (D36) |
+| `DirectoryReader`, `FolderLister` | M1b, M4 | one folder's entries: synchronous (M1b), then off the main actor in growing batches with kinds by type (D38) |
+| `FolderListing`, `ListingOrder`, `RowChanges` | M4 | a folder's sorted, filtered entries; live updates and the table's row changes (D39) |
+| `FolderWatcher` | M4 | FSEvents on one folder, coalesced into changed names, a re-list or folder-gone (D40) |
+| `FolderGrants`, `BookmarkStore` | M1b, M4 | granted folders and recent files as app-scoped bookmarks; lost ones kept with their path (D42) |
 
 - **Project layout (D20):**
 
@@ -533,6 +543,20 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   double-click on it goes up and selects the folder you came from; F3/F4 on it beep;
   type-to-select skips it. ⌘↑/Backspace still go up. The smoke test goes up with
   Return and with a real double-click on the row.
+- **As built (M4, docs/plans/M4.md):** D38–D43. A navigation checks the folder at
+  once, then a `FolderLister` lists it in growing batches while the rows fill in;
+  every navigation bumps a generation, so nothing from an older one lands. Each run
+  of the tab's pipeline (batches, sort, hidden filter, live update, re-list) works
+  out the new `FolderListing`, a small update's `RowChanges` and the selection's rows
+  together, off the main actor past 500 entries; a run that includes listing batches
+  is never applied row by row. The table only refreshes the row views it has, cells
+  draw their own icon and text, and the row stripes come from the row views:
+  NSTableView's own stripes cost 100–180 ms of drawing per navigation at 100k rows.
+  The watcher starts its stream on its own queue, the path bar is built with a
+  cached folder icon and gives way rather than widen the tab, and the tab keeps its
+  access token under one grant. The smoke test lists, sorts, filters, scrolls and
+  live-updates a real 100k-file folder with a main-thread heartbeat and fails on any
+  gap over 50 ms (worst on the dev Mac: about 30–48 ms while listing).
 
 ### 4.8 Single main frame: workspace model (D7)
 
@@ -975,9 +999,9 @@ byte histogram.
 **Open**
 1. **App Store:** keep as a goal for the whole app, editor-only, or drop — revisit
    after the M0 sandbox spike.
-2. **Packages in the browser** (`.app`, `.bundle`): show as files like Finder, with
-   "Show Package Contents", or browse into them? Decide in M4. (The editor never
-   opens them — D14.)
+2. ~~**Packages in the browser**~~: decided in M4 (D43). They list as files, as in
+   Finder, and Show Package Contents (⌥⌘↓) enters one. (The editor never opens them,
+   D14.)
 3. **Recovery on volumes without clones (§4.1):** make a private copy below a size
    limit (proposed 1 GB) and narrow the guarantee above it, or always narrow?
    **Decide from the M0 capability matrix**, once it shows which volumes actually
@@ -997,17 +1021,16 @@ byte histogram.
   - Tab: switch panels in the browser vs. insert a tab in the editor (resolved by
     focus, but confirm it feels right).
 - **NC-style marking and drive switching** — not needed day one; candidates for M13+.
-- **Path bar as a path control** (2026-11-22): each folder of the path clickable to
-  jump there, click or ⇧⌘G turns it into the editable path field. Deferred to M4 with
-  the address and history work; the ".." row (§4.7) is the visible way up until then.
+- ~~**Path bar as a path control**~~ (2026-11-22): built in M4 (D43).
 - **Accessibility and localization** — out of scope for now (D19), including the
   proposed baseline VoiceOver support for the hex viewport in M1.
 - **Block devices, privileged save** — not planned (D14).
 - **From the M0–M2 review (2026-11-22):**
   - *Bookmarks resolving after a relaunch* isn't automated: it needs two app launches.
     Checked by hand in the spike; automate with state restoration in M5.
-  - *Asking for access again* when a saved bookmark no longer resolves: today a dead
-    recent file just drops out of the menu. Belongs to the M4 per-volume access flow.
+  - ~~*Asking for access again* when a saved bookmark no longer resolves~~: done in M4
+    (D42). Lost grants are asked for again where they were; moved recent files stay
+    in Open Recent and offer to find them.
   - *`SF_DATALESS` at open* (§4.1): not testable in CI (needs an iCloud-evicted file);
     lands with the M3c recovery clone, which must wait for the download anyway.
 - **From the M3a review (2026-11-22):**
@@ -1034,3 +1057,16 @@ byte histogram.
   - *Flushing on app deactivation*: the 1 s debounce and the flush at save and close
     cover it; an explicit flush when the app goes to the background isn't wired.
   - *Strategy B writes aren't coordinated* with `NSFileCoordinator` yet.
+- **From M4 (2026-11-23):**
+  - *Many files deleted from outside a shown 100k folder* (100k unlinks, not a move
+    to the Trash) still stalls the tab: each burst of FSEvents is read and merged
+    while the table shrinks, up to seconds in the Debug build, and while it lasted
+    the smoke test's editor undo checks once failed with the tab watching that
+    folder. The smoke test moves the folder away instead (as Finder's Delete does).
+    Revisit with M6's operations, which delete large trees themselves.
+  - *The 50 ms gate on CI*: on the dev Mac the worst gap is about 30-48 ms (listing
+    100k). Hosted runners are slower; if they cross it, look at the first rows'
+    drawing before loosening the gate.
+  - *Volumes in the sidebar* and the global hidden-files default: M5 and M10.
+  - *External volumes by hand*: granting a whole drive and a renamed volume asking
+    again aren't automated (they need real drives), like the M3c volume spike.
