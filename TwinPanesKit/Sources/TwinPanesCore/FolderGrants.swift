@@ -40,6 +40,16 @@ public final class FolderGrants {
         return scope
     }
 
+    /// The most specific granted folder containing `url` whose bookmark no longer
+    /// resolves (renamed, moved or unmounted), as it last was: the place to ask for
+    /// access again (D-g).
+    public func lostGrant(covering url: URL) -> URL? {
+        let target = url.standardizedFileURL.pathComponents
+        return store.lost
+            .filter { target.starts(with: $0.standardizedFileURL.pathComponents) }
+            .max { $0.pathComponents.count < $1.pathComponents.count }
+    }
+
     public func removeAll() {
         store.removeAll()
         cachedEntries = nil

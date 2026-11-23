@@ -2,7 +2,10 @@ import Foundation
 
 /// A newest-first list of app-scoped security-scoped bookmarks kept in `UserDefaults`
 /// under one key (PLAN.md §5). Shared by the folder grants and the Open Recent list.
-/// One entry per standardized path; an optional `limit` caps the list.
+/// One entry per standardized path; an optional `limit` caps the list. A bookmark that
+/// stops resolving (moved, renamed, unmounted) is kept and reported in `lost` with the
+/// path it last had, so the user can be asked to grant it again (docs/plans/M4.md,
+/// D-g); only data that isn't a bookmark at all is pruned.
 public final class BookmarkStore {
     public typealias Entry = (url: URL, data: Data, stale: Bool)
 
@@ -16,12 +19,26 @@ public final class BookmarkStore {
         self.limit = limit
     }
 
-    /// Records `url` at the top, replacing any entry for the same path, pruning entries
-    /// that no longer resolve, and trimming to `limit`. Call while access to it is active.
+    /// Records `url` at the top, replacing any entry for the same path (a lost one too),
+    /// pruning data that isn't a bookmark, and trimming to `limit`. Call while access to it is active.
     public func add(_ url: URL) throws {
         let data = try Self.bookmark(url)
         let path = url.standardizedFileURL.path
         stored = [data] + stored.filter { Self.path(of: $0).map { $0 != path } ?? false }
+    }
+
+    /// Where the entries that no longer resolve last were, newest first.
+    public var lost: [URL] {
+        stored.compactMap { data in
+            Self.resolve(data) == nil
+                ? Self.recordedPath(of: data).map(URL.init(fileURLWithPath:)) : nil
+        }
+    }
+
+    /// Drops the entries for `url`'s path, lost or not.
+    public func forget(_ url: URL) {
+        let path = url.standardizedFileURL.path
+        stored = stored.filter { Self.path(of: $0).map { $0 != path } ?? false }
     }
 
     /// The entries that still resolve, newest first.
@@ -66,7 +83,14 @@ public final class BookmarkStore {
             options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
     }
 
+    /// The path an entry resolves to, or else the one recorded in it.
     private static func path(of data: Data) -> String? {
-        resolve(data)?.url.standardizedFileURL.path
+        resolve(data)?.url.standardizedFileURL.path ?? recordedPath(of: data)
+    }
+
+    /// The path recorded in bookmark data, without resolving it; nil for non-bookmarks.
+    static func recordedPath(of data: Data) -> String? {
+        (URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: data)?.path)
+            .map { URL(fileURLWithPath: $0).standardizedFileURL.path }
     }
 }

@@ -75,6 +75,33 @@ import Testing
         #expect((defaults.array(forKey: key) as? [Data])?.count == 2)
     }
 
+    /// A bookmark whose item went away is kept as lost, with its path, until it's
+    /// granted again; adding the same path replaces it (M4, D-g).
+    @Test func aMovedItemIsReportedLostNotDropped() throws {
+        defer { cleanUp() }
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let store = BookmarkStore(defaults: defaults, key: key)
+        let folder = dir.appendingPathComponent("granted", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try store.add(folder)
+        try store.add(try file("other"))
+        try FileManager.default.removeItem(at: folder)
+        #expect(paths(store) == [dir.appendingPathComponent("other").path])
+        // The recorded path is the real one (/private/var for the temp folder).
+        let lost = try #require(store.lost.first)
+        #expect(store.lost.count == 1 && lost.lastPathComponent == "granted")
+        try store.add(try file("third"))  // writing doesn't prune it
+        #expect(store.lost == [lost])
+        let grants = FolderGrants(defaults: defaults, key: key)
+        #expect(grants.lostGrant(covering: lost.appendingPathComponent("inner/x")) == lost)
+        #expect(grants.lostGrant(covering: lost.deletingLastPathComponent()) == nil)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try store.add(folder)
+        #expect(store.lost.isEmpty && paths(store).first == folder.path)
+        store.forget(folder)
+        #expect(!paths(store).contains(folder.path))
+    }
+
     @Test func refreshKeepsPositionAndAddsIfMissing() throws {
         defer { cleanUp() }
         let store = BookmarkStore(defaults: try #require(UserDefaults(suiteName: suite)), key: key)
