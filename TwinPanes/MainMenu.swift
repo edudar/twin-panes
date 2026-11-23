@@ -83,6 +83,7 @@ enum MainMenu {
                 command(.toggleZoom), command(.exitZoom), .separator(),
                 command(.nextTab), command(.previousTab), .separator(),
                 command(.browserOpen), command(.browserView), command(.browserEdit),
+                command(.browserBack), command(.browserForward),
                 command(.browserParent), command(.browserGoToFolder),
                 command(.browserToggleHidden),
                 .separator(), command(.goToOffset), command(.toggleInspector), .separator(),

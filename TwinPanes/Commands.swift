@@ -47,6 +47,8 @@ extension CommandID {
     static let browserParent: CommandID = "browser.parent"
     static let browserGoToFolder: CommandID = "browser.goToFolder"
     static let browserToggleHidden: CommandID = "browser.toggleHidden"
+    static let browserBack: CommandID = "browser.back"
+    static let browserForward: CommandID = "browser.forward"
     static let editorFind: CommandID = "editor.find"
     static let editorFindNext: CommandID = "editor.findNext"
     static let editorFindPrevious: CommandID = "editor.findPrevious"
@@ -103,6 +105,8 @@ enum DefaultCommands {
         add(.browserOpen, "Open", #selector(BrowserActions.browserOpen(_:)))
         add(.browserParent, "Enclosing Folder", #selector(BrowserActions.browserParent(_:)))
         add(.browserGoToFolder, "Go to Folder…", #selector(BrowserActions.browserGoToFolder(_:)))
+        add(.browserBack, "Back", #selector(BrowserActions.browserBack(_:)))
+        add(.browserForward, "Forward", #selector(BrowserActions.browserForward(_:)))
         add(
             .browserToggleHidden, "Show Hidden Files",
             #selector(BrowserActions.browserToggleHidden(_:)))
@@ -155,7 +159,9 @@ enum DefaultCommands {
             KeyChord(Self.arrow(NSUpArrowFunctionKey), .command), to: .browserParent, in: browser)
         registry.bind(KeyChord("\u{7f}"), to: .browserParent, in: fileList)
         registry.bind(KeyChord("g", [.command, .shift]), to: .browserGoToFolder, in: browser)
-        registry.bind(KeyChord(">", .command), to: .browserToggleHidden, in: browser)  // ⇧⌘.
+        registry.bind(KeyChord(">", .command), to: .browserToggleHidden, in: browser)
+        registry.bind(KeyChord("[", .command), to: .browserBack, in: browser)
+        registry.bind(KeyChord("]", .command), to: .browserForward, in: browser)  // ⇧⌘.
         registry.bind(KeyChord("s", .command), to: .save, in: editor)
         registry.bind(KeyChord("s", [.command, .shift]), to: .saveAs, in: editor)
         registry.bind(KeyChord("f", .command), to: .editorFind, in: editor)

@@ -104,6 +104,14 @@ struct SmokeTest {
         check(dispatch(KeyChord("\u{7f}"), in: window), "Backspace goes to the parent")
         check(browser.folder == folder.standardizedFileURL, "back in the sample folder")
         await browser.listed()
+        check(dispatch(KeyChord("[", .command), in: window), "⌘[ dispatched")
+        await browser.listed()
+        check(browser.folder.lastPathComponent == "sub", "⌘[ goes back into sub")
+        check(dispatch(KeyChord("]", .command), in: window), "⌘] dispatched")
+        await browser.listed()
+        check(
+            browser.folder == folder.standardizedFileURL && table.selectedRow == 1,
+            "⌘] comes forward again with sub selected")
         table.selectRowIndexes([2], byExtendingSelection: false)
         check(dispatch(.function(4), in: window), "F4 dispatched on a file")
         let opened = app.workspace.allItems.compactMap { $0 as? HexEditorItem }

@@ -15,6 +15,9 @@ extension ItemKind {
     @objc optional func browserEdit(_ sender: Any?)
     /// ⌘↑, Backspace: the parent folder.
     @objc optional func browserParent(_ sender: Any?)
+    /// ⌘[ and ⌘]: the tab's previous and next folder.
+    @objc optional func browserBack(_ sender: Any?)
+    @objc optional func browserForward(_ sender: Any?)
     /// ⇧⌘.: show or hide hidden files in this tab.
     @objc optional func browserToggleHidden(_ sender: Any?)
     /// ⇧⌘G: focus the path field.
@@ -58,6 +61,9 @@ public final class BrowserItem: WorkspaceItem {
     }
     private var isMerging = false
     private var listedWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Folders to go back and forward to, most recent last (D-d).
+    var backStack: [HistoryEntry] = []
+    var forwardStack: [HistoryEntry] = []
     /// Set when the sandbox refuses the folder until the user grants access.
     public private(set) var needsAccess = false
     /// False until the first listing; the view lists the folder when it first loads.
@@ -85,15 +91,26 @@ public final class BrowserItem: WorkspaceItem {
     /// there and the rows arrive in batches; if access is needed the tab moves there and
     /// shows the access prompt. Returns false (and stays put) for missing or non-folder
     /// paths: those are checked at once, before anything is listed.
+    /// Going to another folder is recorded in the tab's history.
     @discardableResult
     public func go(to url: URL? = nil, selecting name: String? = nil) -> Bool {
+        navigate(to: url, selecting: name, recording: true, quietly: false)
+    }
+
+    func navigate(to url: URL?, selecting name: String?, recording: Bool, quietly: Bool) -> Bool {
         let target = (url ?? folder).standardizedFileURL
         let newScope = grants.scope(covering: target)
         let problem = FolderLister.check(target)
         if let problem, !problem.needsAccess {
-            host?.showStatus("Can’t open “\(target.path)”: \(problem)")
-            NSSound.beep()
+            if !quietly {
+                host?.showStatus("Can’t open “\(target.path)”: \(problem)")
+                NSSound.beep()
+            }
             return false
+        }
+        if recording, hasListed, target.path != folder.path {
+            backStack.append(here)
+            forwardStack = []
         }
         let order = self.order
         stopListing()

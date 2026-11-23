@@ -90,7 +90,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     private(set) var isRestoringSelection = false
     /// What's selected, recorded as it changes: by the time the table reloads, the
     /// item's rows may already be new, so its old row no longer names the entry.
-    private var selectedName: String?
+    private(set) var selectedName: String?
     private var selectedParentRow = false
 
     /// A new folder: empties the list (it fills as batches arrive), selects the first
@@ -188,6 +188,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     @objc func browserEdit(_ sender: Any?) { browserView(sender) }
     @objc func browserParent(_ sender: Any?) { item?.goToParent() }
 
+    @objc func browserBack(_ sender: Any?) { item?.goBack() }
+    @objc func browserForward(_ sender: Any?) { item?.goForward() }
+
     @objc func browserToggleHidden(_ sender: Any?) {
         guard let item else { return }
         item.showHidden(!item.showsHidden)
@@ -238,6 +241,10 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             return selectedEntry != nil
         case #selector(browserParent(_:)):
             return item.folder.path != "/"
+        case #selector(browserBack(_:)):
+            return !item.backStack.isEmpty
+        case #selector(browserForward(_:)):
+            return !item.forwardStack.isEmpty
         case #selector(browserToggleHidden(_:)):
             menuItem.state = item.showsHidden ? .on : .off
             return true
