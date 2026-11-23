@@ -11,6 +11,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     let pathField = NSTextField()
     /// The clickable path above the list (D-h); the field replaces it while editing.
     let pathControl = NSPathControl()
+    /// The folder each of the bar's items stands for.
+    var pathURLs: [URL] = []
     private let scrollView = NSScrollView()
     private let accessPrompt = NSStackView()
     private let accessLabel = NSTextField(wrappingLabelWithString: "")
@@ -109,7 +111,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     func startShowing(selecting name: String?) {
         guard isViewLoaded, let item else { return }
         pathField.stringValue = item.folder.path
-        pathControl.url = item.folder
+        showPath(item.folder)
         scrollView.isHidden = item.needsAccess
         accessPrompt.isHidden = !item.needsAccess
         if item.needsAccess {  // resolving the saved grants isn't free: only when shown

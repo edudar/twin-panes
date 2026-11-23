@@ -84,11 +84,33 @@ public final class FolderWatcher: Sendable {
             relay.release()
             return false
         }
-        state.withLock {
-            $0.stream = stream
-            $0.relay = relay
+        let kept = state.withLock { state -> Bool in
+            guard !state.stopped else { return false }  // stopped while starting
+            state.stream = stream
+            state.relay = relay
+            return true
         }
-        return true
+        if !kept {
+            FSEventStreamStop(stream)
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+            nonisolated(unsafe) let box = relay
+            queue.async { box.release() }
+        }
+        return kept
+    }
+
+    /// Starts the stream on the watcher's queue instead of here: FSEventStreamStart
+    /// waits on fseventsd, which took up to 240 ms on a busy system (M4 smoke test).
+    /// Changes made before it's running aren't reported.
+    /// `started` hears, on the watcher's queue, whether the stream is running.
+    public func startSoon(
+        latency: TimeInterval = 0.2, started: (@Sendable (Bool) -> Void)? = nil
+    ) {
+        queue.async { [self] in
+            let running = !isStopped && start(latency: latency)
+            started?(running)
+        }
     }
 
     /// Stops the stream; no change is delivered afterwards.

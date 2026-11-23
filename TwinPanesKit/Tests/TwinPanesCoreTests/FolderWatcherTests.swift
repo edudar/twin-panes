@@ -103,6 +103,29 @@ import Testing
         #expect(stoppedSeen.changes.isEmpty)
     }
 
+    /// A watcher stopped before its background start never runs; one left running
+    /// reports changes once it says it has started.
+    @Test func startingInTheBackground() async throws {
+        defer { cleanUp() }
+        let seen = Seen()
+        let stopped = FolderWatcher(folder: dir) { seen.add($0) }
+        let wasRunning = await withCheckedContinuation { done in
+            stopped.stop()
+            stopped.startSoon(latency: 0.05) { done.resume(returning: $0) }
+        }
+        #expect(!wasRunning)
+        let later = Seen()
+        let running = FolderWatcher(folder: dir) { later.add($0) }
+        #expect(
+            await withCheckedContinuation { done in
+                running.startSoon(latency: 0.05) { done.resume(returning: $0) }
+            })
+        defer { running.stop() }
+        FileManager.default.createFile(atPath: dir.appendingPathComponent("bg").path, contents: nil)
+        await later.until { !$0.names.isEmpty }
+        #expect(seen.changes.isEmpty)
+    }
+
     @Test func deletingTheFolderReportsItGone() async throws {
         let (watcher, seen) = watch()
         defer { watcher.stop() }

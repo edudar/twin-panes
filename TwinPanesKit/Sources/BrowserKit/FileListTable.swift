@@ -70,6 +70,9 @@ final class IconCache {
         return copy
     }
 
+    /// The generic folder icon at 16 points.
+    private(set) lazy var folder = Self.small(NSWorkspace.shared.icon(for: .folder))
+
     func icon(for entry: DirectoryEntry) -> NSImage {
         guard entry.type.conforms(to: .application) else {
             if let icon = byType[entry.type] { return icon }

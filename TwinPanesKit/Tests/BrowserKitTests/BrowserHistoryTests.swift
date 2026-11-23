@@ -166,7 +166,8 @@ import Testing
         let controller = item.controller
         _ = controller.view
         await item.listed()
-        #expect(controller.pathControl.url?.path == item.folder.path)
+        #expect(controller.pathURLs.last?.path == item.folder.path)
+        #expect(controller.pathControl.pathItems.count == controller.pathURLs.count)
         #expect(!controller.pathControl.isHidden && controller.pathField.isHidden)
         #expect(controller.pathControl.pathItems.last?.title == "b")
 

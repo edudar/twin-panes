@@ -105,7 +105,9 @@ public final class BrowserItem: WorkspaceItem {
     public var title: String {
         folder.path == "/" ? "/" : FileManager.default.displayName(atPath: folder.path)
     }
-    public var icon: NSImage? { NSWorkspace.shared.icon(forFile: folder.path) }
+    /// The generic folder icon, cached: asking for this folder's own one on every change
+    /// cost tens of milliseconds per navigation.
+    public var icon: NSImage? { IconCache.shared.folder }
     public var viewController: NSViewController { controller }
     public var preferredFirstResponder: NSView? { controller.tableView }
 

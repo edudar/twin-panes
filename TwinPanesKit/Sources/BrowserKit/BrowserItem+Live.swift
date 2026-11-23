@@ -24,7 +24,7 @@ extension BrowserItem {
             guard let self, self.generation == wanted else { return }
             self.folderChanged(change)
         }
-        watcher.start()
+        watcher.startSoon()
         self.watcher = watcher
     }
 

@@ -17,9 +17,29 @@ extension BrowserViewController: NSTextFieldDelegate {
 
     var isEditingPath: Bool { !pathField.isHidden }
 
+    /// The folders of `folder`'s path as the bar's items, each with the cached folder
+    /// icon: setting the control's `url` looks up every folder's own icon, 50-90 ms per
+    /// navigation on a busy system.
+    func showPath(_ folder: URL) {
+        let parts = folder.standardizedFileURL.pathComponents
+        pathURLs = parts.indices.map { i in
+            URL(
+                fileURLWithPath: NSString.path(withComponents: Array(parts[...i])),
+                isDirectory: true)
+        }
+        pathControl.pathItems = pathURLs.map { url in
+            let item = NSPathControlItem()
+            item.title = url.path == "/" ? "/" : url.lastPathComponent
+            item.image = IconCache.shared.folder
+            return item
+        }
+    }
+
     @objc func pathBarClicked(_ sender: NSPathControl) {
-        if let url = sender.clickedPathItem?.url {
-            goToPathComponent(url)
+        if let clicked = sender.clickedPathItem,
+            let index = sender.pathItems.firstIndex(of: clicked), pathURLs.indices.contains(index)
+        {
+            goToPathComponent(pathURLs[index])
         } else {
             editPath()
         }
