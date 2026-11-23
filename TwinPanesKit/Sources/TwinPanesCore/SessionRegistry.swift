@@ -12,7 +12,10 @@ public final class SessionRegistry {
         weak var session: EditorSession?
     }
 
-    public init() {}
+    /// Where sessions keep their folders and clones; nil keeps none.
+    public let sessionsRoot: URL?
+
+    public init(sessionsRoot: URL? = nil) { self.sessionsRoot = sessionsRoot }
 
     /// The live session editing the file at `url`, if there is one.
     public func session(for url: URL) -> EditorSession? {
@@ -26,7 +29,8 @@ public final class SessionRegistry {
         _ url: URL, scope: SecurityScope? = nil, addDirectory: URL? = nil
     ) throws -> (session: EditorSession, isNew: Bool) {
         if let session = session(for: url) { return (session, false) }
-        let session = try EditorSession(url: url, scope: scope, addDirectory: addDirectory)
+        let session = try EditorSession(
+            url: url, scope: scope, addDirectory: addDirectory, sessionsRoot: sessionsRoot)
         entries = entries.filter { $0.value.session != nil }
         entries[session.identity.key] = Entry(session: session)
         // A save replaces the file, giving it a new inode: follow the session there.

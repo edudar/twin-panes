@@ -37,13 +37,21 @@ public final class EditorSession {
     /// Scopes of files the session edited before a Save As; kept, since the original
     /// pieces still read the file it opened.
     var earlierScopes: [SecurityScope] = []
-    public let buffer: EditBuffer
+    public internal(set) var buffer: EditBuffer
+    /// Where session folders go (`SessionFolder.defaultRoot` in the app); nil keeps no
+    /// folder and no clone.
+    public let sessionsRoot: URL?
+    /// Made on the first edit: the clone the original pieces read, the add buffer, and
+    /// the manifest (docs/plans/M3c.md, D-a).
+    public internal(set) var folder: SessionFolder?
+    /// The clone failed (another volume): the original pieces read the live file.
+    public internal(set) var isNarrowed = false
     /// The file as last opened or saved.
     public internal(set) var identity: FileIdentity
     public internal(set) var access: AccessMode
     /// The version that is on disk.
     public internal(set) var savedTree: PieceTree
-    public private(set) var undoStack = UndoStack()
+    public internal(set) var undoStack = UndoStack()
     /// Writes the file (see `save()`); a test can give it another `FileSystem`.
     public let saver: Saver
     /// The last save started or queued, and how many are running or queued (at most 2).
@@ -58,16 +66,27 @@ public final class EditorSession {
 
     /// Opens `url`. Throws `ByteSourceError` for anything but a readable regular file.
     public init(
-        url: URL, scope: SecurityScope? = nil, addDirectory: URL? = nil, saver: Saver = Saver()
+        url: URL, scope: SecurityScope? = nil, addDirectory: URL? = nil, saver: Saver = Saver(),
+        sessionsRoot: URL? = nil
     ) throws {
         self.url = url
         self.scope = scope
         self.saver = saver
+        self.sessionsRoot = sessionsRoot
         let source = try ByteSource(url: url)
-        buffer = try EditBuffer(original: source, addDirectory: addDirectory)
+        buffer =
+            try addDirectory.map { try EditBuffer(original: source, addDirectory: $0) }
+            ?? EditBuffer(original: source)
         identity = source.identity
         access = AccessMode.of(url)
         savedTree = buffer.tree
+    }
+
+    deinit {
+        if let folder {
+            try? folder.markClosed()
+            folder.delete()
+        }
     }
 
     public var length: UInt64 { buffer.length }
@@ -87,6 +106,7 @@ public final class EditorSession {
         selectionAfter: Range<UInt64>, coalescing: Bool = false
     ) throws {
         if case .readOnly(let reason) = access { throw EditorSessionError.readOnly(reason) }
+        if folder == nil { try protectBeforeFirstEdit() }
         let before = UndoStack.State(tree: buffer.tree, selection: selectionBefore)
         try buffer.overwrite(at: offset, with: bytes)
         let after = UndoStack.State(tree: buffer.tree, selection: selectionAfter)

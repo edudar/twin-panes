@@ -121,6 +121,19 @@ private final class StatusLog: WorkspaceHost {
         #expect(log.messages.last?.hasPrefix("Couldn't save “x.bin”") == true)
     }
 
+    /// Closing the tab ends its session: the folder with the clone goes (M3c).
+    @Test func closingTheTabDeletesTheSessionFolder() throws {
+        defer { cleanUp() }
+        let root = folder.appendingPathComponent("Sessions")
+        let item = HexEditorItem(session: try EditorSession(url: url, sessionsRoot: root))
+        _ = item.controller.view
+        item.hexView.insertText("FF")
+        let made = try #require(item.session.folder)
+        item.willClose()
+        #expect(!FileManager.default.fileExists(atPath: made.url.path))
+        #expect(SessionFolder.sweep(root).isEmpty)
+    }
+
     @Test func readOnlyTabsCantSave() throws {
         defer { cleanUp() }
         try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)

@@ -144,6 +144,12 @@ extension SmokeTest {
         let save = #selector(HexEditorActions.editorSave(_:))
         hex.hexView.go(to: 0x20)
         type("7E", in: window)
+        // M3c: the first edit made the session's folder, with a clone of the file.
+        let made = hex.session.folder
+        check(
+            made.map { FileManager.default.fileExists(atPath: $0.file("original.clone").path) }
+                == true && !hex.session.isNarrowed,
+            "the first edit clones the file into the session's folder")
         check(menu(save, key: "s", in: window), "File › Save (⌘S) reaches the editor")
         await saved()
         check(!hex.isDirty && disk(0x20..<0x21) == [0x7E], "the save reaches the file")
@@ -201,6 +207,13 @@ extension SmokeTest {
         check(
             controller.layout.item(hex.id) == nil && (try? Data(contentsOf: copy))?[0x22] == 0x22,
             "Save in the close sheet saves, then closes the tab")
+        for _ in 0..<50
+        where made.map({ FileManager.default.fileExists(atPath: $0.url.path) }) == true {
+            await settle(milliseconds: 20)
+        }
+        check(
+            made.map { !FileManager.default.fileExists(atPath: $0.url.path) } == true,
+            "closing the tab deletes the session's folder")
     }
 
     /// The button titled `title` under `view`, for pressing a sheet's buttons.

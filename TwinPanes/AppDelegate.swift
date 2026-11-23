@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     lazy var spike = SandboxSpike(app: self)
     let recentFiles = RecentFiles()
     /// One session per open file (docs/plans/M3b.md, D-a).
-    let sessions = SessionRegistry()
+    let sessions = SessionRegistry(sessionsRoot: SessionFolder.defaultRoot)
 
     private(set) var windowControllers: [MainWindowController] = []
     private var editorCount = 0
@@ -55,6 +55,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     {
         if !hasVisibleWindows { openMainWindow() }
         return true
+    }
+
+    /// The app quits without tearing sessions down: close them so their folders don't
+    /// look like a crash at the next launch.
+    func applicationWillTerminate(_ notification: Notification) {
+        for session in sessions.sessions { session.close() }
     }
 
     /// Quitting waits for saves that are running, then runs the same close workflow as

@@ -98,8 +98,13 @@ public final class HexEditorItem: WorkspaceItem {
     func updateStatus() { host?.showStatus(statusText) }
 
     /// Stops a running search, which would otherwise keep scanning (and keep the file
-    /// open) after the tab is gone.
-    public func willClose() { controller.cancelSearch() }
+    /// open) after the tab is gone, and closes the session.
+    public func willClose() {
+        controller.cancelSearch()
+        // One tab per session for now (the registry brings an open file's tab forward),
+        // so this tab closing ends the session: its folder goes (docs/plans/M3c.md).
+        session.close()
+    }
 
     static func hex(_ value: UInt64) -> String {
         "0x" + String(value, radix: 16, uppercase: true)

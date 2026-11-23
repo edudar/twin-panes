@@ -36,6 +36,9 @@ struct SmokeTest {
                 if !condition { failures.append(message) }
             }
             await body(check)
+            // `exit` skips teardown: close sessions as quitting does.
+            app.applicationWillTerminate(
+                Notification(name: NSApplication.willTerminateNotification))
             print("  info the smoke test took \(ContinuousClock.now - started)")
             print(failures.isEmpty ? "SMOKE OK" : "SMOKE FAIL: \(failures.count) check(s)")
             exit(failures.isEmpty ? 0 : 1)
@@ -327,7 +330,7 @@ struct SmokeTest {
         await editing(check, hex: hex, window: window)
         await readOnlyFile(check, window: window)
         await saving(check, window: window)
-        await truncation(check, hex: hex, url: url)
+        await truncation(check)
         check(app.openFile(dir) == nil, "a folder is refused")
         window.attachedSheet.map { window.endSheet($0) }
     }
@@ -350,8 +353,16 @@ struct SmokeTest {
     }
 
     /// Review bug 1: the file gets shorter while it's open. Scrolling past the new end
-    /// must draw placeholders and report the problem, not trap.
-    private func truncation(_ check: (Bool, String) -> Void, hex: HexEditorItem, url: URL) async {
+    /// must draw placeholders and report the problem, not trap. A tab of its own: once
+    /// edited, a tab reads its clone (M3c), which an outside truncation can't reach.
+    private func truncation(_ check: (Bool, String) -> Void) async {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("smoke-truncate-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: url) }
+        guard (try? Data(count: 200_000).write(to: url)) != nil, let hex = app.openFile(url)
+        else { return check(false, "open a sample to truncate") }
+        defer { app.controller(containing: hex.id)?.layout.remove(hex.id) }
+        await settle()
         do { try FileHandle(forWritingTo: url).truncate(atOffset: 1000) } catch {
             return check(false, "truncate the sample file: \(error)")
         }
