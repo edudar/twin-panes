@@ -1,0 +1,112 @@
+import CoreServices
+import Foundation
+import Testing
+
+@testable import TwinPanesCore
+
+/// FSEvents on one folder (docs/plans/M4.md, D-f, step 8).
+@MainActor
+@Suite(.timeLimit(.minutes(1))) struct FolderWatcherTests {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("FolderWatcherTests-\(UUID().uuidString)", isDirectory: true)
+
+    init() throws {
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent("sub"), withIntermediateDirectories: true)
+    }
+
+    func cleanUp() { try? FileManager.default.removeItem(at: dir) }
+
+    @MainActor final class Seen {
+        var changes: [FolderWatcher.Change] = []
+        var names: Set<String> {
+            changes.reduce(into: []) { if case .names(let n) = $1 { $0.formUnion(n) } }
+        }
+        var waiting: (check: (Seen) -> Bool, done: CheckedContinuation<Void, Never>)?
+
+        func add(_ change: FolderWatcher.Change) {
+            changes.append(change)
+            if let waiting, waiting.check(self) {
+                self.waiting = nil
+                waiting.done.resume()
+            }
+        }
+
+        /// Returns once `check` holds, or fails the test after 10 s rather than hang.
+        func until(
+            _ check: @escaping (Seen) -> Bool, sourceLocation: SourceLocation = #_sourceLocation
+        ) async {
+            if check(self) { return }
+            let deadline = Task { @MainActor in
+                try await Task.sleep(for: .seconds(10))
+                guard let waiting = self.waiting else { return }
+                self.waiting = nil
+                Issue.record(
+                    "no such change within 10 s: \(self.changes)", sourceLocation: sourceLocation)
+                waiting.done.resume()
+            }
+            await withCheckedContinuation { waiting = (check, $0) }
+            deadline.cancel()
+        }
+    }
+
+    func watch(_ folder: URL? = nil) -> (FolderWatcher, Seen) {
+        let seen = Seen()
+        let watcher = FolderWatcher(folder: folder ?? dir) { seen.add($0) }
+        #expect(watcher.start(latency: 0.05))
+        return (watcher, seen)
+    }
+
+    @Test func createDeleteAndRenameAreReported() async throws {
+        defer { cleanUp() }
+        let (watcher, seen) = watch()
+        defer { watcher.stop() }
+        let file = dir.appendingPathComponent("new.txt")
+        FileManager.default.createFile(atPath: file.path, contents: nil)
+        await seen.until { $0.names.contains("new.txt") }
+        try FileManager.default.moveItem(at: file, to: dir.appendingPathComponent("moved.txt"))
+        await seen.until { $0.names.contains("moved.txt") }
+        try FileManager.default.removeItem(at: dir.appendingPathComponent("moved.txt"))
+        let before = seen.changes.count
+        await seen.until { $0.changes.count > before }
+        #expect(seen.names.isSuperset(of: ["new.txt", "moved.txt"]))
+    }
+
+    /// Changes inside a subfolder aren't the folder's; a second watcher on the subfolder
+    /// shows the event really happened.
+    @Test func aSubfolderChangeIsNotReported() async throws {
+        defer { cleanUp() }
+        let (watcher, seen) = watch()
+        let (inner, innerSeen) = watch(dir.appendingPathComponent("sub"))
+        defer {
+            watcher.stop()
+            inner.stop()
+        }
+        FileManager.default.createFile(
+            atPath: dir.appendingPathComponent("sub/deep.txt").path, contents: nil)
+        await innerSeen.until { $0.names.contains("deep.txt") }
+        FileManager.default.createFile(
+            atPath: dir.appendingPathComponent("marker").path, contents: nil)
+        await seen.until { $0.names.contains("marker") }
+        #expect(!seen.names.contains("deep.txt"))
+    }
+
+    @Test func nothingArrivesAfterStop() async throws {
+        defer { cleanUp() }
+        let (stopped, stoppedSeen) = watch()
+        let (other, otherSeen) = watch()
+        defer { other.stop() }
+        stopped.stop()
+        FileManager.default.createFile(
+            atPath: dir.appendingPathComponent("late").path, contents: nil)
+        await otherSeen.until { $0.names.contains("late") }
+        #expect(stoppedSeen.changes.isEmpty)
+    }
+
+    @Test func deletingTheFolderReportsItGone() async throws {
+        let (watcher, seen) = watch()
+        defer { watcher.stop() }
+        try FileManager.default.removeItem(at: dir)
+        await seen.until { $0.changes.contains(.folderGone) }
+    }
+}
