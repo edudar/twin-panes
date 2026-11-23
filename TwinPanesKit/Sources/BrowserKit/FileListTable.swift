@@ -12,6 +12,7 @@ final class FileListTableView: NSTableView, CommandScopeProviding {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        FileCell.styleVersion += 1
         iconsChanged?()
     }
 
@@ -48,6 +49,48 @@ final class FileCell: NSTableCellView {
         didSet { needsDisplay = true }
     }
 
+    /// The text's font, the same in every cell.
+    static let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+    /// Bumped to make every cell lay its text out again: on an appearance change, and
+    /// for a font change once there's a preference for it.
+    static var styleVersion = 0
+
+    private struct LineKey: Equatable {
+        let text: String
+        let width: CGFloat
+        let version: Int
+    }
+
+    /// The text laid out (and truncated in the middle) for one width: kept until the
+    /// text, the width or the style changes (docs/plans/M4.md, performance pass, step 4).
+    /// It carries no colour, so selecting the row or a new appearance needs no new one.
+    private var line: (key: LineKey, line: CTLine, width: CGFloat)?
+    /// How many lines this cell has laid out, for tests.
+    private(set) var lineBuilds = 0
+
+    func preparedLine(
+        width: CGFloat, version: Int = styleVersion
+    ) -> (line: CTLine, width: CGFloat) {
+        let key = LineKey(text: text, width: width, version: version)
+        if let line, line.key == key { return (line.line, line.width) }
+        lineBuilds += 1
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: Self.font,
+            NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
+        ]
+        func laidOut(_ string: String) -> CTLine {
+            CTLineCreateWithAttributedString(
+                NSAttributedString(string: string, attributes: attributes))
+        }
+        var made = laidOut(text)
+        if CTLineGetTypographicBounds(made, nil, nil, nil) > width {
+            made = CTLineCreateTruncatedLine(made, width, .middle, laidOut("…")) ?? laidOut("")
+        }
+        let madeWidth = CGFloat(CTLineGetTypographicBounds(made, nil, nil, nil))
+        line = (key, made, madeWidth)
+        return (made, madeWidth)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let step = StepTiming.start("cell draw")
         defer { step?.end() }
@@ -56,25 +99,26 @@ final class FileCell: NSTableCellView {
             icon?.draw(in: NSRect(x: x, y: (bounds.height - 16) / 2, width: 16, height: 16))
             x += 22
         }
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingMiddle
-        paragraph.alignment = alignment
-        let selected = backgroundStyle == .emphasized
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let available = max(0, bounds.width - x - 2)
+        let (line, width) = preparedLine(width: available)
         let color: NSColor =
-            selected
+            backgroundStyle == .emphasized
             ? .alternateSelectedControlTextColor
             : secondary ? .secondaryLabelColor : .labelColor
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: NSFont.systemFontSize), .foregroundColor: color,
-            .paragraphStyle: paragraph,
-        ]
-        let height = ceil(
-            NSFont.systemFont(ofSize: NSFont.systemFontSize).boundingRectForFont.height)
-        let rect = NSRect(
-            x: x, y: (bounds.height - height) / 2, width: max(0, bounds.width - x - 2),
-            height: height)
-        (text as NSString).draw(
-            with: rect, options: [.usesLineFragmentOrigin], attributes: attributes)
+        context.saveGState()
+        defer { context.restoreGState() }
+        if isFlipped {
+            context.translateBy(x: 0, y: bounds.height)
+            context.scaleBy(x: 1, y: -1)
+        }
+        color.setFill()
+        context.textMatrix = .identity
+        let (ascent, descent) = (Self.font.ascender, -Self.font.descender)
+        context.textPosition = CGPoint(
+            x: alignment == .right ? x + available - width : x,
+            y: ((bounds.height - ascent - descent) / 2 + descent).rounded())
+        CTLineDraw(line, context)
     }
 }
 
