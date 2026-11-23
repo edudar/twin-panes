@@ -1,7 +1,8 @@
 # M3c plan: protecting unsaved edits and crash recovery
 
-_Status: draft 2026-11-22, written with the M3b split. It gets reviewed again, updated
-from how M3b was actually built, before M3c starts._
+_Status: updated 2026-11-22 from how M3b was built (PLAN.md D30–D33) and started the
+same day while the maintainer was away, at their request; the decisions below are open to
+review when they're back. In progress.__
 
 ## Context
 
@@ -20,6 +21,18 @@ M3c delivers the rest of PLAN.md's first-usable guarantees (D15–D17).
 - Saving never triggers the external-change sheet.
 - An external change never corrupts unsaved edits.
 - The fault-injection suite (PLAN.md §7) passes.
+
+## What M3b built that M3c builds on
+
+- `EditorSession` owns the `EditBuffer`, undo, `savedTree`, identity, access and scope,
+  and saves through `Saver` → `FileSystem` on a dispatch queue (D30, D32).
+- Pieces point at the file as opened; after a strategy-A replace the session reads the
+  old inode through its descriptor (D33). M3c's clone replaces that with a file the
+  session owns.
+- `SavePlan` compares piece trees exactly (D31). The journal reuses that comparison to
+  record what any tree change (edit, undo, redo, revert) did, so undo entries need no
+  changed range after all.
+- Only `Saver` writes through `FileSystem`; the add buffer and the journal join it here.
 
 ## Decisions (agreed when M3b was split)
 
@@ -123,23 +136,45 @@ Strategy B is used when `st_nlink > 1`, or when staging fails on a volume with a
   that matches the reference model up to the last durable record.
 - The kill cases also run once against `RealFileSystem`.
 
-## Commits (outline; detailed at the re-review)
+## Commits
 
-1. The session folder and manifest, lazy creation, the launch sweep.
-2. The clone at the first edit, with the identity check and the reload-first path.
-3. Strategy B and the launch rollback, which removes M3b's hard-link refusal.
-4. File watching with our own writes suppressed.
-5. The external-change policy and sheet.
-6. iCloud dataless files.
-7. The journal format.
-8. Journaling the session.
-9. Recovery.
-10. Restoring tabs at launch.
-11. Narrowed mode.
-12. `FaultyFileSystem`.
-13. The fault suite, in several parts.
-14. The crash smoke test: a child app run in `--crash-after-edit` mode, then relaunched.
-15. Docs.
+Each at most 250 lines, verified alone, committed as it's done.
+
+1. **Core: `SessionFolder`.** `Sessions/<id>/` under a root (Application Support in the
+   app, a temp folder in tests): created on demand, `manifest.json` (format version,
+   file bookmark and path, identity at open), a `closed` marker, deletion, and a sweep
+   of closed or empty folders at launch.
+2. **Core: the edit buffer switches sources once.** `EditBuffer` starts without an add
+   buffer; `attach(original:add:)` swaps in the clone and an add buffer in the session
+   folder before the first edit. Snapshots taken earlier keep what they had.
+3. **Core: the clone at the first edit.** `EditorSession` creates its folder, checks the
+   file is unchanged since open (else reloads first, while clean), clones it, attaches.
+   A clone that fails (another volume) leaves the session narrowed (step 9).
+4. **Core: the journal format.** Framed records with a CRC32C; a reader that stops at
+   a torn or corrupt tail. Fuzz: truncations and bit flips never misread a record.
+5. **Core: journaling the session.** `replace` records (from the tree comparison) for
+   every change, `saved` and `closed`; the add buffer's bytes before the record; the
+   `F_FULLFSYNC` debounce (1 s) and flushes on save and close. Replay equals the live
+   tree after random sessions.
+6. **Core: recovery.** Scan the folders without `closed`, open the clone and add
+   buffer, replay, and give back sessions that are dirty with no undo history.
+7. **App: restore tabs at launch** with a "Recovered unsaved changes" status, then
+   sweep. Smoke: a recovered folder prepared on disk comes back as a dirty tab.
+8. **Core: strategy B** for hard-linked files (save journal, in-place write, commit
+   record, launch rollback); M3b's refusal goes for sessions with a clone.
+9. **Core: narrowed mode** where the clone fails: sampled-page hash in the manifest,
+   conditional replay, strategy A only.
+10. **Core/App: external changes.** `NSFilePresenter` on the session; saves coordinate
+    with it so they raise nothing; a clean tab reloads, a dirty one gets Keep Mine /
+    Reload / Save As.
+11. **Tests: `FaultyFileSystem`** (durable and volatile bytes, throw or power loss at
+    operation N), with the add buffer and journal writing through `FileSystem`.
+12. **Tests: the fault suite** for strategy A, B and the journal.
+13. **iCloud dataless files**, behind an injected flag.
+14. **Docs.**
+
+Steps that don't fit before the maintainer is back stay in this list for the next
+session; the status line says how far it got.
 
 **By hand (the maintainer):** the external APFS, HFS+ and exFAT part of the sandbox
 spike. It decides whether D-d stays as written.
