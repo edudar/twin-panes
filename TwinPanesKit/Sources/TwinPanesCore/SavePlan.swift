@@ -29,6 +29,12 @@ public struct SavePlan: Equatable, Sendable {
         ranges = Self.differences(saved.pieces(in: 0..<length), current.pieces(in: 0..<length))
     }
 
+    /// Where two versions of the same length take bytes from different places (what the
+    /// journal records for a change).
+    static func changedRanges(from old: PieceTree, to new: PieceTree) -> [Range<UInt64>] {
+        differences(old.pieces(in: 0..<old.length), new.pieces(in: 0..<new.length))
+    }
+
     /// Walks two piece lists of the same total length side by side and returns where they
     /// take bytes from different places, merged.
     private static func differences(_ a: [Piece], _ b: [Piece]) -> [Range<UInt64>] {

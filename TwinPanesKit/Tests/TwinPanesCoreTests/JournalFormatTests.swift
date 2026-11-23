@@ -7,7 +7,7 @@ struct JournalFormatTests {
     func randomRecords(_ rng: inout SplitMix64, count: Int) -> [JournalRecord] {
         (0..<count).map { _ in
             switch Int.random(in: 0..<6, using: &rng) {
-            case 0: return .saved
+            case 0: return .saved(UInt64.random(in: 0...1000, using: &rng))
             case 1: return .closed
             default:
                 let lower = UInt64.random(in: 0..<(1 << 40), using: &rng)
@@ -31,7 +31,7 @@ struct JournalFormatTests {
     @Test func recordsRoundTrip() {
         var rng = SplitMix64(seed: 0x10E7_0000_0000_0001)
         let records =
-            [.saved, .closed, .replace(5..<5, [])] + randomRecords(&rng, count: 200)
+            [.saved(0), .closed, .replace(5..<5, [])] + randomRecords(&rng, count: 200)
         let data = records.map(JournalFormat.encode).reduce(Data(), +)
         let decoded = JournalFormat.decode(data)
         #expect(decoded.records == records && decoded.validLength == data.count)

@@ -5,8 +5,9 @@ import Foundation
 public enum JournalRecord: Equatable, Sendable {
     /// The tree's bytes in `range` now come from `pieces` (an edit, undo, redo or revert).
     case replace(Range<UInt64>, [Piece])
-    /// The tree as of this record is the version on disk.
-    case saved
+    /// The version on disk is the tree after the first `n` replace records (a save writes
+    /// the version current when it started; edits typed meanwhile come after).
+    case saved(UInt64)
     /// The session closed cleanly.
     case closed
 }
@@ -29,7 +30,9 @@ public enum JournalFormat {
                 append(piece.offset, to: &body)
                 append(piece.length, to: &body)
             }
-        case .saved: body = [2]
+        case .saved(let count):
+            body = [2]
+            append(count, to: &body)
         case .closed: body = [3]
         }
         var out: [UInt8] = []
@@ -61,7 +64,7 @@ public enum JournalFormat {
 
     private static func parse(_ body: [UInt8]) -> JournalRecord? {
         switch body[0] {
-        case 2 where body.count == 1: return .saved
+        case 2 where body.count == 9: return .saved(read(UInt64.self, body, 1))
         case 3 where body.count == 1: return .closed
         case 1 where body.count >= 21:
             let count = Int(read(UInt32.self, body, 17))
@@ -92,6 +95,31 @@ public enum JournalFormat {
             value |= T(byte) << (shift * 8)
         }
         return value
+    }
+
+    /// Rebuilds a session from its records over the original (the clone) of
+    /// `originalLength` bytes: the current tree, and the saved one.
+    public static func replay(
+        _ records: [JournalRecord], originalLength: UInt64
+    )
+        -> (tree: PieceTree, saved: PieceTree)
+    {
+        var history = [PieceTree(originalLength: originalLength)]
+        var saved = history[0]
+        for record in records {
+            switch record {
+            case .replace(let range, let pieces):
+                let (left, rest) = history[history.count - 1].split(at: range.lowerBound)
+                let right = rest.split(at: range.upperBound - range.lowerBound).1
+                let middle = pieces.reduce(PieceTree()) { $0.appending($1) }
+                history.append(left.appending(middle).appending(right))
+            case .saved(let count):
+                saved = history[Int(min(count, UInt64(history.count - 1)))]
+            case .closed:
+                break
+            }
+        }
+        return (history[history.count - 1], saved)
     }
 
     /// CRC32C (Castagnoli), as storage formats commonly use.

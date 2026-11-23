@@ -46,6 +46,9 @@ public final class EditorSession {
     public internal(set) var folder: SessionFolder?
     /// The clone failed (another volume): the original pieces read the live file.
     public internal(set) var isNarrowed = false
+    /// The operation journal in `folder`; nil before the first edit, or after it failed
+    /// to write (edits go on, unprotected).
+    var journal: SessionJournal?
     /// The file as last opened or saved.
     public internal(set) var identity: FileIdentity
     public internal(set) var access: AccessMode
@@ -111,6 +114,7 @@ public final class EditorSession {
         try buffer.overwrite(at: offset, with: bytes)
         let after = UndoStack.State(tree: buffer.tree, selection: selectionAfter)
         undoStack.record(before: before, after: after, coalescing: coalescing)
+        journalChange(from: before.tree)
         notify(.edited)
     }
 
@@ -123,7 +127,9 @@ public final class EditorSession {
     /// Goes back to the version on disk and forgets the undo history (Revert to Saved,
     /// and the close prompt's Discard).
     public func revert() {
+        let old = buffer.tree
         buffer.restore(savedTree)
+        journalChange(from: old)
         undoStack = UndoStack()
         notify(.edited)
     }
@@ -135,7 +141,9 @@ public final class EditorSession {
 
     private func restore(_ state: UndoStack.State?) -> UndoStack.State? {
         guard let state else { return nil }
+        let old = buffer.tree
         buffer.restore(state.tree)
+        journalChange(from: old)
         notify(.edited)
         return state
     }

@@ -44,6 +44,7 @@ extension EditorSession {
     public func saveAs(to target: URL, scope: SecurityScope? = nil) async throws {
         try await enqueueSave {
             let (version, saver, snapshot) = (self.buffer.tree, self.saver, self.buffer.snapshot())
+            let journaled = self.journal?.replaceCount
             let written = try await Self.offMain {
                 try withExtendedLifetime(scope) { try saver.write(snapshot, to: target) }
             }
@@ -51,8 +52,16 @@ extension EditorSession {
             (self.url, self.scope, self.identity) = (target, scope, written)
             self.access = AccessMode.of(target)
             self.savedTree = version
+            self.journalSaved(after: journaled)
             self.notify(.saved)
         }
+    }
+
+    /// Journals a save of the version after `count` replace records (taken when the save
+    /// started, so edits typed meanwhile stay unsaved in a replay).
+    private func journalSaved(after count: UInt64?) {
+        guard let count else { return }
+        do { try journal?.recordSaved(after: count) } catch { journal = nil }
     }
 
     /// Runs `body` on a dispatch queue, not Swift concurrency's few threads: a save
@@ -82,12 +91,14 @@ extension EditorSession {
     /// the disk no longer holds it), writes on a background queue, then records the result.
     private func performSave() async throws {
         let version = buffer.tree
+        let journaled = journal?.replaceCount
         let onDisk = try? FileIdentity(url: url)
         let plan = SavePlan(
             saved: savedTree, current: version,
             diskMatchesSaved: onDisk?.isUnchanged(from: identity) ?? false)
         if plan.ranges.isEmpty, !plan.writesWholeFile {
             savedTree = version  // same bytes in the same places: nothing to write
+            journalSaved(after: journaled)
             return notify(.saved)
         }
         let (saver, url, scope, snapshot) = (saver, url, scope, buffer.snapshot())
@@ -95,6 +106,7 @@ extension EditorSession {
             try withExtendedLifetime(scope) { try saver.save(snapshot, plan: plan, to: url) }
         }
         savedTree = version
+        journalSaved(after: journaled)
         notify(.saved)
     }
 }

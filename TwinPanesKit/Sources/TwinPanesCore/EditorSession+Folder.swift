@@ -26,6 +26,7 @@ extension EditorSession {
                 isNarrowed = true
             }
             buffer.attach(original: original, add: add)
+            journal = try SessionJournal(folder: made, add: add, fileSystem: saver.fileSystem)
         } catch {
             made.delete()
             throw error
@@ -34,6 +35,12 @@ extension EditorSession {
     }
 
     static let cloneName = "original.clone"
+
+    /// Journals the change from `old` to the current tree. A journal that fails to write
+    /// is dropped: the edits go on, no longer recoverable after a crash.
+    func journalChange(from old: PieceTree) {
+        do { try journal?.record(from: old, to: buffer.tree) } catch { journal = nil }
+    }
 
     /// Reads the file afresh: a new edit model, the file's current identity, no history.
     func reloadFromDisk() throws {
@@ -49,6 +56,8 @@ extension EditorSession {
     /// is marked closed and deleted. Snapshots still reading the clone keep their open
     /// descriptors.
     public func close() {
+        journal?.close()
+        journal = nil
         guard let folder else { return }
         try? folder.markClosed()
         folder.delete()

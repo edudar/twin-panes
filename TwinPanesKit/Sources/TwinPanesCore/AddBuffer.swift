@@ -141,6 +141,16 @@ public final class AddBuffer: Sendable {
         return out
     }
 
+    /// Flushes the written bytes to the drive (`F_FULLFSYNC`), before a journal record
+    /// that refers to them is flushed.
+    public func sync() throws {
+        try writeLock.withLock { _ in
+            guard fcntl(fd, F_FULLFSYNC) != -1 else {
+                throw AddBufferError.writeFailed(offset: length, errno: errno)
+            }
+        }
+    }
+
     /// Reads `range` straight from the backing file without touching the page cache.
     public func readSequential(_ range: Range<UInt64>) throws -> Data {
         let written = length
