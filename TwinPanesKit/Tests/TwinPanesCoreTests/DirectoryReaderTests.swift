@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UniformTypeIdentifiers
 
 @testable import TwinPanesCore
 
@@ -42,6 +43,25 @@ import Testing
         #expect(link.isDirectory && link.isSymbolicLink)
         let app = try #require(entries.first { $0.url.lastPathComponent == "Tool.app" })
         #expect(app.isPackage && !app.isDirectory)
+    }
+
+    /// Kind comes from the name's type, cached, capitalised as in Finder (M4, D-b).
+    @Test func kindsFromTypes() throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data().write(to: dir.appendingPathComponent("notes.txt"))
+        try Data().write(to: dir.appendingPathComponent("README"))
+        try Data().write(to: dir.appendingPathComponent("odd.zzqqxx"))
+        let entries = try DirectoryReader.entries(of: dir)
+        func entry(_ name: String) throws -> DirectoryEntry {
+            try #require(entries.first { $0.name == name })
+        }
+        #expect(try entry("A-folder").type == .folder && entry("A-folder").kind == "Folder")
+        #expect(try entry("Tool.app").type.conforms(to: .application))
+        #expect(try entry("notes.txt").type.conforms(to: .plainText))
+        #expect(try entry("README").type == .data)
+        #expect(try entry("odd.zzqqxx").kind == "Document")
+        #expect(try entry("link-to-folder").type == .folder)
+        #expect(entries.allSatisfy { $0.kind.first?.isUppercase == true })
     }
 
     @Test func hiddenFilesOnRequest() throws {

@@ -1,11 +1,39 @@
 import AppKit
 import TwinPanesCore
+import UniformTypeIdentifiers
 import WorkspaceKit
 
 /// The file list: adds the `item.browser.fileList` scope, so keys like Tab, Return and
 /// Backspace are bound only while the list has focus (PLAN.md §4.11).
 final class FileListTableView: NSTableView, CommandScopeProviding {
     var commandScopes: [BindingScope] { [.item(.browser, part: "fileList")] }
+}
+
+/// Row icons, by type (docs/plans/M4.md, D-b). Applications have icons of their own, so
+/// they are looked up by path and the last few hundred kept.
+@MainActor
+final class IconCache {
+    static let shared = IconCache()
+    private var byType: [UTType: NSImage] = [:]
+    private var byPath: [String: NSImage] = [:]
+    private var pathOrder: [String] = []
+    let pathLimit = 256
+
+    func icon(for entry: DirectoryEntry) -> NSImage {
+        guard entry.type.conforms(to: .application) else {
+            if let icon = byType[entry.type] { return icon }
+            let icon = NSWorkspace.shared.icon(for: entry.type)
+            byType[entry.type] = icon
+            return icon
+        }
+        let path = entry.url.path
+        if let icon = byPath[path] { return icon }
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        byPath[path] = icon
+        pathOrder.append(path)
+        if pathOrder.count > pathLimit { byPath[pathOrder.removeFirst()] = nil }
+        return icon
+    }
 }
 
 extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
@@ -61,7 +89,7 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
             label.alignment = column == .size ? .right : .left
             return label
         }
-        let icon = NSImageView(image: NSWorkspace.shared.icon(forFile: entry.url.path))
+        let icon = NSImageView(image: IconCache.shared.icon(for: entry))
         icon.imageScaling = .scaleProportionallyDown
         icon.widthAnchor.constraint(equalToConstant: 16).isActive = true
         icon.heightAnchor.constraint(equalToConstant: 16).isActive = true

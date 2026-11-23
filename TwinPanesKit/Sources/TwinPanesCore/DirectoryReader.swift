@@ -1,5 +1,7 @@
 import Darwin
 import Foundation
+import Synchronization
+import UniformTypeIdentifiers
 
 /// One item in a folder listing.
 public struct DirectoryEntry: Hashable, Sendable {
@@ -14,8 +16,35 @@ public struct DirectoryEntry: Hashable, Sendable {
     /// Bytes for files; nil for folders.
     public let size: UInt64?
     public let modified: Date?
-    /// Finder's kind, e.g. "Folder", "Plain Text Document".
-    public let kind: String
+    /// The entry's type, from its name (docs/plans/M4.md, D-b): reading each file's own
+    /// type description is what made listing a big folder slow. Also picks the icon.
+    public let type: UTType
+
+    /// The Kind column, e.g. "Folder", "Plain text", cached per type.
+    public var kind: String { TypeNames.description(of: type) }
+}
+
+/// Type descriptions for the Kind column, looked up once per type.
+public enum TypeNames {
+    private static let cache = Mutex<[UTType: String]>([:])
+
+    public static func description(of type: UTType) -> String {
+        if let known = cache.withLock({ $0[type] }) { return known }
+        var text = type.isDynamic ? "Document" : (type.localizedDescription ?? "Document")
+        text = text.prefix(1).uppercased() + text.dropFirst()
+        cache.withLock { $0[type] = text }
+        return text
+    }
+
+    /// The type of a file called `name`: by its extension, or plain data without one.
+    static func type(named name: String, folder: Bool, package: Bool) -> UTType {
+        if folder { return .folder }
+        let ext = (name as NSString).pathExtension
+        guard !ext.isEmpty else { return package ? .package : .data }
+        // The lookup matches only types under its base, data unless asked otherwise.
+        let byName = UTType(filenameExtension: ext, conformingTo: package ? .package : .data)
+        return byName ?? (package ? .package : .data)
+    }
 }
 
 public enum DirectoryReaderError: Error, Equatable {
@@ -26,12 +55,12 @@ public enum DirectoryReaderError: Error, Equatable {
     case failed(URL, String)
 }
 
-/// Reads folder listings (M1b). Synchronous: the caller decides where it runs. Async
-/// listing for very large folders is M4.
+/// Reads folder listings (M1b). Synchronous: the caller decides where it runs.
+/// Only cheap keys are read; names are the real file names, not Finder's display names.
 public enum DirectoryReader {
     static let keys: [URLResourceKey] = [
         .isDirectoryKey, .isPackageKey, .isSymbolicLinkKey, .isHiddenKey, .fileSizeKey,
-        .contentModificationDateKey, .localizedTypeDescriptionKey, .localizedNameKey,
+        .contentModificationDateKey,
     ]
 
     /// The entries of `folder`, folders first, then by name as Finder sorts it.
@@ -73,13 +102,14 @@ public enum DirectoryReader {
             if let targetSize = target?.fileSize { fileSize = targetSize }
         }
         let isFolder = isDirectory && !isPackage
+        let name = url.lastPathComponent
         return DirectoryEntry(
-            url: url, name: values?.localizedName ?? url.lastPathComponent,
+            url: url, name: name,
             isDirectory: isFolder, isPackage: isPackage, isSymbolicLink: isLink,
             isHidden: values?.isHidden ?? false,
             size: isFolder ? nil : fileSize.map { UInt64($0) },
             modified: values?.contentModificationDate,
-            kind: values?.localizedTypeDescription ?? (isFolder ? "Folder" : "Document"))
+            type: TypeNames.type(named: name, folder: isFolder, package: isPackage))
     }
 
     static func finderOrder(_ a: DirectoryEntry, _ b: DirectoryEntry) -> Bool {
