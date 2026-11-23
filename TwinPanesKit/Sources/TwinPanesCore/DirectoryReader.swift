@@ -53,6 +53,11 @@ public enum DirectoryReaderError: Error, Equatable, Sendable {
     case notFound(URL)
     case notAFolder(URL)
     case failed(URL, String)
+
+    /// True for `.needsAccess`: the tab shows the access prompt rather than refusing.
+    public var needsAccess: Bool {
+        if case .needsAccess = self { true } else { false }
+    }
 }
 
 /// Reads folder listings (M1b). Synchronous: the caller decides where it runs.

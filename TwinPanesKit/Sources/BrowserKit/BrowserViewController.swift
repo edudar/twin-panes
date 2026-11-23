@@ -123,7 +123,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
 
     /// The table row of the entry called `name`.
     func row(named name: String) -> Int? {
-        item?.entries.firstIndex { $0.name == name }.map { $0 + (showsParentRow ? 1 : 0) }
+        item?.listing.row(named: name).map { $0 + (showsParentRow ? 1 : 0) }
     }
 
     private func restoreSelection(_ row: Int?, parentRow: Bool) {

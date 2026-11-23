@@ -21,9 +21,8 @@ extension ItemKind {
     @objc optional func browserGrantAccess(_ sender: Any?)
 }
 
-/// A browser tab over one folder at a time (M1b, PLAN.md §4.7). The listing is
-/// synchronous for now; async listing for huge folders, history, sorting, hidden
-/// files and live updates come in M4.
+/// A browser tab over one folder at a time (M1b, PLAN.md §4.7). Folders are listed off
+/// the main actor and arrive in batches (docs/plans/M4.md, D-a).
 @MainActor
 public final class BrowserItem: WorkspaceItem {
     public let id = ItemID()
@@ -38,7 +37,19 @@ public final class BrowserItem: WorkspaceItem {
     public let openFile: (URL, SecurityScope?) -> Void
 
     public private(set) var folder: URL
-    public private(set) var entries: [DirectoryEntry] = []
+    /// The folder's entries, sorted and filtered (D-c).
+    public private(set) var listing = FolderListing()
+    /// The rows shown, without "..".
+    public var entries: [DirectoryEntry] { listing.rows }
+    /// True while the current folder's listing is still arriving.
+    public private(set) var isListing = false
+    /// Bumped by every navigation: work started for an older one is dropped.
+    private var generation = 0
+    private(set) var lister: FolderLister?
+    /// Batches waiting for the merge that's running off the main actor.
+    private var pendingBatch: [DirectoryEntry] = []
+    private var isMerging = false
+    private var listedWaiters: [CheckedContinuation<Void, Never>] = []
     /// Set when the sandbox refuses the folder until the user grants access.
     public private(set) var needsAccess = false
     /// False until the first listing; the view lists the folder when it first loads.
@@ -63,31 +74,120 @@ public final class BrowserItem: WorkspaceItem {
     public var preferredFirstResponder: NSView? { controller.tableView }
 
     /// Lists `url` (default: the current folder again). On success the tab moves
-    /// there; if access is needed the tab moves there and shows the access prompt.
-    /// Returns false (and stays put) for missing or non-folder paths.
+    /// there and the rows arrive in batches; if access is needed the tab moves there and
+    /// shows the access prompt. Returns false (and stays put) for missing or non-folder
+    /// paths: those are checked at once, before anything is listed.
     @discardableResult
     public func go(to url: URL? = nil, selecting name: String? = nil) -> Bool {
         let target = (url ?? folder).standardizedFileURL
         let newScope = grants.scope(covering: target)
-        do {
-            entries = try DirectoryReader.entries(of: target)
-            needsAccess = false
-        } catch DirectoryReaderError.needsAccess {
-            entries = []
-            needsAccess = true
-        } catch {
-            host?.showStatus("Can’t open “\(target.path)”: \(error)")
+        let problem = FolderLister.check(target)
+        if let problem, !problem.needsAccess {
+            host?.showStatus("Can’t open “\(target.path)”: \(problem)")
             NSSound.beep()
             return false
         }
+        stopListing()
+        needsAccess = problem != nil
+        listing = FolderListing(order: listing.order, showsHidden: listing.showsHidden)
         folder = target
         scope = newScope
         hasListed = true
         controller.startShowing(selecting: name)
-        controller.reloadKeepingSelection()
         onChange?()
+        if !needsAccess { startListing() }
         updateStatus()
+        if !isListing { finishWaiting() }
         return true
+    }
+
+    private func startListing() {
+        let lister = FolderLister(folder: folder)
+        let wanted = generation
+        self.lister = lister
+        isListing = true
+        lister.start { [weak self] event in
+            guard let self, self.generation == wanted else { return }
+            self.received(event)
+        }
+    }
+
+    private func stopListing() {
+        lister?.cancel()
+        lister = nil
+        generation += 1
+        pendingBatch = []
+        isMerging = false
+        isListing = false
+    }
+
+    private func received(_ event: FolderLister.Event) {
+        switch event {
+        case .batch(let batch):
+            pendingBatch += batch
+            mergePending()
+        case .done:
+            isListing = false
+            if !isMerging { listingFinished() }
+        case .failed(let error):
+            isListing = false
+            needsAccess = error.needsAccess
+            host?.showStatus("Can’t list “\(folder.path)”: \(error)")
+            listingFinished()
+        }
+    }
+
+    /// Merges the waiting batches: here when the folder is small, else off the main
+    /// actor, one merge at a time; a result for an older navigation is dropped.
+    private func mergePending() {
+        guard !isMerging, !pendingBatch.isEmpty else { return }
+        let batch = pendingBatch
+        pendingBatch = []
+        let base = listing
+        if base.entries.count + batch.count <= FolderListing.mainActorLimit {
+            return show(base.merging(batch))
+        }
+        isMerging = true
+        let wanted = generation
+        Task.detached(priority: .userInitiated) {
+            let merged = base.merging(batch)
+            await MainActor.run { [weak self] in
+                guard let self, self.generation == wanted else { return }
+                self.isMerging = false
+                self.show(merged)
+            }
+        }
+    }
+
+    private func show(_ merged: FolderListing) {
+        listing = merged
+        controller.reloadKeepingSelection()
+        if !pendingBatch.isEmpty {
+            mergePending()
+        } else if !isListing {
+            listingFinished()
+        } else {
+            updateStatus()
+        }
+    }
+
+    private func listingFinished() {
+        lister = nil
+        controller.reloadKeepingSelection()
+        updateStatus()
+        finishWaiting()
+    }
+
+    /// Returns once the current folder has been listed completely.
+    public func listed() async {
+        guard isListing || isMerging else { return }
+        await withCheckedContinuation { listedWaiters.append($0) }
+    }
+
+    private func finishWaiting() {
+        let waiters = listedWaiters
+        listedWaiters = []
+        waiters.forEach { $0.resume() }
     }
 
     /// Opens a folder entry, or hands a file to the editor.
@@ -114,6 +214,8 @@ public final class BrowserItem: WorkspaceItem {
     func updateStatus() {
         if needsAccess {
             host?.showStatus("\(folder.path) · no access yet")
+        } else if isListing {
+            host?.showStatus("\(folder.path) · Listing… \(listing.entries.count.formatted()) items")
         } else {
             let folders = entries.filter(\.isDirectory).count
             host?.showStatus(

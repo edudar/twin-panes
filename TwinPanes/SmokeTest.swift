@@ -80,6 +80,7 @@ struct SmokeTest {
         }
         defer { try? FileManager.default.removeItem(at: folder) }
         check(browser.go(to: folder), "browser lists a real folder")
+        await browser.listed()
         check(
             browser.entries.map(\.name) == ["sub", "data.bin"],
             "folders first: \(browser.entries.map(\.name))")
@@ -98,8 +99,10 @@ struct SmokeTest {
         table.selectRowIndexes([1], byExtendingSelection: false)
         check(dispatch(.returnKey, in: window), "Return opens the selected folder")
         check(browser.folder.lastPathComponent == "sub", "now inside sub")
+        await browser.listed()
         check(dispatch(KeyChord("\u{7f}"), in: window), "Backspace goes to the parent")
         check(browser.folder == folder.standardizedFileURL, "back in the sample folder")
+        await browser.listed()
         table.selectRowIndexes([2], byExtendingSelection: false)
         check(dispatch(.function(4), in: window), "F4 dispatched on a file")
         let opened = app.workspace.allItems.compactMap { $0 as? HexEditorItem }
@@ -245,6 +248,7 @@ struct SmokeTest {
         let sample = folder.standardizedFileURL
         func enterSub() async {
             browser.go(to: sample.appendingPathComponent("sub"))
+            await browser.listed()
             await settle()
         }
         await enterSub()
@@ -255,6 +259,7 @@ struct SmokeTest {
         check(table.selectedRow == 0, "\"..\" is selected on entering a folder")
         check(dispatch(.returnKey, in: window), "Return on \"..\" dispatched")
         check(browser.folder == sample, "Return on \"..\" goes to the parent")
+        await browser.listed()
         check(table.selectedRow == 1, "and selects the folder you came from")
 
         await enterSub()
@@ -266,6 +271,7 @@ struct SmokeTest {
         let sent = table.doubleAction.map { table.sendAction($0, to: table.target) } ?? false
         check(sent, "the list's double-click action is wired up")
         check(browser.folder == sample, "double-clicking \"..\" goes to the parent")
+        await browser.listed()
     }
 
     func status(of controller: MainWindowController) -> String {

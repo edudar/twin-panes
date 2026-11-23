@@ -83,7 +83,7 @@ public final class FolderLister: Sendable {
     }
 
     /// Why `folder` can't be listed, or nil if it can.
-    static func check(_ folder: URL) -> DirectoryReaderError? {
+    public static func check(_ folder: URL) -> DirectoryReaderError? {
         let fd = open(folder.path, O_RDONLY | O_DIRECTORY)
         if fd >= 0 {
             Darwin.close(fd)
