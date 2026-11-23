@@ -34,13 +34,19 @@ extension BrowserItem {
             // The lister may still deliver these: read them once it's done instead.
             if isListing { changedWhileListing.formUnion(names) } else { read(names) }
         case .relist:
-            relist()
+            // The listing running now would land on top of a re-list's rows: list again
+            // once it's done instead.
+            if isListing { relistRequested = true } else { relist() }
         case .folderGone:
             leaveVanishedFolder()
         }
     }
 
     func readChangedWhileListing() {
+        if relistRequested, !isRelisting {
+            relistRequested = false
+            relist()
+        }
         guard !changedWhileListing.isEmpty else { return }
         let names = changedWhileListing
         changedWhileListing = []

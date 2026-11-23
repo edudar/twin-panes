@@ -109,6 +109,26 @@ import Testing
             item.relistsStarted == 2 && !item.isRelisting && names == ["sub", "b.txt", "d.txt"])
     }
 
+    /// A re-list asked for while the folder is still listing waits for the listing, so
+    /// the two never pile the same entries into the rows.
+    @Test func aRelistDuringTheListingWaitsForIt() async throws {
+        defer { cleanUp() }
+        let big = root.appendingPathComponent("big")
+        try FileManager.default.createDirectory(at: big, withIntermediateDirectories: true)
+        for i in 0..<3_000 {
+            FileManager.default.createFile(
+                atPath: big.appendingPathComponent("f\(i)").path, contents: nil)
+        }
+        item.go(to: big)
+        #expect(item.isListing)
+        item.folderChanged(.relist)
+        #expect(item.relistsStarted == 0)
+        await item.listed()
+        await until { item.relistsStarted == 1 }
+        await item.listed()
+        #expect(item.entries.count == 3_000 && Set(item.entries.map(\.name)).count == 3_000)
+    }
+
     @Test func closingTheTabStopsWatching() async throws {
         defer { cleanUp() }
         #expect(item.watcher != nil)
