@@ -47,7 +47,7 @@ public enum TypeNames {
     }
 }
 
-public enum DirectoryReaderError: Error, Equatable {
+public enum DirectoryReaderError: Error, Equatable, Sendable {
     /// The sandbox (or file permissions) refuses this folder; ask the user for access.
     case needsAccess(URL)
     case notFound(URL)
