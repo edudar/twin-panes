@@ -107,8 +107,12 @@ extension EditorSession {
             return notify(.saved)
         }
         let (saver, url, scope, snapshot) = (saver, url, scope, buffer.snapshot())
+        // In place (hard links) only when the original pieces read the clone, not the file.
+        let journal = isNarrowed ? nil : folder?.file(SaveJournal.fileName)
         identity = try await Self.offMain {
-            try withExtendedLifetime(scope) { try saver.save(snapshot, plan: plan, to: url) }
+            try withExtendedLifetime(scope) {
+                try saver.save(snapshot, plan: plan, to: url, inPlaceJournal: journal)
+            }
         }
         savedTree = version
         journalSaved(after: journaled)

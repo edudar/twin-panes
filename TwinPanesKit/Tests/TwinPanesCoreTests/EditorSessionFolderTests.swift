@@ -85,4 +85,31 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: again.url.path))
         #expect(SessionFolder.sweep(root).isEmpty)
     }
+
+    /// With its clone, a session saves a hard-linked file in place (strategy B); a crash
+    /// half way through such a save is rolled back when the session is recovered.
+    @Test func hardLinkedFilesSaveInPlaceAndRollBack() async throws {
+        defer { cleanUp() }
+        let link = folder.appendingPathComponent("link.bin")
+        try FileManager.default.linkItem(at: url, to: link)
+        let session = try session()
+        try type(session, 0xAA, at: 5)
+        try await session.save()
+        #expect(try Data(contentsOf: link)[5] == 0xAA && !session.isDirty)
+
+        try type(session, 0xBB, at: 6)
+        let made = try #require(session.folder)
+        try SaveJournal.begin(
+            made.file(SaveJournal.fileName), file: url, identity: FileIdentity(url: url),
+            ranges: [6..<7], fileSystem: RealFileSystem())
+        let handle = try FileHandle(forWritingTo: url)  // the write, then the "crash"
+        try handle.seek(toOffset: 6)
+        try handle.write(contentsOf: Data([0xBB]))
+        try handle.close()
+        let copy = folder.appendingPathComponent("crashed")
+        try FileManager.default.copyItem(at: made.url, to: copy)
+        let recovered = try EditorSession(recovering: SessionFolder(url: copy))
+        #expect(try Data(contentsOf: url)[6] == 6)  // rolled back
+        #expect(try recovered.snapshot.read(5..<7) == Data([0xAA, 0xBB]) && recovered.isDirty)
+    }
 }

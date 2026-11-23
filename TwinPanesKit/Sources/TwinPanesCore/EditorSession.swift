@@ -92,6 +92,9 @@ public final class EditorSession {
     /// add buffer and the journal give back its current and saved versions. It comes
     /// back dirty, with no undo history, and goes on journaling into the same folder.
     public init(recovering folder: SessionFolder, saver: Saver = Saver()) throws {
+        // A save in place that didn't commit is undone first (strategy B).
+        _ = try? SaveJournal.rollBackIfNeeded(
+            folder.file(SaveJournal.fileName), fileSystem: saver.fileSystem)
         let manifest = try folder.manifest()
         var stale = false
         let resolved = manifest.bookmark.flatMap {
