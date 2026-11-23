@@ -108,3 +108,33 @@ public enum AccessMode: Equatable, Sendable {
         return canWrite ? .writable : .readOnly(.noWritePermission)
     }
 }
+
+/// Stored in session manifests (`SessionManifest`), so recovery can tell whether the file
+/// is still the one the session started from.
+extension FileIdentity: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case device, inode, size, seconds, nanoseconds, links
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key = Key(
+            device: try c.decode(Int32.self, forKey: .device),
+            inode: try c.decode(UInt64.self, forKey: .inode))
+        size = try c.decode(UInt64.self, forKey: .size)
+        modified = timespec(
+            tv_sec: try c.decode(Int.self, forKey: .seconds),
+            tv_nsec: try c.decode(Int.self, forKey: .nanoseconds))
+        linkCount = try c.decode(UInt16.self, forKey: .links)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(key.device, forKey: .device)
+        try c.encode(key.inode, forKey: .inode)
+        try c.encode(size, forKey: .size)
+        try c.encode(modified.tv_sec, forKey: .seconds)
+        try c.encode(modified.tv_nsec, forKey: .nanoseconds)
+        try c.encode(linkCount, forKey: .links)
+    }
+}
