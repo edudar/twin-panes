@@ -308,8 +308,12 @@ opening an editor from the browser) goes through a protocol or factory defined i
   closed folders and reopening the rest as tabs ("Recovered unsaved changes"); a torn
   journal tail is cut off and journaling goes on in the same folder. Saves rewrite the
   manifest so a recovered session saves against what was saved last. Narrowed sessions
-  journal nothing (D37). Not built yet: the fault-injection suite, iCloud dataless
-  files (docs/plans/M3c.md, steps 11–13).
+  journal nothing (D37). The fault-injection gate (§7) runs on real files through a
+  crashing `FileSystem` wrapper: a kill or a power loss at every operation of strategies
+  A and B leaves the old or new contents after recovery's rollback, and a crashed
+  session recovers a state it really had (docs/plans/M3c.md, D-g as built; the add
+  buffer's own power loss isn't simulated). Not built yet: iCloud dataless files and a
+  crash smoke test with a child process (docs/plans/M3c.md, steps 13–14).
 
 ### 4.3 Saving: `Saver`
 `NSFileCoordinator` only coordinates with cooperating clients; atomicity and recovery
