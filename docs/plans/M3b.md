@@ -1,7 +1,7 @@
 # M3b plan: sessions and saving
 
-_Status: approved 2026-11-22; in progress, commits 1–2 of 11 done (`FileIdentity`,
-`AccessMode`, `EditorSession`). Split from the original M3b on review: this part is sessions
+_Status: approved 2026-11-22; in progress, commits 1–4 of 11 done (`FileIdentity`,
+`AccessMode`, `EditorSession`, the tab on a session, `SessionRegistry`). Split from the original M3b on review: this part is sessions
 and saving; the clone, external changes, crash recovery and the fault-injection suite
 are M3c (docs/plans/M3c.md)._
 
@@ -155,9 +155,10 @@ failing tests → implementation. I stop for "commit" after each one.
    session, `sessionKey` is the session's ID, and read-only typing refuses with the
    reason. Tests in EditorKit, including every event that should update the tab from
    the session's notifications.
-4. **Core/App: `SessionRegistry`.** Keying and re-keying; Open, Recent, the browser and
-   drops all go through it, and opening an open file focuses its tab. Tests in Core,
-   plus a smoke check.
+4. **Core/App: `SessionRegistry`.** Keyed by device and inode, sessions held weakly;
+   Open, Recent, the browser and drops all go through it, and opening an open file
+   focuses its tab. Tests in Core, plus a smoke check. Re-keying moved to step 7, the
+   first change that gives a session a new identity (changed while building).
 5. **Core: the save plan.** The union ranges, and the decision to write the whole file.
    A fuzz test: after random edits, undos, redos and saves, applying each plan to a byte
    model gives the current bytes.
@@ -165,7 +166,7 @@ failing tests → implementation. I stop for "commit" after each one.
    coordinated replace, and the new identity. Round-trip tests with xattrs, tags, mode
    and creation date; the hard-link refusal; the free-space check.
 7. **Core: saving from the session.** An off-main save over a snapshot, the race
-   (`savedTree = A`), one save at a time, a queued ⌘S, re-keying, and failures leaving
+   (`savedTree = A`), one save at a time, a queued ⌘S, re-keying the registry, and failures leaving
    the session dirty. Tests with a gated `FileSystem` while typing.
 8. **App: Save, Revert to Saved, and Save in the close sheet.** The menu items and their
    validation, `canSave`, the status line, the error sheet, the bookmark refresh, the

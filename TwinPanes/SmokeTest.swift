@@ -282,6 +282,7 @@ struct SmokeTest {
         }
         check(app.controller(containing: hex.id) != nil, "hex editor opens as a tab")
         check(hex.length == 200_000, "file length is read")
+        await reopen(check, hex: hex, url: url)
         await settle()
         let editorView = hex.viewController.view
         editorView.window?.layoutIfNeeded()
@@ -328,6 +329,23 @@ struct SmokeTest {
         await truncation(check, hex: hex, url: url)
         check(app.openFile(dir) == nil, "a folder is refused")
         window.attachedSheet.map { window.endSheet($0) }
+    }
+
+    /// M3b: opening a file that is already open (by any path to it) brings its tab back
+    /// to the front instead of opening a second, independent copy.
+    private func reopen(_ check: (Bool, String) -> Void, hex: HexEditorItem, url: URL) async {
+        guard let layout = app.controller(containing: hex.id)?.layout,
+            let slot = layout.slot(of: hex.id),
+            let other = layout.items(in: slot).first(where: { $0.id != hex.id })
+        else { return check(false, "the editor's panel has another tab to switch to") }
+        layout.select(other.id)
+        let tabs = layout.items(in: slot).count
+        let spelling = url.deletingLastPathComponent().appendingPathComponent(".")
+            .appendingPathComponent(url.lastPathComponent)
+        let again = app.openFile(spelling)
+        check(again === hex, "opening an open file returns its tab")
+        check(layout.items(in: slot).count == tabs, "and opens no second tab")
+        check(layout.selectedItem(in: slot)?.id == hex.id, "and brings it to the front")
     }
 
     /// Review bug 1: the file gets shorter while it's open. Scrolling past the new end

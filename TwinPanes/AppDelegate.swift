@@ -15,6 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         prompt: { [weak self] session in await self?.askToSave(session) ?? .cancel })
     lazy var spike = SandboxSpike(app: self)
     let recentFiles = RecentFiles()
+    /// One session per open file (docs/plans/M3b.md, D-a).
+    let sessions = SessionRegistry()
 
     private(set) var windowControllers: [MainWindowController] = []
     private var editorCount = 0
@@ -152,22 +154,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
-    /// Opens `url` as a hex editor tab in `target` (or the active window). `scope` keeps
-    /// sandbox access when the URL came from a bookmark; panel, drop and Finder URLs carry
-    /// their own access for this run.
+    /// Opens `url` as a hex editor tab in `target` (or the active window), or brings
+    /// forward the tab already editing that file, wherever it is. `scope` keeps sandbox
+    /// access when the URL came from a bookmark; panel, drop and Finder URLs carry their
+    /// own access for this run.
     @discardableResult
     func openFile(
         _ url: URL, scope: SecurityScope? = nil, in target: MainWindowController? = nil
     ) -> HexEditorItem? {
         do {
-            let item = try HexEditorItem(url: url, scope: scope)
-            show(item, in: target)
+            let (session, isNew) = try sessions.open(url, scope: scope)
             recentFiles.note(url)
+            if !isNew, let item = editorItem(showing: session),
+                let controller = controller(containing: item.id)
+            {
+                controller.layout.select(item.id)
+                controller.window?.makeKeyAndOrderFront(nil)
+                return item
+            }
+            let item = HexEditorItem(session: session)
+            show(item, in: target)
             return item
         } catch {
             presentOpenError(error, url: url, in: target)
             return nil
         }
+    }
+
+    /// The editor tab showing `session`, in any window.
+    func editorItem(showing session: EditorSession) -> HexEditorItem? {
+        workspace.allItems.lazy.compactMap { $0 as? HexEditorItem }
+            .first { $0.session === session }
     }
 
     @objc func openDocument(_ sender: Any?) {
