@@ -17,10 +17,15 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     private let accessPrompt = NSStackView()
     private let accessLabel = NSTextField(wrappingLabelWithString: "")
     let grantButton = NSButton()
+    nonisolated(unsafe) var iconObserver: NSObjectProtocol?
 
     init(item: BrowserItem) {
         self.item = item
         super.init(nibName: nil, bundle: nil)
+    }
+
+    deinit {
+        if let iconObserver { NotificationCenter.default.removeObserver(iconObserver) }
     }
 
     @available(*, unavailable)
@@ -171,6 +176,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         tableView.noteNumberOfRowsChanged()
         var stale = IndexSet()
         tableView.enumerateAvailableRowViews { rowView, row in
+            if showsParentRow, row == 0 { return }
             // Row views past the new end are the table's to remove.
             if row < tableView.numberOfRows, !refreshCells(in: rowView, row: row) {
                 stale.insert(row)

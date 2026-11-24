@@ -21,7 +21,7 @@ import UniformTypeIdentifiers
 
     /// Waits for the cache's next `didChange`.
     func changed(_ cache: IconCache, in center: NotificationCenter) async {
-        final class Token { var value: NSObjectProtocol? }
+        final class Token: @unchecked Sendable { var value: NSObjectProtocol? }
         let token = Token()
         await withCheckedContinuation { done in
             token.value = center.addObserver(
@@ -36,13 +36,14 @@ import UniformTypeIdentifiers
     /// The icon once it's drawn.
     func loaded(
         _ cache: IconCache, _ entry: DirectoryEntry, scale: CGFloat = 2,
-        appearance: NSAppearance.Name = .aqua
+        appearance: NSAppearance.Name = .aqua, in center: NotificationCenter? = nil
     ) async -> NSImage {
+        let targetCenter = center ?? self.center
         while true {
             if let icon = cache.icon(for: entry, scale: scale, appearance: appearance) {
                 return icon
             }
-            await changed(cache, in: center)
+            await changed(cache, in: targetCenter)
         }
     }
 
@@ -171,5 +172,123 @@ import UniformTypeIdentifiers
             }
             #expect(item.shownIconsAreCurrent)
         }
+    }
+
+    @Test func forgettingDuringInFlightRenderDiscardsStaleIcon() async throws {
+        let (started, startedCont) = AsyncStream.makeStream(of: Void.self)
+        let proceed = DispatchSemaphore(value: 0)
+        let cache = IconCache(center: center) { _ in
+            startedCont.yield()
+            proceed.wait()
+            return NSImage(size: NSSize(width: 16, height: 16))
+        }
+        let app = entry("Tool.app", .application)
+        #expect(cache.icon(for: app, scale: 2, appearance: .aqua) == nil)
+        for await _ in started { break }
+        cache.forget(["Tool.app"], in: URL(fileURLWithPath: "/tmp"))
+        proceed.signal()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(cache.icon(for: app, scale: 2, appearance: .aqua) == nil)
+    }
+
+    @Test func nilRenderDoesNotRetriggerLoads() async throws {
+        final class Counter: Sendable { let count = Mutex(0) }
+        let counter = Counter()
+        let cache = IconCache(center: center) { _ in
+            counter.count.withLock { $0 += 1 }
+            return nil
+        }
+        let text = entry("missing.txt", .plainText)
+        for _ in 0..<3 {
+            #expect(cache.icon(for: text, scale: 2, appearance: .aqua) == nil)
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        #expect(counter.count.withLock { $0 } == 1)
+    }
+
+    private func tempFolder() throws -> (URL, FolderGrants) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BrowserIconTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let prefs = root.appendingPathComponent("prefs").path
+        return (root, FolderGrants(defaults: UserDefaults(suiteName: prefs)!))
+    }
+
+    @Test func customIconOnRegularFileLoadsAndUpdatesAfterForget() async throws {
+        let (root, _) = try tempFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fileURL = root.appendingPathComponent("custom.txt")
+        FileManager.default.createFile(atPath: fileURL.path, contents: Data("hello".utf8))
+        func waitIcon(
+            _ cache: IconCache, _ entry: DirectoryEntry, excluding: [NSImage]
+        ) async throws -> NSImage? {
+            for _ in 0..<20 {
+                if let icon = cache.icon(for: entry, scale: 2, appearance: .aqua),
+                    !excluding.contains(where: { $0 === icon })
+                {
+                    return icon
+                }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            return nil
+        }
+        let sym = { (n: String) in NSImage(systemSymbolName: n, accessibilityDescription: nil)! }
+        #expect(NSWorkspace.shared.setIcon(sym("star"), forFile: fileURL.path, options: []))
+        let cache = IconCache(center: center)
+        let plain = await loaded(cache, entry("plain.txt", .plainText))
+        let custom = DirectoryEntry(
+            url: fileURL, name: "custom.txt", isDirectory: false, isPackage: false,
+            isSymbolicLink: false, isHidden: false, size: 5, modified: nil, type: .plainText)
+        let first = try #require(await waitIcon(cache, custom, excluding: [plain]))
+        #expect(NSWorkspace.shared.setIcon(sym("heart"), forFile: fileURL.path, options: []))
+        cache.forget(["custom.txt"], in: root)
+        #expect(try await waitIcon(cache, custom, excluding: [plain, first]) != nil)
+    }
+
+    @Test func deallocatingControllerRemovesIconObserver() throws {
+        let (root, grants) = try tempFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        weak var weakController: BrowserViewController?
+        weak var weakObserver: AnyObject?
+        do {
+            let item = BrowserItem(folder: root, grants: grants) { _, _ in }
+            _ = item.controller.view
+            weakController = item.controller
+            weakObserver = item.controller.iconObserver as AnyObject?
+            #expect(weakObserver != nil)
+            item.willClose()
+        }
+        #expect(weakController == nil && weakObserver == nil)
+    }
+
+    @Test func refreshIconsUpdatesMovedNameColumn() async throws {
+        let (root, grants) = try tempFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("a.txt").path
+        FileManager.default.createFile(atPath: file, contents: nil)
+        let item = BrowserItem(folder: root, grants: grants) { _, _ in }
+        defer { item.willClose() }
+        let window = NSWindow(
+            contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: .titled,
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = item.controller.view
+        defer { window.close() }
+        item.go()
+        await item.listed()
+        let table = item.controller.tableView
+        table.moveColumn(0, toColumn: 1)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let entry = try #require(item.entries.first { $0.name == "a.txt" })
+        _ = await loaded(
+            IconCache.shared, entry, scale: window.backingScaleFactor,
+            appearance: table.effectiveAppearance.name, in: .default)
+        let row = try #require(item.controller.row(named: "a.txt"))
+        let cell = try #require(
+            table.view(atColumn: 1, row: row, makeIfNecessary: false) as? FileCell)
+        cell.icon = nil
+        #expect(!item.shownIconsAreCurrent)
+        item.controller.refreshIcons()
+        #expect(cell.icon != nil && item.shownIconsAreCurrent)
     }
 }

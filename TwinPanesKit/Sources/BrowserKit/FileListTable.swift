@@ -148,10 +148,15 @@ final class IconCache {
     }
 
     typealias Renderer = @Sendable (Key) -> NSImage?
-    private var icons: [Key: (image: NSImage, generation: Int)] = [:]
-    private var loading: [Key: Int] = [:]
+    private var icons: [Key: (image: NSImage?, generation: Int)] = [:]
+    private var loading: [Key: (generation: Int, requestID: Int)] = [:]
+    private var nextRequestID = 0
     private var pathOrder: [Key] = []
     let pathLimit = 256
+    private var customIcons: [String: Bool] = [:]
+    private var customIconOrder: [String] = []
+    private var probingCustomIcons: Set<String> = []
+    private let customIconLimit = 1024
     private var generation = 0
     private var announcing = false
     private let center: NotificationCenter
@@ -170,69 +175,119 @@ final class IconCache {
 
     /// The generic folder icon at 16 points, for the path bar and the ".." row, whose
     /// image views pick a size themselves.
-    private(set) lazy var folder: NSImage = {
+    private(set) lazy var folder: NSImage = Self.makeFolderIcon()
+
+    private static func makeFolderIcon() -> NSImage {
         let copy = NSWorkspace.shared.icon(for: .folder).copy() as? NSImage ?? NSImage()
         copy.size = NSSize(width: 16, height: 16)
         return copy
-    }()
+    }
 
     /// Draws every icon again; until each is done, the old one shows.
     @objc func redraw() {
+        folder = Self.makeFolderIcon()
+        (customIcons, customIconOrder, probingCustomIcons) = ([:], [], [])
         generation += 1
         announce()
     }
 
     /// These entries of `folder` changed (a new icon pasted in Get Info, say). Walks the
-    /// few cached app icons, not `names`: a live update while a big folder lists can
-    /// name tens of thousands of entries, and building a path for each one took 20-50 ms
-    /// of the main thread (docs/plans/M4.md, performance pass).
+    /// few cached app/custom icons, not `names`: a live update while a big folder lists
+    /// can name tens of thousands of entries, and building a path for each one took
+    /// 20-50 ms of the main thread (docs/plans/M4.md, performance pass).
     func forget(_ names: Set<String>, in folder: URL) {
         let parent = folder.path
-        func changed(_ key: Key) -> Bool {
-            let path = key.id as NSString
+        func changedPath(_ pathString: String) -> Bool {
+            let path = pathString as NSString
             return path.deletingLastPathComponent == parent
                 && names.contains(path.lastPathComponent)
         }
-        guard pathOrder.contains(where: changed) else { return }
+        func changed(_ key: Key) -> Bool { key.isPath && changedPath(key.id) }
         for key in pathOrder where changed(key) { icons[key] = nil }
         pathOrder.removeAll(where: changed)
+        for key in loading.keys where changed(key) { loading[key] = nil }
+        for path in customIcons.keys where changedPath(path) { customIcons[path] = nil }
+        customIconOrder.removeAll(where: changedPath)
+        for path in probingCustomIcons where changedPath(path) { probingCustomIcons.remove(path) }
     }
 
     /// The icon for `entry`, or nil until it's been drawn.
     func icon(
         for entry: DirectoryEntry, scale: CGFloat, appearance: NSAppearance.Name
     ) -> NSImage? {
+        let path = entry.url.path
+        var usePath = entry.isApplication
+        if !usePath, let known = customIcons[path] {
+            usePath = known
+        } else if !usePath {
+            probeCustomIcon(atPath: path)
+        }
         let key = Key(
-            id: entry.isApplication ? entry.url.path : entry.type.identifier,
-            isPath: entry.isApplication, scale: scale, appearance: appearance)
+            id: usePath ? path : entry.type.identifier, isPath: usePath, scale: scale,
+            appearance: appearance)
         let cached = icons[key]
         if cached?.generation != generation { load(key) }
         return cached?.image
     }
 
-    private func load(_ key: Key) {
-        guard loading[key] != generation else { return }
-        loading[key] = generation
-        let (wanted, render) = (generation, render)
-        let box = WeakIconCache(self)
+    private func probeCustomIcon(atPath path: String) {
+        guard probingCustomIcons.insert(path).inserted else { return }
+        let (wanted, box) = (generation, WeakIconCache(self))
         queue.async {
-            nonisolated(unsafe) let image = render(key)
+            let hasCustom = Self.hasCustomIcon(atPath: path)
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { box.cache?.loaded(key, image, generation: wanted) }
+                MainActor.assumeIsolated { box.cache?.probedCustomIcon(path, hasCustom, wanted) }
             }
         }
     }
 
-    private func loaded(_ key: Key, _ image: NSImage?, generation wanted: Int) {
-        guard loading[key] == wanted else { return }  // a newer drawing is on its way
+    private func probedCustomIcon(_ path: String, _ hasCustom: Bool, _ wanted: Int) {
+        guard probingCustomIcons.remove(path) != nil, wanted == generation else { return }
+        if customIcons[path] == nil {
+            customIconOrder.append(path)
+            if customIconOrder.count > customIconLimit {
+                customIcons[customIconOrder.removeFirst()] = nil
+            }
+        }
+        customIcons[path] = hasCustom
+        if hasCustom { announce() }
+    }
+
+    nonisolated static func hasCustomIcon(atPath path: String) -> Bool {
+        var buf = [UInt8](repeating: 0, count: 32)
+        let len = getxattr(path, "com.apple.FinderInfo", &buf, 32, 0, XATTR_NOFOLLOW)
+        guard len >= 10 else { return false }
+        return (UInt16(buf[8]) << 8 | UInt16(buf[9])) & 0x0400 != 0
+    }
+
+    private func load(_ key: Key) {
+        guard loading[key]?.generation != generation else { return }
+        nextRequestID += 1
+        let (wanted, requestID, render, box) = (
+            generation, nextRequestID, render, WeakIconCache(self)
+        )
+        loading[key] = (wanted, requestID)
+        queue.async {
+            nonisolated(unsafe) let image = render(key)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    box.cache?.loaded(key, image, generation: wanted, requestID: requestID)
+                }
+            }
+        }
+    }
+
+    private func loaded(
+        _ key: Key, _ image: NSImage?, generation wanted: Int, requestID: Int
+    ) {
+        guard let pending = loading[key], pending == (wanted, requestID) else { return }
         loading[key] = nil
-        guard let image else { return }
         if key.isPath, icons[key] == nil {
             pathOrder.append(key)
             if pathOrder.count > pathLimit { icons[pathOrder.removeFirst()] = nil }
         }
         icons[key] = (image, wanted)
-        announce()
+        if image != nil { announce() }
     }
 
     /// One `didChange` for everything drawn in one turn of the run loop.
@@ -264,11 +319,12 @@ final class IconCache {
             let rep = NSBitmapImageRep(
                 bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
                 bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
-        else { return icon }
+                colorSpaceName: .calibratedRGB, bytesPerRow: 0, bitsPerPixel: 0),
+            let context = NSGraphicsContext(bitmapImageRep: rep)
+        else { return icon.copy() as? NSImage ?? NSImage() }
         rep.size = size
         NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current = context
         let appearance = NSAppearance(named: key.appearance) ?? NSAppearance(named: .aqua)!
         appearance.performAsCurrentDrawingAppearance {
             icon.draw(in: NSRect(origin: .zero, size: size))
@@ -332,7 +388,8 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         tableView.doubleAction = #selector(browserOpen(_:))
         tableView.setAccessibilityIdentifier("fileList")
         tableView.iconsChanged = { [weak self] in self?.refreshIcons() }
-        NotificationCenter.default.addObserver(
+        if let iconObserver { NotificationCenter.default.removeObserver(iconObserver) }
+        iconObserver = NotificationCenter.default.addObserver(
             forName: IconCache.didChange, object: IconCache.shared, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated { self?.refreshIcons() } }
     }
@@ -439,11 +496,16 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         return IconCache.shared.icon(for: entry, scale: scale, appearance: appearance)
     }
 
+    private var nameColumn: Int { tableView.column(withIdentifier: .init(Column.name.rawValue)) }
+
     /// The icons no longer match the screen or the appearance: give the name cells on
     /// screen theirs again.
     func refreshIcons() {
+        let column = nameColumn
+        guard column >= 0 else { return }
         tableView.enumerateAvailableRowViews { rowView, row in
-            guard let cell = rowView.view(atColumn: 0) as? FileCell, let entry = entry(atRow: row)
+            guard let cell = rowView.view(atColumn: column) as? FileCell,
+                let entry = entry(atRow: row)
             else { return }
             cell.icon = icon(for: entry)
         }
@@ -452,9 +514,12 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
     /// True when every name cell on screen shows the icon for the table's current scale
     /// and appearance (asking draws any that are missing). For tests and the smoke test.
     var shownIconsAreCurrent: Bool {
+        let column = nameColumn
+        guard column >= 0 else { return true }
         var current = true
         tableView.enumerateAvailableRowViews { rowView, row in
-            guard let cell = rowView.view(atColumn: 0) as? FileCell, let entry = entry(atRow: row)
+            guard let cell = rowView.view(atColumn: column) as? FileCell,
+                let entry = entry(atRow: row)
             else { return }
             let wanted = icon(for: entry)
             if wanted == nil || cell.icon !== wanted { current = false }
