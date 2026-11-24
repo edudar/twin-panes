@@ -81,7 +81,7 @@ enum MainMenu {
             "View",
             [
                 command(.toggleZoom), command(.exitZoom), .separator(),
-                command(.nextTab), command(.previousTab), .separator(),
+                command(.nextTab), command(.previousTab), command(.switchPanel), .separator(),
                 command(.browserOpen), command(.browserShowPackageContents),
                 command(.browserView), command(.browserEdit),
                 command(.browserBack), command(.browserForward),
@@ -106,7 +106,7 @@ enum MainMenu {
             [
                 standard("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
                 standard("Zoom", #selector(NSWindow.performZoom(_:)), ""),
-                .separator(),
+                .separator(), command(.moveTabToOtherPanel), .separator(),
                 standard("Bring All to Front", #selector(NSApplication.arrangeInFront(_:)), ""),
             ])
         _ = submenu(

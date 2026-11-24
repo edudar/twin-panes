@@ -46,6 +46,16 @@ extension SmokeTest {
                 "clicking into the \(panel.rawValue)'s file list makes it the active panel")
         }
 
+        // Tab and ⇧Tab in a file list switch panels, as real key events (D-b).
+        let switches = [("Tab", KeyChord.tab, right), ("⇧Tab", KeyChord("\t", .shift), left)]
+        for (name, chord, target) in switches {
+            check(dispatch(chord, in: window), "\(name) in a file list is dispatched")
+            check(
+                layout.focusedPanelItem === target
+                    && window.firstResponder === target.preferredFirstResponder,
+                "\(name) switches to the other panel's file list")
+        }
+
         layout.insert(app.makeEditorSession().makeView(), in: .rightPanel)
         controller.frameController.closeItem(right.id)
         await settle()
@@ -58,6 +68,23 @@ extension SmokeTest {
         check(
             layout.items(in: .rightPanel).count == 1 && replacement?.folder == left.folder,
             "closing a panel's last editor leaves a browser at the other panel's folder")
+
+        // Window › Move Tab to Other Panel moves the same item (D-b).
+        guard let moveTab = app.registry.command(.moveTabToOtherPanel) else {
+            return check(false, "Move Tab to Other Panel is a command")
+        }
+        let moved = app.makeEditorSession().makeView()
+        layout.insert(moved, in: .leftPanel)
+        check(app.dispatcher.perform(moveTab, in: window), "Move Tab to Other Panel runs")
+        check(
+            layout.slot(of: moved.id) == .rightPanel && layout.focusedPanelItem === moved,
+            "Move Tab to Other Panel moves the tab and activates its new panel")
+        layout.activate(.leftPanel)
+        check(
+            !app.dispatcher.perform(moveTab, in: window),
+            "Move Tab to Other Panel is disabled for a panel's only browser")
+        controller.frameController.closeItem(moved.id)
+        await settle()
     }
 
     /// Clicks the middle of `view`'s visible part with real mouse events. The mouse-up is

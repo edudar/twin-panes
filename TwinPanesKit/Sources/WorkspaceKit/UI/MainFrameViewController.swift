@@ -190,6 +190,33 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         showStatus("Zoom off")
     }
 
+    /// Makes the other panel active and focuses its tab (`panel.switch`, docs/plans/M5.md,
+    /// D-b). Does nothing while an item is zoomed.
+    @objc public func switchPanel(_ sender: Any?) {
+        guard canSwitchPanel, let other = layout.activePanel.otherPanel else { return }
+        layout.activate(other)
+    }
+
+    private var canSwitchPanel: Bool {
+        layout.zoomedItem == nil
+            && layout.activePanel.otherPanel.flatMap { layout.selectedItem(in: $0) } != nil
+    }
+
+    /// Moves the active panel's tab to the other panel, which becomes active, unless the
+    /// layout won't let it go (a panel's only browser).
+    @objc public func moveTabToOtherPanel(_ sender: Any?) {
+        guard let (item, other) = movableTab else { return }
+        layout.move(item.id, to: other)
+    }
+
+    /// The tab Move Tab to Other Panel would move, and where to.
+    private var movableTab: (any WorkspaceItem, SlotID)? {
+        guard layout.zoomedItem == nil, let item = layout.focusedPanelItem,
+            let other = layout.activePanel.otherPanel, layout.canMove(item.id, to: other)
+        else { return nil }
+        return (item, other)
+    }
+
     @objc public func selectNextTab(_ sender: Any?) { layout.selectAdjacentTab(1) }
     @objc public func selectPreviousTab(_ sender: Any?) { layout.selectAdjacentTab(-1) }
 
@@ -201,6 +228,10 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         case #selector(toggleZoom(_:)):
             menuItem.title = layout.zoomedItem == nil ? "Zoom Item" : "Exit Zoom"
             return layout.focusedPanelItem != nil || layout.zoomedItem != nil
+        case #selector(switchPanel(_:)):
+            return canSwitchPanel
+        case #selector(moveTabToOtherPanel(_:)):
+            return movableTab != nil
         case #selector(exitZoom(_:)):
             return layout.zoomedItem != nil
         case #selector(selectNextTab(_:)), #selector(selectPreviousTab(_:)):

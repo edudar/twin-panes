@@ -42,6 +42,8 @@ extension CommandID {
     static let exitZoom: CommandID = "workspace.exitZoom"
     static let nextTab: CommandID = "workspace.nextTab"
     static let previousTab: CommandID = "workspace.previousTab"
+    static let switchPanel: CommandID = "panel.switch"
+    static let moveTabToOtherPanel: CommandID = "panel.moveTab"
     static let browserView: CommandID = "browser.view"
     static let browserEdit: CommandID = "browser.edit"
     static let browserOpen: CommandID = "browser.open"
@@ -102,6 +104,10 @@ enum DefaultCommands {
         add(
             .previousTab, "Show Previous Tab",
             #selector(MainFrameViewController.selectPreviousTab(_:)))
+        add(.switchPanel, "Switch Panel", #selector(MainFrameViewController.switchPanel(_:)))
+        add(
+            .moveTabToOtherPanel, "Move Tab to Other Panel",
+            #selector(MainFrameViewController.moveTabToOtherPanel(_:)))
         add(.browserView, "View", #selector(BrowserActions.browserView(_:)))
         add(.browserEdit, "Edit", #selector(BrowserActions.browserEdit(_:)))
         add(.browserOpen, "Open", #selector(BrowserActions.browserOpen(_:)))
@@ -155,6 +161,9 @@ enum DefaultCommands {
         registry.bind(.escape, to: .exitZoom, in: .mainFrame)
         registry.bind(KeyChord("\t", .control), to: .nextTab)
         registry.bind(KeyChord("\t", [.control, .shift]), to: .previousTab)
+        // Only in the file list, so the path field and the editor keep Tab (§4.11).
+        registry.bind(.tab, to: .switchPanel, in: fileList)
+        registry.bind(KeyChord("\t", .shift), to: .switchPanel, in: fileList)
         registry.bind(.function(3), to: .browserView, in: browser)
         registry.bind(.function(4), to: .browserEdit, in: browser)
         registry.bind(.returnKey, to: .browserOpen, in: fileList)
