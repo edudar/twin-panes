@@ -144,4 +144,72 @@ import Testing
         #expect(store.entries.isEmpty)
         #expect(BookmarkStore(defaults: defaults, key: key).entries.isEmpty)
     }
+
+    @Test func symlinkAndCaseVariantsDeduplicateAndForget() throws {
+        defer { cleanUp() }
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let store = BookmarkStore(defaults: defaults, key: key)
+        let folder = dir.appendingPathComponent("MixedCase", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let canonicalPath = BookmarkStore.canonicalPath(folder)
+        try #require(canonicalPath.hasPrefix("/private/var/"))
+        let canonicalURL = URL(fileURLWithPath: canonicalPath, isDirectory: true)
+        let altSymlink = URL(
+            fileURLWithPath: "/var/" + canonicalPath.dropFirst("/private/var/".count),
+            isDirectory: true)
+        try store.add(canonicalURL)
+        try store.add(altSymlink)
+        #expect(store.entries.count == 1)
+
+        try store.refresh(altSymlink)
+        #expect(store.entries.count == 1)
+
+        let caseSensitive =
+            (try? folder.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey])
+                .volumeSupportsCaseSensitiveNames) ?? true
+        if !caseSensitive {
+            let upper = dir.appendingPathComponent("MIXEDCASE", isDirectory: true)
+            try store.add(upper)
+            #expect(store.entries.count == 1)
+        }
+
+        // Delete folder so it becomes lost, then forget via symlink + case variant.
+        try FileManager.default.removeItem(at: folder)
+        #expect(store.lost.count == 1)
+        let forgetTarget =
+            caseSensitive
+            ? altSymlink
+            : dir.appendingPathComponent("mixedcase", isDirectory: true)
+        store.forget(forgetTarget)
+        #expect(store.lost.isEmpty)
+        #expect(store.entries.isEmpty)
+    }
+
+    @Test func snapshotReturnsEntriesAndLost() throws {
+        defer { cleanUp() }
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let store = BookmarkStore(defaults: defaults, key: key)
+        let a = try file("a")
+        let b = try file("b")
+        try store.add(a)
+        try store.add(b)
+        try FileManager.default.removeItem(at: a)
+
+        let snap = store.snapshot()
+        #expect(
+            snap.entries.map { BookmarkStore.canonicalPath($0.url) } == [
+                BookmarkStore.canonicalPath(b)
+            ])
+        #expect(
+            snap.lost.map { BookmarkStore.canonicalPath($0) } == [BookmarkStore.canonicalPath(a)])
+    }
+
+    @Test func negativeLimitDoesNotTrap() throws {
+        defer { cleanUp() }
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let store = BookmarkStore(defaults: defaults, key: key, limit: -1)
+        try store.add(try file("a"))
+        #expect(store.entries.isEmpty)
+    }
 }
