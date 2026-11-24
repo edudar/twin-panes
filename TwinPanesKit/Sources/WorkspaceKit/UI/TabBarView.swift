@@ -65,7 +65,7 @@ final class TabBarView: NSView {
 final class TabItemView: NSView {
     let id: ItemID
     let isSelected: Bool
-    private let isActivePanel: Bool
+    let isActivePanel: Bool
     private let isDirty: Bool
     /// False hides the close button: the tab is a panel's only browser.
     var canClose = true {

@@ -29,6 +29,23 @@ extension SmokeTest {
             "⌘W is disabled on a panel's only browser")
         check(layout.items(in: .leftPanel).map(\.id) == [left.id], "the panel's only browser stays")
 
+        // Clicking into a panel makes it the active one (D-b). Home needs a grant the
+        // smoke test doesn't have, so the lists show the temporary folder instead.
+        for browser in [left, right] {
+            browser.go(to: FileManager.default.temporaryDirectory)
+            await browser.listed()
+        }
+        window.makeKeyAndOrderFront(nil)
+        window.layoutIfNeeded()
+        for (panel, browser) in [(SlotID.rightPanel, right), (.leftPanel, left)] {
+            guard let list = browser.preferredFirstResponder else { continue }
+            click(list, in: window)
+            await settle()
+            check(
+                layout.activePanel == panel && window.firstResponder === list,
+                "clicking into the \(panel.rawValue)'s file list makes it the active panel")
+        }
+
         layout.insert(app.makeEditorSession().makeView(), in: .rightPanel)
         controller.frameController.closeItem(right.id)
         await settle()
@@ -41,5 +58,22 @@ extension SmokeTest {
         check(
             layout.items(in: .rightPanel).count == 1 && replacement?.folder == left.folder,
             "closing a panel's last editor leaves a browser at the other panel's folder")
+    }
+
+    /// Clicks the middle of `view`'s visible part with real mouse events. The mouse-up is
+    /// queued first: a table's mouse-down tracks the mouse until it sees one.
+    func click(_ view: NSView, in window: NSWindow) {
+        let visible = view.visibleRect
+        let point = view.convert(NSPoint(x: visible.midX, y: visible.midY), to: nil)
+        func event(_ type: NSEvent.EventType) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: type == .leftMouseDown ? 1 : 0)
+        }
+        guard let down = event(.leftMouseDown), let up = event(.leftMouseUp) else { return }
+        NSApp.postEvent(up, atStart: false)
+        window.sendEvent(down)
     }
 }

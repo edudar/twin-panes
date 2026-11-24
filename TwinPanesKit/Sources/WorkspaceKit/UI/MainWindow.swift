@@ -8,6 +8,9 @@ public final class MainWindow: NSWindow, NSDraggingDestination {
     /// Called whenever this window becomes key or its first responder changes, so menus
     /// can refresh focus-dependent key equivalents (PLAN.md §4.11).
     public var onFocusChange: ((NSWindow) -> Void)?
+    /// Called with the new first responder whenever it changes; the main frame follows
+    /// it to the panel it's in (docs/plans/M5.md, D-b).
+    public var onFirstResponderChange: ((NSResponder?) -> Void)?
     private var lastHandledKeyEvent: NSEvent?
 
     public override func becomeKey() {
@@ -17,7 +20,10 @@ public final class MainWindow: NSWindow, NSDraggingDestination {
 
     public override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
         let changed = super.makeFirstResponder(responder)
-        if changed { onFocusChange?(self) }
+        if changed {
+            onFirstResponderChange?(firstResponder)
+            onFocusChange?(self)
+        }
         return changed
     }
 
@@ -96,6 +102,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.setContentSize(NSSize(width: 900, height: 600))
         super.init(window: window)
         window.delegate = self
+        window.onFirstResponderChange = { [weak frameController] responder in
+            frameController?.followFocus(to: responder)
+        }
         workspace.register(layout)
     }
 

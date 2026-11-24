@@ -145,6 +145,18 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         focusCurrentItemIfChanged()
     }
 
+    /// Makes the panel that holds `responder` the active one, so clicking or tabbing into
+    /// a panel activates it (docs/plans/M5.md, D-b). Focus outside both panels, such as
+    /// in the zoomed item or on the window itself, leaves the active panel as it is.
+    public func followFocus(to responder: NSResponder?) {
+        guard let view = responder as? NSView,
+            let panel = slotControllers.first(where: { view.isDescendant(of: $0.value.view) })?
+                .key,
+            panel != layout.activePanel
+        else { return }
+        layout.activate(panel)
+    }
+
     // MARK: Item management
 
     /// Asks the close workflow, then removes the item. A tab the layout won't remove

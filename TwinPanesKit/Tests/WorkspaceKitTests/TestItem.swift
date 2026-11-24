@@ -14,7 +14,11 @@ final class TestItem: WorkspaceItem {
     private(set) var closes = 0
     weak var host: WorkspaceHost?
     var onChange: (() -> Void)?
-    lazy var viewController = NSViewController()
+    lazy var viewController: NSViewController = {
+        let controller = NSViewController()
+        controller.view = FocusableView()
+        return controller
+    }()
     let preferredSlot: SlotID
 
     init(
@@ -77,4 +81,9 @@ extension PanelFiller {
     static let testBrowsers = PanelFiller(kind: "filler") { panel, _ in
         TestItem(panel.rawValue, kind: "filler", slot: panel)
     }
+}
+
+/// A view that takes keyboard focus, as an item's file list or editor does.
+final class FocusableView: NSView {
+    override var acceptsFirstResponder: Bool { true }
 }
