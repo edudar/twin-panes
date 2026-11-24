@@ -1,11 +1,10 @@
 # M3c plan: protecting unsaved edits and crash recovery
 
-_Status: updated 2026-11-22 from how M3b was built (PLAN.md D30–D33) and started the
-same day while the maintainer was away, at their request; the decisions below are open to
-review when they're back. In progress: steps 1–12 done (narrowed mode reduced, see
-D-d; external changes use a vnode watch rather than `NSFilePresenter`, see D-c; the
-fault suite runs on real files, see D-g). Left: iCloud dataless files (13), the crash
-smoke test, and the docs (14).__
+_Status: done 2026-11-23. Steps 1–12 and the docs (14) are built (narrowed mode
+reduced, see D-d; external changes use a vnode watch rather than `NSFilePresenter`, see
+D-c; the fault suite runs on real files, see D-g). PLAN.md D34–D37 and the §4.2 As built
+note are the record. Closed with two steps left, logged in PLAN.md §9: iCloud dataless
+files (13) move to M6, and the crash smoke test with a child process to M5._
 
 ## Context
 

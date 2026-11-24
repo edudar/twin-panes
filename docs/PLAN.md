@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.24 (2026-11-23). Living document; requirements will keep growing.
+Status: draft v0.25 (2026-11-23). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -310,7 +310,7 @@ opening an editor from the browser) goes through a protocol or factory defined i
   - **Fault-injection tests are an M3c gate** (§7): kill and simulated power loss at
     every write/fsync/rename point of save and journal, external rewrites during
     edit and save, typing during save, volume disappearing mid-save.
-- **As built (M3c, in progress):** D34. The clone is made at the first edit after a
+- **As built (M3c):** D34. The clone is made at the first edit after a
   check that the file is still as opened (else a reload first); `EditBuffer.attach`
   switches the original and add buffer once. Records are written at once through the
   `FileSystem` seam; `F_FULLFSYNC` of the add buffer then the journal runs within 1 s
@@ -323,8 +323,8 @@ opening an editor from the browser) goes through a protocol or factory defined i
   crashing `FileSystem` wrapper: a kill or a power loss at every operation of strategies
   A and B leaves the old or new contents after recovery's rollback, and a crashed
   session recovers a state it really had (docs/plans/M3c.md, D-g as built; the add
-  buffer's own power loss isn't simulated). Not built yet: iCloud dataless files and a
-  crash smoke test with a child process (docs/plans/M3c.md, steps 13–14).
+  buffer's own power loss isn't simulated). M3c closed without iCloud dataless files
+  and a crash smoke test with a child process; both are in §9 ("From M3c").
 
 ### 4.3 Saving: `Saver`
 `NSFileCoordinator` only coordinates with cooperating clients; atomicity and recovery
@@ -963,8 +963,8 @@ starts; this table stays the summary.
 | M3b | Sessions & saving → **first usable hex version** | `EditorSession` + `SessionRegistry`, dirty state, read-only mode, save strategy A (clone-stage-replace) per the M0 capability matrix with a range-patch save plan, save race handling, Save / Save As / Revert, unsaved-changes sheets with Save, Undo/Redo menu wired to the session. Hard-linked files offer Save As until M3c | Edit + save on 4 GB is near-instant; undo after save restores original bytes; typing during a save keeps the new edits; a failed save leaves the old file intact; read-only files refuse edits but Save As works |
 | M3c | Protecting unsaved edits & crash recovery | Session folder + clone at the first edit (backing generation), strategy B (in place + journal + commit record) for hard-linked files, recovery guarantee per volume (narrowed mode where no clone), external-change policy with own-write suppression, iCloud dataless files, operation journal + crash restore, the fault-injection suite | Killing the app mid-edit or mid-save loses nothing, and power loss loses at most the last ~1 s of edits; typing during a save keeps the new edits and their journal; saving never triggers the external-change sheet; external modification never corrupts unsaved edits; **the fault-injection suite (§7) passes** |
 | M4 | Browser foundation | Builds on M1b: async listing that never blocks the UI, back/forward history, sorting by column, hidden-files toggle, live updates (FSEvents), per-volume access flow informed by the M0 spike | Browse a 100k-file folder without UI stalls |
-| M5 | Dual panels + tabs | Second panel, active-panel focus, per-panel tab bar, tab restore on relaunch via AppKit restoration (D23), collapsible sidebar (Favorites, Locations), shell-style path completion in the path field (§4.7) | Daily navigation possible without Finder |
-| M6 | NC keys + file operations | Function-key bar, F2–F8 actions with ⌘ equivalents, operations queue (copy/move/trash/new folder/rename) with progress and conflict handling, cross-volume move with per-item failure reporting | Copy/move large trees reliably with cancel and conflicts |
+| M5 | Dual panels + tabs | Second panel, active-panel focus, per-panel tab bar, tab restore on relaunch via AppKit restoration (D23), collapsible sidebar (Favorites, Locations), shell-style path completion in the path field (§4.7), a relaunch smoke test that also checks crash recovery (from M3c, §9) | Daily navigation possible without Finder |
+| M6 | NC keys + file operations | Function-key bar, F2–F8 actions with ⌘ equivalents, operations queue (copy/move/trash/new folder/rename) with progress and conflict handling, cross-volume move with per-item failure reporting, iCloud dataless files in operations and at the editor's first edit (from M3c, §9) | Copy/move large trees reliably with cancel and conflicts |
 | M7 | Preview pane + hex integration | Collapsible right pane with Quick Look + metadata, viewer factory injected by the TwinPanes app target, QuickView item (F3 quick view in opposite panel, read-only `ByteSource`, unsaved-edits marker), F4 editor tab (hex), hex view in preview for unsupported types | Hex editor reachable entirely from the file manager; moving the cursor through 1,000 files in quick view creates no sessions |
 | M8 | Insert/delete | PieceTable insert/delete exposed, insert-mode toggle in hex, paste/delete ranges, strategy A with a streamed rewrite (inode re-keying, new backing generation, metadata preservation), free-space check, refusal or copy-based path on strategy-B-only volumes | Random edit sequences round-trip byte-exact through save; xattrs/tags survive |
 | M9a | Text mode + find/replace | Mode switcher, encoding detection, lossless invalid-byte mapping, TextKit sync layer, TextKit 2 text mode (after the spike in §4.10 passes; 16 MB threshold profiled separately), unencodable-input handling + Convert to UTF-8, line endings, inline find/replace in hex (any length) and text modes | Switch modes mid-edit with no data loss; replace-all on a 15 MB text file is one undo step; text-mode memory stays within its budget at the threshold |
@@ -1061,7 +1061,8 @@ byte histogram.
     (D42). Lost grants are asked for again where they were; moved recent files stay
     in Open Recent and offer to find them.
   - *`SF_DATALESS` at open* (§4.1): not testable in CI (needs an iCloud-evicted file);
-    lands with the M3c recovery clone, which must wait for the download anyway.
+    planned with the M3c recovery clone, which must wait for the download anyway, and
+    moved to M6 when M3c closed (see "From M3c").
 - **From the M3a review (2026-11-22):**
   - *Lazy `AddBuffer` creation*: open the backing file on first edit instead of at tab
     open; lands in M3c when `AddBuffer` moves into the session folder (created on the
@@ -1086,6 +1087,14 @@ byte histogram.
   - *Flushing on app deactivation*: the 1 s debounce and the flush at save and close
     cover it; an explicit flush when the app goes to the background isn't wired.
   - *Strategy B writes aren't coordinated* with `NSFileCoordinator` yet.
+  - *iCloud dataless files* (M3c step 13, left when M3c closed on 2026-11-23): the
+    first edit of an evicted file must download it before the clone, behind an
+    injected flag since CI has no iCloud. Lands in M6, whose copy and move must
+    handle dataless files too.
+  - *A crash smoke test* (left with M3c step 14): kill a child app mid-edit and check
+    the tab comes back on relaunch. The fault suite covers recovery in unit tests;
+    the real-app check needs two launches, so it lands in M5 with the relaunch
+    automation for state restoration.
 - **From M4 (2026-11-23):**
   - *Many files deleted from outside a shown 100k folder* (100k unlinks, not a move
     to the Trash) still stalls the tab: each burst of FSEvents is read and merged
