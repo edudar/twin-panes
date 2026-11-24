@@ -76,6 +76,7 @@ struct SmokeTest {
         await twoPanels(check, in: second)
         await selfLaunch(check)
         await restoreRelaunch(check)
+        await crashRelaunch(check)
 
         // Browser (M1b): list a real folder, navigate with keys, open a file.
         guard let window = first.window,

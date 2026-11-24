@@ -23,7 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     let recentFiles: RecentFiles = isIsolatedRun ? .isolated() : RecentFiles()
     /// One session per open file (docs/plans/M3b.md, D-a).
-    let sessions = SessionRegistry(sessionsRoot: SessionFolder.defaultRoot)
+    let sessions = SessionRegistry(
+        sessionsRoot: SmokeChild(arguments: CommandLine.arguments)?.sessionsRoot
+            ?? SessionFolder.defaultRoot)
 
     private(set) var windowControllers: [MainWindowController] = []
     private var editorCount = 0
@@ -139,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return showRecovered(found)
     }
 
-    private func crashedSessions(in root: URL = SessionFolder.defaultRoot) -> [EditorSession] {
+    func crashedSessions(in root: URL = SessionFolder.defaultRoot) -> [EditorSession] {
         SessionFolder.sweep(root).compactMap { folder in
             // A folder that can't be read stays for the next launch, as the sweep says.
             guard let session = try? EditorSession(recovering: folder) else { return nil }
@@ -149,7 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @discardableResult
-    private func showRecovered(_ recovered: [EditorSession]) -> [HexEditorItem] {
+    func showRecovered(_ recovered: [EditorSession]) -> [HexEditorItem] {
         recovered.map { session in
             let item = HexEditorItem(session: session)
             item.didSaveAs = { [weak self] url in self?.recentFiles.note(url) }

@@ -7,6 +7,17 @@ struct SmokeChildReport: Codable {
     var processID: Int32
     /// What a restored window shows, from the `restore-load` step.
     var shown: ShownWindow?
+    /// What came back after a crash, from the `crash-recover` step.
+    var recovered: RecoveredEdits?
+}
+
+/// What the crash relaunch checks after the restart (docs/plans/M5.md, D-f, 2).
+struct RecoveredEdits: Codable {
+    var recoveredSessions: Int
+    var unclaimedSessions: Int
+    var editorTabs: Int
+    var isDirty: Bool?
+    var editedByte: UInt8?
 }
 
 /// A restored window as the restore relaunch checks it (docs/plans/M5.md, D-f, 1).
@@ -36,6 +47,9 @@ struct SmokeChild {
     let step: String
     let folder: URL
 
+    /// The child's own sessions folder, so a crash leaves nothing in the user's.
+    var sessionsRoot: URL { folder.appendingPathComponent("Sessions", isDirectory: true) }
+
     /// Nil when this launch isn't a child's.
     init?(arguments: [String]) {
         guard let index = arguments.firstIndex(of: Self.flag), arguments.count > index + 2
@@ -52,14 +66,21 @@ struct SmokeChild {
                     != nil,
                 processID: ProcessInfo.processInfo.processIdentifier)
             do {
+                var waitsToBeKilled = false
                 switch step {
                 case "ping": break
                 case "restore-save": try await saveWindow(app: app)
                 case "restore-load": report.shown = try await loadWindow(app: app)
+                case "crash-edit":
+                    try await editAndWait(app: app)
+                    waitsToBeKilled = true
+                case "crash-recover": report.recovered = try await recover(app: app)
                 default: throw SmokeChildError.unknownStep(step)
                 }
                 try JSONEncoder().encode(report)
                     .write(to: folder.appendingPathComponent("\(step).json"), options: .atomic)
+                // The parent kills this one with SIGKILL: the crash under test.
+                if waitsToBeKilled { return }
                 // `exit` skips teardown: close sessions as quitting does.
                 app.applicationWillTerminate(
                     Notification(name: NSApplication.willTerminateNotification))

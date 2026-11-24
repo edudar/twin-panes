@@ -21,11 +21,29 @@ extension SmokeTest {
     /// 20 s for its report. Returns the report, if one came, and what happened, for the
     /// log. A child still running then is stopped.
     func launchChild(_ step: String, in folder: URL) async -> (SmokeChildReport?, String) {
+        await runChild(step, in: folder) { process in
+            if process.isRunning { process.terminate() }
+        }
+    }
+
+    /// Runs a child that keeps running after its report, then kills it with SIGKILL, as
+    /// a crash would, and waits for it to go.
+    func crashChild(_ step: String, in folder: URL) async -> (SmokeChildReport?, String) {
+        await runChild(step, in: folder) { process in
+            guard process.isRunning else { return }
+            kill(process.processIdentifier, SIGKILL)
+            process.waitUntilExit()
+        }
+    }
+
+    private func runChild(
+        _ step: String, in folder: URL, finally end: (Process) -> Void
+    ) async -> (SmokeChildReport?, String) {
         let process = Process()
         process.executableURL = Bundle.main.executableURL
         process.arguments = [SmokeChild.flag, step, folder.path]
         do { try process.run() } catch { return (nil, "can't start: \(error)") }
-        defer { if process.isRunning { process.terminate() } }
+        defer { end(process) }
         let file = folder.appendingPathComponent("\(step).json")
         for _ in 0..<200 {
             if let data = try? Data(contentsOf: file) {
@@ -90,5 +108,39 @@ extension SmokeTest {
             shown.editorFile == "data.bin" && shown.editorSelection == [100, 120]
                 && shown.editorBytesPerRow == "fixed(8)" && shown.editorIsDirty == false,
             "and the editor, through its bookmark, with its view and no edits")
+    }
+}
+
+extension SmokeTest {
+    /// Step 14 of docs/plans/M5.md (D-f, 2): edits survive the app being killed, and come
+    /// back in the restored tab on their file, dirty.
+    func crashRelaunch(_ check: (Bool, String) -> Void) async {
+        let fm = FileManager.default
+        let folder = fm.temporaryDirectory
+            .appendingPathComponent("smoke-crash-\(UUID().uuidString)", isDirectory: true)
+            .resolvingSymlinksInPath()
+        defer { try? fm.removeItem(at: folder) }
+        do {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data(repeating: 0, count: 256).write(to: folder.appendingPathComponent("data.bin"))
+        } catch {
+            return check(false, "create the crash relaunch's folder: \(error)")
+        }
+        let (edited, editOutcome) = await crashChild("crash-edit", in: folder)
+        guard edited != nil else {
+            return check(false, "the first launch edits before it's killed (\(editOutcome))")
+        }
+        let (loaded, loadOutcome) = await launchChild("crash-recover", in: folder)
+        guard let recovered = loaded?.recovered else {
+            return check(false, "the launch after the crash recovers (\(loadOutcome))")
+        }
+        print("  info after the crash: \(recovered)")
+        check(
+            recovered.recoveredSessions == 1 && recovered.unclaimedSessions == 0
+                && recovered.editorTabs == 1,
+            "after a crash, the restored editor tab takes its file's recovered session")
+        check(
+            recovered.isDirty == true && recovered.editedByte == 0x7E,
+            "and shows the edit typed before the crash, unsaved")
     }
 }
