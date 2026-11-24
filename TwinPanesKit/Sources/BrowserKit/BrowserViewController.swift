@@ -189,7 +189,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// A small live update (D-f): removes, inserts and reloads just the rows that
     /// changed, so the scroll position, the selection and the other rows' views stay.
     /// The changes were worked out with the listing; false if there's no view to update.
-    func applyRowChanges(_ changes: RowChanges) -> Bool {
+    func applyRowChanges(
+        _ changes: RowChanges, asked: Set<String> = [], found: [String: Int] = [:]
+    ) -> Bool {
         let step = StepTiming.start("row changes")
         defer { step?.end() }
         guard isViewLoaded, let item, !item.needsAccess else { return false }
@@ -204,6 +206,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         let inserted = IndexSet(changes.inserted.map { $0 + offset })
         let changed = IndexSet(changes.changed.map { $0 + offset })
         let selected = tableView.selectedRow
+        let priorName = selectedName
         tableView.beginUpdates()
         tableView.removeRows(at: removed, withAnimation: [])
         tableView.insertRows(at: inserted, withAnimation: [])
@@ -212,8 +215,15 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             forRowIndexes: changed, columnIndexes: IndexSet(0..<tableView.numberOfColumns))
         restripe()
         if tableView.selectedRow < 0, selected >= 0, tableView.numberOfRows > 0 {
-            // The selected entry went: the row that took its place is selected.
-            restoreSelection(min(selected, tableView.numberOfRows - 1), parentRow: false)
+            if let priorName,
+                let movedRow = asked.contains(priorName)
+                    ? found[priorName] : item.listing.row(named: priorName)
+            {
+                restoreSelection(movedRow + offset, parentRow: false)
+            } else {
+                // The selected entry went: the row that took its place is selected.
+                restoreSelection(min(selected, tableView.numberOfRows - 1), parentRow: false)
+            }
         }
         return true
     }

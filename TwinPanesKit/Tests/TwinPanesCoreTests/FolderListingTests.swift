@@ -153,6 +153,79 @@ import UniformTypeIdentifiers
         #expect(new.rows(named: [all[30].name, "missing"]).count == (all[30].isHidden ? 0 : 1))
     }
 
+    /// Touched entries whose sort key changed enough to move them past other rows are
+    /// removed from their old rows and inserted at their new rows so replaying the changes
+    /// still matches the new listing.
+    @Test(arguments: orders)
+    func rowChangesReplayWhenEntriesMoveRank(order: ListingOrder) throws {
+        let all = Self.entries(300, seed: 23)
+        let old = FolderListing(order: order).merging(all)
+        let visible = old.rows
+        let gone = Set([visible[1].name, visible[50].name, visible[100].name])
+        let movedTargets = [visible[5], visible[6], visible[25], visible[75], visible[120]]
+        var replacements: [DirectoryEntry] = []
+        for (idx, e) in movedTargets.enumerated() {
+            let flippedKind = idx == 2 ? !e.isDirectory : e.isDirectory
+            let flippedSize: UInt64? =
+                flippedKind ? nil : (idx.isMultiple(of: 2) ? 99_999 - UInt64(idx) : 0)
+            let flippedDate = Date(
+                timeIntervalSince1970: idx.isMultiple(of: 2) ? 2_000_000 : 1)
+            let flippedType: UTType = flippedKind ? .folder : (e.type == .png ? .json : .png)
+            replacements.append(
+                DirectoryEntry(
+                    url: e.url, name: e.name, isDirectory: flippedKind, isPackage: false,
+                    isSymbolicLink: false, isHidden: false, size: flippedSize,
+                    modified: flippedDate, type: flippedType))
+        }
+        let staysInPlace = visible[150]
+        let fresh = DirectoryEntry(
+            url: URL(fileURLWithPath: "/tmp/fresh-move"), name: "fresh-move.txt",
+            isDirectory: false, isPackage: false, isSymbolicLink: false, isHidden: false,
+            size: 500, modified: Date(timeIntervalSince1970: 500), type: .plainText)
+        let touched = gone.union(replacements.map(\.name)).union([staysInPlace.name, fresh.name])
+        let new = old.removing(names: touched).merging(replacements + [staysInPlace, fresh])
+        let changes = try #require(new.rowChanges(from: old, touching: touched, limit: 100))
+        var replay = old.rows
+        for row in changes.removed.reversed() { replay.remove(at: row) }
+        for row in changes.inserted { replay.insert(new.rows[row], at: row) }
+        for row in changes.changed { replay[row] = new.rows[row] }
+        #expect(replay == new.rows)
+        #expect(
+            new.sorted(by: ListingOrder(column: order.column == .name ? .size : .name))
+                .rowChanges(from: old, touching: touched, limit: 100) == nil)
+        #expect(new.showingHidden(true).rowChanges(from: old, touching: touched, limit: 100) == nil)
+    }
+
+    @Test(arguments: orders)
+    func mergingDeduplicatesByName(order: ListingOrder) {
+        let base = Self.entries(40, seed: 31)
+        let dupSource = base[0]
+        let updatedInSameBatch = DirectoryEntry(
+            url: dupSource.url, name: dupSource.name, isDirectory: dupSource.isDirectory,
+            isPackage: false, isSymbolicLink: false, isHidden: dupSource.isHidden,
+            size: dupSource.isDirectory ? nil : 88_888,
+            modified: Date(timeIntervalSince1970: 9_999), type: dupSource.type)
+        let first = FolderListing(order: order, showsHidden: true)
+            .merging(base + [updatedInSameBatch])
+        #expect(first.entries.count == base.count)
+        #expect(first.entries.first { $0.name == dupSource.name } == updatedInSameBatch)
+        let nextTarget = base[10]
+        let updatedInNextBatch = DirectoryEntry(
+            url: nextTarget.url, name: nextTarget.name, isDirectory: !nextTarget.isDirectory,
+            isPackage: false, isSymbolicLink: false, isHidden: nextTarget.isHidden,
+            size: nextTarget.isDirectory ? 1 : nil,
+            modified: Date(timeIntervalSince1970: 12_345),
+            type: nextTarget.isDirectory ? .plainText : .folder)
+        let second = first.merging([updatedInNextBatch])
+        let expectedMap = Dictionary(
+            (base + [updatedInSameBatch, updatedInNextBatch]).map { ($0.name, $0) },
+            uniquingKeysWith: { _, new in new })
+        let expected = expectedMap.values.sorted(by: order.areInIncreasingOrder)
+        #expect(second.entries == expected)
+        #expect(second.merging([]).entries == second.entries)
+        #expect(second.merging([]).rows == second.rows)
+    }
+
     @Test func hiddenEntriesAreFilteredNotDropped() {
         let all = Self.entries(400, seed: 5)
         let hidden = all.filter(\.isHidden).count

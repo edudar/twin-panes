@@ -321,7 +321,11 @@ public final class BrowserItem: WorkspaceItem {
         let step = StepTiming.start("show")
         defer { step?.end() }
         replaceListing(with: applied.listing)
-        if resorted || !(applied.changes.map(controller.applyRowChanges) ?? false) {
+        if resorted
+            || !(applied.changes.map {
+                controller.applyRowChanges($0, asked: applied.asked, found: applied.found)
+            } ?? false)
+        {
             controller.reloadKeepingSelection(
                 scrolling: resorted, asked: applied.asked, found: applied.found)
         }

@@ -85,16 +85,29 @@ public struct FolderListing: Sendable {
     /// Above this many entries, sorting and merging belong off the main actor.
     public static let mainActorLimit = 500
 
-    /// Adds a batch from the lister: sorts it, then merges it into place.
+    /// Adds a batch from the lister: deduplicates by name (keeping the latest entry),
+    /// sorts it, and merges it into place, replacing any older copy with the same name.
     public func merging(_ batch: [DirectoryEntry]) -> FolderListing {
+        guard !batch.isEmpty else { return self }
         let order = self.order
-        let sortedBatch = batch.sorted(by: order.areInIncreasingOrder)
+        var batchNames = Set<String>()
+        batchNames.reserveCapacity(batch.count)
+        var unique: [DirectoryEntry] = []
+        unique.reserveCapacity(batch.count)
+        for entry in batch.reversed() where batchNames.insert(entry.name).inserted {
+            unique.append(entry)
+        }
+        let sortedBatch = unique.sorted(by: order.areInIncreasingOrder)
         var merged: [DirectoryEntry] = []
         merged.reserveCapacity(entries.count + sortedBatch.count)
         var i = entries.startIndex
         var j = sortedBatch.startIndex
-        while i < entries.endIndex, j < sortedBatch.endIndex {
-            if order.areInIncreasingOrder(sortedBatch[j], entries[i]) {
+        while i < entries.endIndex {
+            if batchNames.contains(entries[i].name) {
+                i += 1
+                continue
+            }
+            if j < sortedBatch.endIndex, order.areInIncreasingOrder(sortedBatch[j], entries[i]) {
                 merged.append(sortedBatch[j])
                 j += 1
             } else {
@@ -102,7 +115,6 @@ public struct FolderListing: Sendable {
                 i += 1
             }
         }
-        merged += entries[i...]
         merged += sortedBatch[j...]
         var copy = self
         copy.entries = merged
@@ -151,17 +163,38 @@ public struct FolderListing: Sendable {
     }
 
     /// How the rows changed from `old` when only the entries called `names` did (a live
-    /// update): the old rows that went, the new rows that came, the new rows that were
-    /// read again. Nil if more than `limit` rows changed.
+    /// update): the old rows that went, the new rows that came, and the new rows that were
+    /// read again in place. Touched entries whose sort position moved are reported as removed
+    /// from their old row and inserted at their new row. Nil if `order` or `showsHidden`
+    /// changed or more than `limit` row operations are needed.
     public func rowChanges(
         from old: FolderListing, touching names: Set<String>, limit: Int
     ) -> RowChanges? {
+        guard order == old.order, showsHidden == old.showsHidden else { return nil }
         let before = old.rows(named: names)
         let after = rows(named: names)
         guard before.count + after.count <= 2 * limit else { return nil }
-        let removed = before.filter { after[$0.key] == nil }.map(\.value).sorted()
-        let inserted = after.filter { before[$0.key] == nil }.map(\.value).sorted()
-        let changed = after.filter { before[$0.key] != nil }.map(\.value).sorted()
+        let beforeOrdered = before.sorted { $0.value < $1.value }
+        let afterOrdered = after.sorted { $0.value < $1.value }
+        // Count how many untouched rows precede each touched entry in `old.rows`; a moved
+        // entry either changes that count or swaps order relative to another touched entry.
+        var oldGap = [String: Int](minimumCapacity: beforeOrdered.count)
+        for (offset, item) in beforeOrdered.enumerated() {
+            oldGap[item.key] = item.value - offset
+        }
+        var stay = Set<String>()
+        var lastStayBefore = -1
+        for (offset, item) in afterOrdered.enumerated() {
+            guard let beforeRow = before[item.key],
+                oldGap[item.key] == item.value - offset,
+                beforeRow > lastStayBefore
+            else { continue }
+            stay.insert(item.key)
+            lastStayBefore = beforeRow
+        }
+        let removed = beforeOrdered.compactMap { stay.contains($0.key) ? nil : $0.value }
+        let inserted = afterOrdered.compactMap { stay.contains($0.key) ? nil : $0.value }
+        let changed = afterOrdered.compactMap { stay.contains($0.key) ? $0.value : nil }
         guard removed.count + inserted.count + changed.count <= limit else { return nil }
         return RowChanges(
             removed: removed, inserted: inserted, changed: changed, oldCount: old.rows.count,

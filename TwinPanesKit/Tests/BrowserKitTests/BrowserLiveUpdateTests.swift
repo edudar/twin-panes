@@ -208,4 +208,44 @@ import Testing
         await until { names == ["sub", "d.txt"] }
         #expect(item.controller.selectedEntry?.name == "d.txt")
     }
+
+    /// Resizing a file when sorted by size moves its row and keeps both visible rows and selection
+    /// in sync with the listing.
+    @Test func resizingAFileWhenSortedBySizeMovesItsRowAndKeepsSelection() async throws {
+        defer { cleanUp() }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = item.controller.view
+        defer { window.close() }
+        try Data(count: 1).write(to: root.appendingPathComponent("b.txt"))
+        try Data(count: 50).write(to: root.appendingPathComponent("d.txt"))
+        item.sort(by: ListingOrder(column: .size, ascending: true))
+        await until {
+            names == ["sub", "b.txt", "d.txt"]
+                && item.entries.first { $0.name == "b.txt" }?.size == 1
+                && item.entries.first { $0.name == "d.txt" }?.size == 50
+        }
+        let table = item.controller.tableView
+        window.contentView?.layoutSubtreeIfNeeded()
+        table.layoutSubtreeIfNeeded()
+        let bRow = try #require(item.controller.row(named: "b.txt"))
+        table.selectRowIndexes([bRow], byExtendingSelection: false)
+        #expect(item.controller.selectedEntry?.name == "b.txt")
+        try Data(count: 200).write(to: root.appendingPathComponent("b.txt"))
+        await until {
+            names == ["sub", "d.txt", "b.txt"]
+                && item.entries.first { $0.name == "b.txt" }?.size == 200
+        }
+        #expect(item.controller.selectedEntry?.name == "b.txt")
+        #expect(table.numberOfRows == 4)
+        #expect(table.selectedRow == item.controller.row(named: "b.txt"))
+        window.contentView?.layoutSubtreeIfNeeded()
+        table.layoutSubtreeIfNeeded()
+        let shownNames = (1..<4).compactMap {
+            (table.view(atColumn: 0, row: $0, makeIfNecessary: false) as? FileCell)?.text
+        }
+        #expect(shownNames == ["sub", "d.txt", "b.txt"])
+    }
 }
