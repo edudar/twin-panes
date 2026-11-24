@@ -54,6 +54,9 @@ extension HexEditorItem {
     /// Puts back the saved view options, selection and scroll position, clamped to the
     /// file as it is now; values this build doesn't know keep their defaults.
     public func restoreView(_ state: EditorState) {
+        // The app restores a tab before showing it. Until the view loads, the hex view
+        // has no data source and takes the file as empty, clamping the selection to 0.
+        _ = controller.view
         hexView.options = Self.options(from: state)
         guard length > 0 else { return }
         let start = min(state.selectionStart, length - 1)

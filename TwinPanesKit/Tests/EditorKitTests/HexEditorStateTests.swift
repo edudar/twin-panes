@@ -61,6 +61,19 @@ import WorkspaceKit
         #expect(tab.hexView.topRow == 40)
     }
 
+    /// The app restores a tab before showing it, so before its view has loaded.
+    @Test func aViewRestoredBeforeItLoadsKeepsItsSelectionAndScroll() throws {
+        defer { cleanUp() }
+        item.hexView.select(100..<120)
+        item.hexView.scroll(toTopRow: 3)
+        let state = try savedState()
+        let tab = HexEditorItem(session: item.session)
+        tab.restoreView(state)
+        _ = tab.controller.view
+        #expect(tab.hexView.selection.range == 100..<120)
+        #expect(tab.hexView.topRow == 3)
+    }
+
     @Test func aSelectionPastTheEndIsClampedToTheFile() throws {
         defer { cleanUp() }
         var state = try savedState()
