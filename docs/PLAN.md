@@ -131,7 +131,18 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `DirectoryReader`, `FolderLister` | M1b, M4 | one folder's entries: synchronous (M1b), then off the main actor in growing batches with kinds by type (D38) |
 | `FolderListing`, `ListingOrder`, `RowChanges` | M4 | a folder's sorted, filtered entries; live updates and the table's row changes (D39) |
 | `FolderWatcher` | M4 | FSEvents on one folder, coalesced into changed names, a re-list or folder-gone (D40) |
-| `FolderGrants`, `BookmarkStore` | M1b, M4 | granted folders and recent files as app-scoped bookmarks; lost ones kept with their path (D42) |
+| `FolderGrants`, `BookmarkStore`, `SecurityScope` | M1b, M4 | granted folders and recent files as app-scoped bookmarks (lost ones kept with their path, D42) and reference-counted sandbox scope tokens (§5) |
+| `GapMeter`, `StallLimit` | M4 | main-thread CPU-time heartbeat meter and machine-scaled stall limit for smoke checks |
+
+**BrowserKit components** (M1b, M4)
+
+| Component | Milestone | Role |
+|---|---|---|
+| `BrowserItem` (`+History`, `+Live`) | M1b, M4 | folder tab `WorkspaceItem`, back/forward history, async listing and live-update pipeline |
+| `BrowserViewController` (`+PathBar`) | M1b, M4 | file list controller, path bar / path field (⇧⌘G), access prompt |
+| `FileListTable`, `IconCache` | M1b, M4 | striped `NSTableView`, cached icon bitmaps (dark/light, lazy custom icons) and text-layout cells |
+| `AccessRequest` | M4 | sandbox access prompt targeting (volume, home folder, or lost grant) |
+| `StepTiming`, `StepRecorder` | M4 | main-actor step timing for smoke-test stall diagnostics |
 
 - **Project layout (D20):**
 
@@ -575,17 +586,33 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   cached folder icon and gives way rather than widen the tab, and the tab keeps its
   access token under one grant. The smoke test lists, sorts, filters, scrolls and
   live-updates a real 100k-file folder with a main-thread heartbeat and fails on any
-  gap over 50 ms (worst on the dev Mac: about 30–48 ms while listing).
+  gap whose main-thread CPU time exceeds the limit (50 ms on the dev Mac, scaled up
+  to 4× from two reference workloads; worst on the dev Mac: about 30–48 ms while
+  listing before the performance pass).
 - **As built (M4 performance pass, docs/plans/M4.md):** D44. CI failed the 50 ms gate
   on all three runners (listing up to 915 ms). A Time Profiler pass found cell drawing
   (text layout, icons resampled from 1024 px), full row rebuilds per listing batch, a
   lock shared by the Kind sort and the Kind column, and icon lookups on the main
   actor. Fixed in that order of cost; the smoke test also found, through its new
   stall report, a 20–50 ms loop added by the icon cache itself (fixed). `StepTiming`
-  times the tab's main-actor steps, and a gate over 50 ms prints what ran during its
+  times the tab's main-actor steps, and a gate over the limit prints what ran during its
   worst gap. Cached size and date formatters were measured and dropped (under 0.1 ms
   a screenful). Dev Mac, worst gaps over several runs: listing 20–41 ms (was 31–52),
   scrolling 12–16 ms (was 23–37), the folder moved away 18–36 ms (was 29–67).
+- **As built (M4 review fixes):** `FolderListing.rowChanges` emits rank-moving updates
+  as remove + insert so selection follows moved rows, and `merging` deduplicates
+  overlapping batches; overlapping live `read(_:)` calls sequence per name,
+  `relistLister` cancels on stop/`deinit`, `listed()` waiters resume on stop, and
+  `SecurityScope` stays retained across background I/O. `BookmarkStore` resolves with
+  `.withoutMounting` and canonical paths; `FolderGrants` checks active scopes and
+  volume bounds; `FolderWatcher` uses `F_GETPATH`, `O_CLOEXEC`, and scoped unmount
+  handling. `IconCache` removes observers on `deinit`, guards in-flight IDs, and probes
+  `com.apple.FinderInfo` custom icons lazily off the main thread. `DirectoryReader`
+  resolves symlink targets, skips caching dynamic type names, bypasses cached resource
+  values in `entryIfPresent`, and uses `getpwuid_r`. Path bar, history notices/loops,
+  `GapMeter`/`StallLimit` CPU-clock guards, `AccessRequest` volume/keyboard handling,
+  parent-row/locale/geometry table updates, and `RecentFiles` menu snapshots were also
+  hardened.
 
 ### 4.8 Single main frame: workspace model (D7)
 

@@ -29,7 +29,7 @@ the first time; each grant is saved as a security-scoped bookmark.
 Logic tests for every library module run with SwiftPM:
 
 ```bash
-swift test --package-path TwinPanesKit
+swift test --parallel --package-path TwinPanesKit
 ```
 
 CI also runs the tests under Thread Sanitizer and builds the package for x86_64,
@@ -76,7 +76,7 @@ Manual checks, such as the sandbox spike, are in
 | `TwinPanes.xcodeproj` | The thin app target: Info.plist, entitlements, document types, assets and signing. |
 | `TwinPanes/` | App sources: entry point, menus, command bindings, recent files, the smoke test, and `AppIcon.icon`, the Icon Composer app icon. |
 | `Config/` | Build settings (`.xcconfig`), `Info.plist` additions and entitlements. |
-| `TwinPanesKit/` | One Swift package with every library module and its tests. |
+| `TwinPanesKit/` | One Swift package with every library module (`Sources/`) and its test target (`Tests/`). |
 | `docs/` | The plan, runbooks and images. `docs/plans/` holds one plan per milestone, written and reviewed before the work starts; `docs/reviews/` holds one fix plan per code review. |
 
 Modules in `TwinPanesKit/Sources/` are sibling folders, and their dependencies
@@ -84,7 +84,7 @@ point one way only, enforced by `Package.swift`:
 
 | Module | Purpose | Depends on |
 |---|---|---|
-| `TwinPanesCore` | Byte source and page cache, search, the edit model (piece tree, add buffer, undo), editor sessions and saving, directory listing, folder grants, security scopes. Foundation only. | none |
+| `TwinPanesCore` | Byte source and page cache, search, the edit model (piece tree, add buffer, undo), editor sessions and saving, directory listing, folder grants, security scopes, stall/gap timing. Foundation only. | none |
 | `WorkspaceKit` | The main window, slots, tabs, command registry and close workflow. | TwinPanesCore |
 | `HexViewKit` | The virtualized hex view, layout, selection and copy. | WorkspaceKit, TwinPanesCore |
 | `TextEditKit` | Text and Markdown modes (later milestones). | WorkspaceKit, TwinPanesCore |
