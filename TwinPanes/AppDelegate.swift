@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         })
     lazy var spike = SandboxSpike(app: self)
     private static var isIsolatedRun: Bool {
-        ["--smoke-test", "--bench"].contains(where: CommandLine.arguments.contains)
+        ["--smoke-test", "--bench", SmokeChild.flag].contains(where: CommandLine.arguments.contains)
     }
 
     let recentFiles: RecentFiles = isIsolatedRun ? .isolated() : RecentFiles()
@@ -98,6 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenu.build(updater: menuUpdater, recentFiles: recentFiles)
+        if let child = SmokeChild(arguments: CommandLine.arguments) {
+            child.run()
+            return
+        }
         if CommandLine.arguments.contains("--smoke-test") {
             SmokeTest(app: self, includeBenchmarks: CommandLine.arguments.contains("--bench")).run()
             return

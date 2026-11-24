@@ -74,6 +74,7 @@ struct SmokeTest {
             "smoke-test windows are left out of window restoration")
         await settle()
         await twoPanels(check, in: second)
+        await selfLaunch(check)
 
         // Browser (M1b): list a real folder, navigate with keys, open a file.
         guard let window = first.window,
