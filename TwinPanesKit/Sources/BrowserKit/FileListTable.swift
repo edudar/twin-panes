@@ -319,10 +319,13 @@ final class IconCache {
             let rep = NSBitmapImageRep(
                 bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
                 bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                colorSpaceName: .calibratedRGB, bytesPerRow: 0, bitsPerPixel: 0),
-            let context = NSGraphicsContext(bitmapImageRep: rep)
+                colorSpaceName: .calibratedRGB, bytesPerRow: 0, bitsPerPixel: 0)
         else { return icon.copy() as? NSImage ?? NSImage() }
+        // The size in points first: the context takes its scale from it when it's made.
         rep.size = size
+        guard let context = NSGraphicsContext(bitmapImageRep: rep) else {
+            return icon.copy() as? NSImage ?? NSImage()
+        }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
         let appearance = NSAppearance(named: key.appearance) ?? NSAppearance(named: .aqua)!

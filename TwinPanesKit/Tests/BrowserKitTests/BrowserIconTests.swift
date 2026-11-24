@@ -58,6 +58,23 @@ import UniformTypeIdentifiers
         #expect(rep.size == NSSize(width: 16, height: 16))
     }
 
+    /// The icon fills its 16 points at every scale, not 16 pixels in a corner.
+    @Test(arguments: [1.0, 2.0, 3.0])
+    func theIconFillsItsBitmap(scale: Double) throws {
+        let solid = NSImage(size: NSSize(width: 16, height: 16), flipped: false) {
+            NSColor.black.setFill()
+            $0.fill()
+            return true
+        }
+        let key = IconCache.Key(id: "solid", isPath: false, scale: scale, appearance: .aqua)
+        let image = IconCache.drawn(solid, key)
+        let rep = try #require(image.representations.first as? NSBitmapImageRep)
+        let corners = [(0, 0), (rep.pixelsWide - 1, 0), (rep.pixelsWide - 1, rep.pixelsHigh - 1)]
+        for (x, y) in corners {
+            #expect(rep.colorAt(x: x, y: y)?.alphaComponent == 1, "pixel \(x), \(y)")
+        }
+    }
+
     @Test func iconsAreKeptPerTypeScaleAndAppearance() async {
         let cache = IconCache(center: center)
         let text = entry("a.txt", .plainText)
