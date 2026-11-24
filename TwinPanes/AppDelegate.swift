@@ -50,6 +50,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             folderGrants = FolderGrants()
         }
         super.init()
+        if Self.isIsolatedRun { Self.ignoreSavedWindows() }
+    }
+
+    /// The smoke test and the benchmarks never restore the windows a normal launch saved
+    /// (docs/plans/M5.md, D-c). Set in the argument domain, as `-ApplePersistenceIgnoreState
+    /// YES` would be, so nothing is written to the user's defaults.
+    private static func ignoreSavedWindows() {
+        let defaults = UserDefaults.standard
+        var arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        arguments["ApplePersistenceIgnoreState"] = true
+        defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+    }
+
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+
+    /// Rebuilds restored tabs (docs/plans/M5.md, D-c). Holds the app strongly: the app
+    /// delegate lives as long as the process.
+    lazy var itemRestorer: ItemRestorer = {
+        var restorer = ItemRestorer()
+        restorer.register(.browser, newestVersion: BrowserItem.stateVersion) { state in
+            BrowserItem.restored(from: state, grants: self.folderGrants) { url, scope in
+                self.openFile(url, scope: scope)
+            }
+        }
+        restorer.register(.editor, newestVersion: HexEditorItem.stateVersion) { state in
+            self.restoredEditor(from: state)
+        }
+        return restorer
+    }()
+
+    /// An editor tab on the file `state` names, opened the way Open Recent opens one,
+    /// with its view put back. Nil when the file can't be reached any more: the
+    /// restorer skips the tab.
+    private func restoredEditor(from state: ItemState) -> HexEditorItem? {
+        guard let saved = HexEditorItem.editorState(from: state),
+            let (url, _) = BookmarkStore.resolve(saved.fileBookmark),
+            let (session, _) = try? sessions.open(url, scope: SecurityScope(url: url))
+        else { return nil }
+        let item = HexEditorItem(session: session)
+        item.didSaveAs = { [weak self] url in self?.recentFiles.note(url) }
+        item.restoreView(saved)
+        return item
     }
 
     // MARK: Lifecycle
@@ -146,8 +188,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: Windows and items
 
+    /// A new main window with the default browsers, or with the tabs and divider of
+    /// `saved` when AppKit restores one.
     @discardableResult
-    func openMainWindow() -> MainWindowController {
+    func openMainWindow(restoring saved: WindowState? = nil) -> MainWindowController {
         let layout = MainFrameLayout(
             // Holds the app strongly: the app delegate lives as long as the process.
             filler: PanelFiller(kind: .browser) { panel, layout in
@@ -170,7 +214,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 if let menu = NSApp.mainMenu { self?.menuUpdater.refresh(menu, for: window) }
             }
         }
-        layout.fillEmptyPanels()
+        if let window = controller.window {
+            window.isRestorable = !Self.isIsolatedRun
+            window.restorationClass = MainWindowRestoration.self
+            window.identifier = MainWindowRestoration.identifier
+        }
+        if let saved {
+            controller.frameController.restore(saved, using: itemRestorer)
+        } else {
+            layout.fillEmptyPanels()
+        }
         if let frame = NSApp.keyWindow?.frame {
             controller.window?.setFrameTopLeftPoint(
                 NSPoint(x: frame.minX + 24, y: frame.maxY - 24))

@@ -64,6 +64,14 @@ struct SmokeTest {
         let second = app.openMainWindow()
         check(app.workspace.allLayouts.count == 2, "two main windows registered")
         check(first.layout !== second.layout, "each window has its own layout")
+        // Restoration (docs/plans/M5.md, D-c): windows name the restoration class, but
+        // the smoke test's are neither saved nor restored, so it never touches the
+        // user's saved windows.
+        check(
+            first.window?.restorationClass == MainWindowRestoration.self
+                && first.window?.isRestorable == false
+                && UserDefaults.standard.bool(forKey: "ApplePersistenceIgnoreState"),
+            "smoke-test windows are left out of window restoration")
         await settle()
         await twoPanels(check, in: second)
 
