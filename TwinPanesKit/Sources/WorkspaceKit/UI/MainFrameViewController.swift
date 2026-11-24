@@ -18,6 +18,8 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     private let statusLabel = NSTextField(labelWithString: "")
     private var token: ObservationToken?
     private var lastFocusedItemID: ItemID?
+    /// Each item's own host; items hold theirs weakly.
+    private var itemHosts: [ItemID: FrontItemHost] = [:]
 
     public init(layout: MainFrameLayout, closeCoordinator: CloseCoordinator) {
         self.layout = layout
@@ -95,8 +97,13 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         zoomHost.display(zoomed)
         zoomHost.view.isHidden = zoomed == nil
         split.isHidden = zoomed != nil
-        for item in layout.allItems {
-            item.host = self
+        let items = layout.allItems
+        itemHosts = Dictionary(
+            uniqueKeysWithValues: items.map { item in
+                (item.id, itemHosts[item.id] ?? FrontItemHost(itemID: item.id, frame: self))
+            })
+        for item in items {
+            item.host = itemHosts[item.id]
             item.onChange = { [weak self] in self?.render() }
         }
         focusCurrentItemIfChanged()
@@ -118,6 +125,11 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
 
     public func showStatus(_ message: String) {
         statusLabel.stringValue = message
+    }
+
+    /// Whether `id` is the item in front: the zoomed item, or the active panel's tab.
+    fileprivate func isInFront(_ id: ItemID) -> Bool {
+        (layout.zoomedItem ?? layout.focusedPanelItem)?.id == id
     }
 
     public override func viewDidAppear() {
@@ -224,5 +236,24 @@ final class SlotViewController: NSViewController, CommandScopeProviding {
         tabBar.update(
             items: items, selected: frame?.layout.selection[slot], isActivePanel: isActive)
         host.display(showing)
+    }
+}
+
+/// The host one item sees. Its status messages reach the status line only while the item
+/// is in front, so a browser updating in the other panel, or in a tab behind, doesn't
+/// overwrite what the item you're looking at said.
+@MainActor
+private final class FrontItemHost: WorkspaceHost {
+    let itemID: ItemID
+    private weak var frame: MainFrameViewController?
+
+    init(itemID: ItemID, frame: MainFrameViewController) {
+        self.itemID = itemID
+        self.frame = frame
+    }
+
+    func showStatus(_ message: String) {
+        guard let frame, frame.isInFront(itemID) else { return }
+        frame.showStatus(message)
     }
 }
