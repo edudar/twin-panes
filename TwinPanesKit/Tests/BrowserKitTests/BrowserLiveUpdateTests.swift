@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Testing
 
 @testable import BrowserKit
@@ -15,7 +16,8 @@ private final class RecordingHost: WorkspaceHost {
 
 /// Live updates in the tab (docs/plans/M4.md, D-f, step 9).
 @MainActor
-@Suite struct BrowserLiveUpdateTests {
+@Suite(.timeLimit(.minutes(1)))
+struct BrowserLiveUpdateTests {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("BrowserLiveUpdateTests-\(UUID().uuidString)", isDirectory: true)
         .standardizedFileURL
@@ -47,6 +49,8 @@ private final class RecordingHost: WorkspaceHost {
         _ check: @escaping () -> Bool, sourceLocation: SourceLocation = #_sourceLocation
     ) async {
         if check() { return }
+        var deadlineTask: Task<Void, Never>?
+        defer { deadlineTask?.cancel() }
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             var finished = false
             item.didUpdate = { [item] in
@@ -55,13 +59,23 @@ private final class RecordingHost: WorkspaceHost {
                 item.didUpdate = nil
                 done.resume()
             }
-            Task { @MainActor in
+            deadlineTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(10))
                 guard !finished else { return }
                 finished = true
+                item.didUpdate = nil
                 Issue.record("no such update within 10 s: \(names)", sourceLocation: sourceLocation)
                 done.resume()
             }
+        }
+    }
+
+    private func createEmptyFiles(count: Int, in folder: URL) {
+        for i in 0..<count {
+            let path = folder.appendingPathComponent("f\(i)").path
+            let fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, 0o644)
+            #expect(fd >= 0)
+            if fd >= 0 { close(fd) }
         }
     }
 
@@ -124,10 +138,7 @@ private final class RecordingHost: WorkspaceHost {
         defer { cleanUp() }
         let big = root.appendingPathComponent("big")
         try FileManager.default.createDirectory(at: big, withIntermediateDirectories: true)
-        for i in 0..<3_000 {
-            FileManager.default.createFile(
-                atPath: big.appendingPathComponent("f\(i)").path, contents: nil)
-        }
+        createEmptyFiles(count: 3_000, in: big)
         item.go(to: big)
         #expect(item.isListing)
         item.folderChanged(.relist)
@@ -330,13 +341,12 @@ private final class RecordingHost: WorkspaceHost {
         defer { cleanUp() }
         let big = root.appendingPathComponent("big-close")
         try FileManager.default.createDirectory(at: big, withIntermediateDirectories: true)
-        for i in 0..<3_000 {
-            FileManager.default.createFile(
-                atPath: big.appendingPathComponent("f\(i)").path, contents: nil)
-        }
+        createEmptyFiles(count: 3_000, in: big)
         item.go(to: big)
         #expect(item.isListing)
         let item = self.item
+        var timeoutTask: Task<Void, Never>?
+        defer { timeoutTask?.cancel() }
         let resumed = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
             var finished = false
             Task { @MainActor in
@@ -345,7 +355,7 @@ private final class RecordingHost: WorkspaceHost {
                 finished = true
                 done.resume(returning: true)
             }
-            Task { @MainActor in
+            timeoutTask = Task { @MainActor in
                 await Task.yield()
                 item.willClose()
                 try? await Task.sleep(for: .seconds(2))

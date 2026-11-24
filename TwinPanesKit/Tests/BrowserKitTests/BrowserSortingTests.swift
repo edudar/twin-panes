@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Testing
 import TwinPanesCore
 
@@ -42,6 +43,7 @@ import TwinPanesCore
     @Test func sortingKeepsFoldersOnTopAndTheSelection() async throws {
         defer { cleanUp() }
         let item = await browser(at: root)
+        defer { item.willClose() }
         #expect(names(item) == ["folder", "big.bin", "medium.png", "small.txt"])
         let table = item.controller.tableView
         table.selectRowIndexes(
@@ -59,6 +61,7 @@ import TwinPanesCore
     @Test func aHeaderClickSortsByItsColumn() async throws {
         defer { cleanUp() }
         let item = await browser(at: root)
+        defer { item.willClose() }
         let table = item.controller.tableView
         #expect(table.sortDescriptors.first?.key == "name")
         let size = try #require(table.tableColumns.first { $0.title == "Size" })
@@ -75,11 +78,9 @@ import TwinPanesCore
         defer { cleanUp() }
         let big = root.appendingPathComponent("big")
         try FileManager.default.createDirectory(at: big, withIntermediateDirectories: true)
-        for i in 0..<(FolderListing.mainActorLimit + 500) {
-            FileManager.default.createFile(
-                atPath: big.appendingPathComponent("f\(i)").path, contents: nil)
-        }
+        createEmptyFiles(count: FolderListing.mainActorLimit + 500, in: big)
         let item = await browser(at: big)
+        defer { item.willClose() }
         item.sort(by: ListingOrder(ascending: false))
         await item.listed()
         let names = item.entries.map(\.name)
@@ -100,10 +101,7 @@ import TwinPanesCore
             .appendingPathComponent("BrowserLifetimeTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: big) }
         try FileManager.default.createDirectory(at: big, withIntermediateDirectories: true)
-        for i in 0..<(FolderListing.mainActorLimit + 100) {
-            FileManager.default.createFile(
-                atPath: big.appendingPathComponent("f\(i)").path, contents: nil)
-        }
+        createEmptyFiles(count: FolderListing.mainActorLimit + 100, in: big)
         let grants = FolderGrants(
             defaults: UserDefaults(suiteName: big.appendingPathComponent("defaults").path)!)
         var item: BrowserItem? = BrowserItem(folder: big, grants: grants) { _, _ in }
@@ -136,6 +134,7 @@ import TwinPanesCore
         let grants = FolderGrants(
             defaults: UserDefaults(suiteName: prefs.appendingPathComponent("d").path)!)
         let item = BrowserItem(folder: root, grants: grants) { _, _ in }
+        defer { item.willClose() }
         _ = item.viewController.view
         await item.listed()
         #expect(
@@ -155,5 +154,14 @@ import TwinPanesCore
         #expect(item.entries.map(\.name).contains(".inner"))
         item.showHidden(false)
         #expect(!item.entries.map(\.name).contains(".inner"))
+    }
+}
+
+private func createEmptyFiles(count: Int, in folder: URL) {
+    for i in 0..<count {
+        let path = folder.appendingPathComponent("f\(i)").path
+        let fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, 0o644)
+        #expect(fd >= 0)
+        if fd >= 0 { close(fd) }
     }
 }
