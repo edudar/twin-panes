@@ -7,8 +7,8 @@ import Testing
 @MainActor
 @Suite struct CloseCoordinatorTests {
     let workspace = WorkspaceRegistry()
-    let windowA = MainFrameLayout()
-    let windowB = MainFrameLayout()
+    let windowA = MainFrameLayout(filler: .testBrowsers)
+    let windowB = MainFrameLayout(filler: .testBrowsers)
 
     init() {
         workspace.register(windowA)

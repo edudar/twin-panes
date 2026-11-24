@@ -71,3 +71,10 @@ final class TestSession {
         isSaving = false
     }
 }
+
+extension PanelFiller {
+    /// Fills a panel with an item of kind "filler" titled after the panel.
+    static let testBrowsers = PanelFiller(kind: "filler") { panel, _ in
+        TestItem(panel.rawValue, kind: "filler", slot: panel)
+    }
+}

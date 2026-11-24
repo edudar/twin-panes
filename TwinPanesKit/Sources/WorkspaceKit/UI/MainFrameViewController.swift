@@ -3,8 +3,8 @@ import AppKit
 /// Renders a `MainFrameLayout`: panel slots with tab bars, the zoom overlay and a status
 /// line. Also the responder for frame-level commands (close tab, zoom, tab switching).
 ///
-/// M0 shows the panel slots only; the preview pane (M7) and bottom drawer (M12) exist in
-/// the model but aren't drawn yet. The right panel appears once it has an item (M5).
+/// It shows both panel slots; the preview pane (M7) and bottom drawer (M12) exist in the
+/// model but aren't drawn yet.
 @MainActor
 public final class MainFrameViewController: NSViewController, WorkspaceHost,
     CommandScopeProviding, NSMenuItemValidation
@@ -18,6 +18,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     private let statusLabel = NSTextField(labelWithString: "")
     private var token: ObservationToken?
     private var lastFocusedItemID: ItemID?
+    private var hasSplitEvenly = false
     /// Each item's own host; items hold theirs weakly.
     private var itemHosts: [ItemID: FrontItemHost] = [:]
 
@@ -92,7 +93,6 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
                 items: layout.items(in: slot),
                 showing: selected?.id == zoomed?.id ? nil : selected,
                 isActive: layout.activePanel == slot)
-            controller.view.isHidden = slot != .leftPanel && layout.items(in: slot).isEmpty
         }
         zoomHost.display(zoomed)
         zoomHost.view.isHidden = zoomed == nil
@@ -134,19 +134,27 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
 
     public override func viewDidAppear() {
         super.viewDidAppear()
+        // The panels start as two equal halves (docs/plans/M5.md, D-a). Earlier layouts
+        // run before the window has its size, and the split gives later growth to one side.
+        if !hasSplitEvenly {
+            hasSplitEvenly = true
+            view.layoutSubtreeIfNeeded()
+            split.setPosition((split.bounds.width - split.dividerThickness) / 2, ofDividerAt: 0)
+        }
         lastFocusedItemID = nil
         focusCurrentItemIfChanged()
     }
 
     // MARK: Item management
 
-    /// Asks the close workflow, then removes the item.
+    /// Asks the close workflow, then removes the item. A tab the layout won't remove
+    /// (a panel's only browser) isn't asked about.
     public func closeItem(_ id: ItemID) {
-        guard let item = layout.item(id) else { return }
+        guard let item = layout.item(id), layout.canRemove(id) else { return }
         Task {
-            guard await closeCoordinator.confirmClose([item]), layout.item(id) != nil else {
-                return
-            }
+            guard await closeCoordinator.confirmClose([item]), layout.item(id) != nil,
+                layout.canRemove(id)
+            else { return }
             item.willClose()
             item.host = nil
             item.onChange = nil
@@ -176,7 +184,8 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(closeTab(_:)):
-            return layout.focusedPanelItem != nil || layout.zoomedItem != nil
+            return (layout.zoomedItem ?? layout.focusedPanelItem).map { layout.canRemove($0.id) }
+                ?? false
         case #selector(toggleZoom(_:)):
             menuItem.title = layout.zoomedItem == nil ? "Zoom Item" : "Exit Zoom"
             return layout.focusedPanelItem != nil || layout.zoomedItem != nil
@@ -226,6 +235,7 @@ final class SlotViewController: NSViewController, CommandScopeProviding {
             host.view.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             root.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
         ])
+        root.setAccessibilityIdentifier(slot.rawValue)
         tabBar.onSelect = { [weak self] id in self?.frame?.layout.select(id) }
         tabBar.onClose = { [weak self] id in self?.frame?.closeItem(id) }
         view = root
@@ -234,7 +244,8 @@ final class SlotViewController: NSViewController, CommandScopeProviding {
     func update(items: [any WorkspaceItem], showing: (any WorkspaceItem)?, isActive: Bool) {
         _ = view
         tabBar.update(
-            items: items, selected: frame?.layout.selection[slot], isActivePanel: isActive)
+            items: items, selected: frame?.layout.selection[slot], isActivePanel: isActive,
+            canClose: { [weak self] id in self?.frame?.layout.canRemove(id) ?? false })
         host.display(showing)
     }
 }

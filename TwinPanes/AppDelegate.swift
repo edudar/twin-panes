@@ -117,7 +117,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @discardableResult
     func openMainWindow() -> MainWindowController {
-        let layout = MainFrameLayout()
+        let layout = MainFrameLayout(
+            // Holds the app strongly: the app delegate lives as long as the process.
+            filler: PanelFiller(kind: .browser) { panel, layout in
+                let other = panel.otherPanel.flatMap { layout.selectedItem(in: $0) }
+                return self.makeBrowser(at: (other as? BrowserItem)?.folder)
+            })
         let controller = MainWindowController(
             layout: layout, workspace: workspace, dispatcher: dispatcher,
             closeCoordinator: closeCoordinator)
@@ -134,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 if let menu = NSApp.mainMenu { self?.menuUpdater.refresh(menu, for: window) }
             }
         }
-        layout.insert(makeBrowser())
+        layout.fillEmptyPanels()
         if let frame = NSApp.keyWindow?.frame {
             controller.window?.setFrameTopLeftPoint(
                 NSPoint(x: frame.minX + 24, y: frame.maxY - 24))

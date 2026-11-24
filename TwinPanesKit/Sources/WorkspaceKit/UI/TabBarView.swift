@@ -40,12 +40,17 @@ final class TabBarView: NSView {
         NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
     }
 
-    func update(items: [any WorkspaceItem], selected: ItemID?, isActivePanel: Bool) {
+    /// `canClose` says which tabs get a close button.
+    func update(
+        items: [any WorkspaceItem], selected: ItemID?, isActivePanel: Bool,
+        canClose: (ItemID) -> Bool
+    ) {
         for view in stack.arrangedSubviews { view.removeFromSuperview() }
         for item in items {
             let tab = TabItemView(
                 id: item.id, title: item.title, icon: item.icon, isDirty: item.isDirty,
                 isSelected: item.id == selected, isActivePanel: isActivePanel)
+            tab.canClose = canClose(item.id)
             tab.onSelect = { [weak self] id in self?.onSelect?(id) }
             tab.onClose = { [weak self] id in self?.onClose?(id) }
             stack.addArrangedSubview(tab)
@@ -62,6 +67,10 @@ final class TabItemView: NSView {
     let isSelected: Bool
     private let isActivePanel: Bool
     private let isDirty: Bool
+    /// False hides the close button: the tab is a panel's only browser.
+    var canClose = true {
+        didSet { updateAppearance() }
+    }
     var onSelect: ((ItemID) -> Void)?
     var onClose: ((ItemID) -> Void)?
 
@@ -134,7 +143,8 @@ final class TabItemView: NSView {
             systemSymbolName: showClose ? "xmark" : (isDirty ? "circle.fill" : "xmark"),
             accessibilityDescription: "Close tab")
         closeButton.symbolConfiguration = .init(pointSize: showClose ? 9 : 6, weight: .semibold)
-        closeButton.alphaValue = showClose || isDirty ? 1 : 0
+        closeButton.alphaValue = canClose && (showClose || isDirty) ? 1 : 0
+        closeButton.isEnabled = canClose
         closeButton.contentTintColor = .secondaryLabelColor
         titleLabel.textColor =
             isSelected && isActivePanel ? .labelColor : .secondaryLabelColor

@@ -8,7 +8,7 @@ import Testing
 @MainActor
 @Suite struct ItemCloseTests {
     let workspace = WorkspaceRegistry()
-    let layout = MainFrameLayout()
+    let layout = MainFrameLayout(filler: .testBrowsers)
 
     func coordinator() -> CloseCoordinator {
         CloseCoordinator(openItems: { [workspace] in workspace.allItems }) { _ in .discard }

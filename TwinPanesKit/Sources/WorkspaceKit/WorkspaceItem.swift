@@ -22,6 +22,15 @@ public enum SlotID: String, Hashable, Sendable, CaseIterable {
     case drawer
 
     public var isPanel: Bool { self == .leftPanel || self == .rightPanel }
+
+    /// The panel across from this one; nil for slots that aren't panels.
+    public var otherPanel: SlotID? {
+        switch self {
+        case .leftPanel: .rightPanel
+        case .rightPanel: .leftPanel
+        case .preview, .drawer: nil
+        }
+    }
 }
 
 /// Services the main frame offers to the items it hosts.

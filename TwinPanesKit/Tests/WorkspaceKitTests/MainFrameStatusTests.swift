@@ -4,10 +4,10 @@ import Testing
 @testable import WorkspaceKit
 
 /// The status line shows what the item in front says, not what a tab behind it or the
-/// other panel's tab says (docs/plans/M5.md: with two panels, one is always behind).
+/// other panel's tab says (docs/plans/M5.md, D-a: both panels are always there).
 @MainActor
 @Suite struct MainFrameStatusTests {
-    let layout = MainFrameLayout()
+    let layout = MainFrameLayout(filler: .testBrowsers)
     let left = TestItem("left")
     let right = TestItem("right", slot: .rightPanel)
 

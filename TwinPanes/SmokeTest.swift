@@ -65,6 +65,7 @@ struct SmokeTest {
         check(app.workspace.allLayouts.count == 2, "two main windows registered")
         check(first.layout !== second.layout, "each window has its own layout")
         await settle()
+        await twoPanels(check, in: second)
 
         // Browser (M1b): list a real folder, navigate with keys, open a file.
         guard let window = first.window,
