@@ -119,13 +119,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         guard isViewLoaded, let item else { return }
         pathField.stringValue = item.folder.path
         showPath(item.folder)
-        scrollView.isHidden = item.needsAccess
-        accessPrompt.isHidden = !item.needsAccess
-        if item.needsAccess {  // resolving the saved grants isn't free: only when shown
-            let request = accessRequest
-            accessLabel.stringValue = request.message
-            grantButton.title = request.button
-        }
+        updateAccessPrompt()
         wantedSelection = name
         tableView.reloadData()
         restoreSelection(nil, parentRow: true)
@@ -137,15 +131,14 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     func reloadKeepingSelection(
         scrolling: Bool = false, asked: Set<String> = [], found: [String: Int] = [:]
     ) {
-        guard isViewLoaded, let item else { return }
+        guard isViewLoaded, item != nil else { return }
         // The rows of the names asked about were found off the main actor; only a name
         // that wasn't asked about (the selection moved meanwhile) is searched for here.
         func row(named name: String) -> Int? {
             guard asked.contains(name) else { return self.row(named: name) }
             return found[name].map { $0 + (showsParentRow ? 1 : 0) }
         }
-        scrollView.isHidden = item.needsAccess
-        accessPrompt.isHidden = !item.needsAccess
+        updateAccessPrompt()
         let selected = selectedName
         let onParent = selectedParentRow
         refreshRows()
@@ -276,6 +269,10 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     // MARK: Commands
 
     @objc func browserOpen(_ sender: Any?) {
+        if item?.needsAccess == true {
+            grantButton.performClick(nil)
+            return
+        }
         if isParentRowSelected {
             item?.goToParent()
         } else if let entry = selectedEntry {
@@ -327,6 +324,23 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         }
     }
 
+    private func updateAccessPrompt() {
+        guard let item else { return }
+        scrollView.isHidden = item.needsAccess
+        accessPrompt.isHidden = !item.needsAccess
+        if item.needsAccess {
+            // Resolving the saved grants isn't free: only when shown.
+            let request = accessRequest
+            accessLabel.stringValue = request.message
+            grantButton.title = request.button
+            if view.window?.firstResponder === tableView {
+                view.window?.makeFirstResponder(grantButton)
+            }
+        } else if view.window?.firstResponder === grantButton {
+            view.window?.makeFirstResponder(tableView)
+        }
+    }
+
     /// What the access prompt asks for in the current folder.
     var accessRequest: AccessRequest {
         guard let item else {
@@ -334,7 +348,30 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         }
         return AccessRequest.for(
             folder: item.folder, lost: item.grants.lostGrant(covering: item.folder),
-            home: DirectoryReader.realHomeDirectory)
+            home: DirectoryReader.realHomeDirectory,
+            volume: Self.volumeURL(for: item.folder),
+            coveringGrant: item.grants.grant(covering: item.folder))
+    }
+
+    static func volumeURL(for folder: URL) -> URL? {
+        let existing = nearestExistingAncestor(of: folder)
+        return (try? existing.resourceValues(forKeys: [.volumeURLKey]))?.volume
+    }
+
+    static func nearestExistingAncestor(of url: URL) -> URL {
+        var candidate = url.standardizedFileURL
+        var isDirectory: ObjCBool = false
+        while candidate.path != "/" {
+            if FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+                isDirectory.boolValue
+            {
+                return candidate
+            }
+            let parent = candidate.deletingLastPathComponent()
+            if parent.path == candidate.path { break }
+            candidate = parent
+        }
+        return URL(fileURLWithPath: "/", isDirectory: true)
     }
 
     @objc func browserGrantAccess(_ sender: Any?) {
@@ -344,7 +381,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         panel.prompt = "Grant Access"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
-        panel.directoryURL = accessRequest.directory
+        panel.directoryURL = Self.nearestExistingAncestor(of: accessRequest.directory)
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
             self?.item?.granted(url)
@@ -355,7 +392,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         guard let item else { return false }
         switch menuItem.action {
         case #selector(browserOpen(_:)):
-            return selectedEntry != nil || isParentRowSelected
+            return !item.needsAccess && (selectedEntry != nil || isParentRowSelected)
         case #selector(browserView(_:)), #selector(browserEdit(_:)):
             return selectedEntry != nil
         case #selector(browserParent(_:)):

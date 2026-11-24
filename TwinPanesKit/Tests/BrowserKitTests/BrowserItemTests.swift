@@ -378,6 +378,54 @@ import Testing
         #expect(item.controller.selectedEntry?.name == "file.txt")
     }
 
+    @Test func needsAccessViaFailedListingPopulatesPromptAndOpenDoesNotGoToParent() async throws {
+        defer { cleanUp() }
+        let locked = root.appendingPathComponent("locked")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: false)
+        let item = browser(at: locked)
+        let controller = item.controller
+        _ = controller.view
+        await item.listed()
+        #expect(!item.needsAccess)
+
+        item.received(.failed(.needsAccess(locked)))
+        #expect(item.needsAccess)
+        #expect(controller.grantButton.title.contains("Grant Access"))
+        #expect(Self.labels(in: controller.view).contains { $0.contains("locked") })
+
+        controller.browserOpen(nil)
+        await item.listed()
+        #expect(item.folder.path == locked.path)
+    }
+
+    @Test func volumeRootAccessRequestDoesNotRepeatVolumeName() {
+        defer { cleanUp() }
+        let home = URL(fileURLWithPath: "/Users/someone", isDirectory: true)
+        let volume = URL(fileURLWithPath: "/Volumes/MyDisk", isDirectory: true)
+        let request = AccessRequest.for(folder: volume, lost: nil, home: home, volume: volume)
+        #expect(request.directory == volume)
+        #expect(request.button == "Grant Access to “MyDisk”…")
+        #expect(!request.message.contains("is on “MyDisk”"))
+        #expect(request.message == "Grant access to “MyDisk” once and it’s remembered.")
+    }
+
+    @Test func coveringGrantUnderHomeAsksForFolderDirectly() {
+        defer { cleanUp() }
+        let home = URL(fileURLWithPath: "/Users/someone", isDirectory: true)
+        let desktop = home.appendingPathComponent("Desktop", isDirectory: true)
+        let request = AccessRequest.for(
+            folder: desktop, lost: nil, home: home, coveringGrant: home)
+        #expect(request.directory == desktop)
+        #expect(request.button == "Grant Access…")
+    }
+
+    @Test func nonExistentLostDirectoryFallsBackToNearestExistingAncestor() {
+        defer { cleanUp() }
+        let missing = root.appendingPathComponent("missing/deep", isDirectory: true)
+        let resolved = BrowserViewController.nearestExistingAncestor(of: missing)
+        #expect(resolved == root)
+    }
+
     static func labels(in view: NSView?) -> [String] {
         guard let view else { return [] }
         let own = (view as? NSTextField).map { [$0.stringValue] } ?? []
