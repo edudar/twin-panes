@@ -116,4 +116,32 @@ import Testing
         let lister = FolderLister(folder: locked)
         #expect(await run(lister).events == [.failed(.needsAccess(lister.folder))])
     }
+
+    @Test func extremeBatchSizesDoNotSpinOrOverflow() async {
+        defer { cleanUp() }
+        makeFiles(5)
+        let zero = await run(
+            FolderLister(folder: dir, batchSize: 0, maxBatchSize: 0, interval: .seconds(10)))
+        #expect(zero.batches.joined().count == 5)
+        #expect(zero.events.last == .done)
+
+        let huge = await run(
+            FolderLister(
+                folder: dir, batchSize: Int.max / 2, maxBatchSize: .max, interval: .zero))
+        #expect(huge.batches.joined().count == 5)
+        #expect(huge.events.last == .done)
+    }
+
+    @Test func nonExecutableDirectoryEmitsFailed() async throws {
+        defer { cleanUp() }
+        let nonExec = dir.appendingPathComponent("locked")
+        try FileManager.default.createDirectory(at: nonExec, withIntermediateDirectories: false)
+        FileManager.default.createFile(
+            atPath: nonExec.appendingPathComponent("secret.txt").path, contents: nil)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o444], ofItemAtPath: nonExec.path)
+        let recorder = await run(FolderLister(folder: nonExec))
+        #expect(recorder.events.contains { if case .failed = $0 { true } else { false } })
+        #expect(!recorder.events.contains(.done))
+    }
 }

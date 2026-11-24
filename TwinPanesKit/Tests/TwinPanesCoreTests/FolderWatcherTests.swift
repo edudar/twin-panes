@@ -66,9 +66,14 @@ import Testing
         await seen.until { $0.names.contains("new.txt") }
         try FileManager.default.moveItem(at: file, to: dir.appendingPathComponent("moved.txt"))
         await seen.until { $0.names.contains("moved.txt") }
-        try FileManager.default.removeItem(at: dir.appendingPathComponent("moved.txt"))
         let before = seen.changes.count
-        await seen.until { $0.changes.count > before }
+        try FileManager.default.removeItem(at: dir.appendingPathComponent("moved.txt"))
+        await seen.until {
+            $0.changes.dropFirst(before).contains {
+                if case .names(let names) = $0 { return names.contains("moved.txt") }
+                return false
+            }
+        }
         #expect(seen.names.isSuperset(of: ["new.txt", "moved.txt"]))
     }
 
@@ -131,5 +136,58 @@ import Testing
         defer { watcher.stop() }
         try FileManager.default.removeItem(at: dir)
         await seen.until { $0.changes.contains(.folderGone) }
+    }
+
+    @Test func childUnmountReportsEntryNotFolderGone() {
+        defer { cleanUp() }
+        let watcher = FolderWatcher(folder: dir) { _ in }
+        let change = watcher.change(
+            paths: [watcher.path + "/Backup"],
+            flags: [FSEventStreamEventFlags(kFSEventStreamEventFlagUnmount)])
+        #expect(change == .names(["Backup"]))
+    }
+
+    @Test func selfAndAncestorUnmountReportFolderGone() {
+        defer { cleanUp() }
+        let watcher = FolderWatcher(folder: dir) { _ in }
+        let selfUnmount = watcher.change(
+            paths: [watcher.path + "/"],
+            flags: [FSEventStreamEventFlags(kFSEventStreamEventFlagUnmount)])
+        #expect(selfUnmount == .folderGone)
+        let parent = URL(fileURLWithPath: watcher.path).deletingLastPathComponent().path
+        let ancestorUnmount = watcher.change(
+            paths: [parent],
+            flags: [FSEventStreamEventFlags(kFSEventStreamEventFlagUnmount)])
+        #expect(ancestorUnmount == .folderGone)
+    }
+
+    @Test func nonCanonicalCasePathMatchesFSEventsPath() throws {
+        defer { cleanUp() }
+        let mixed = dir.appendingPathComponent("SubCase", isDirectory: true)
+        try FileManager.default.createDirectory(at: mixed, withIntermediateDirectories: false)
+        let lower = dir.appendingPathComponent("subcase", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: lower.path) else { return }
+        let canonical = FolderWatcher(folder: mixed) { _ in }.path
+        let nonCanonical = FolderWatcher(folder: lower) { _ in }.path
+        #expect(nonCanonical == canonical)
+    }
+
+    @Test func trailingSlashSelfEventWhenReplacedByFileReportsFolderGone() throws {
+        defer { cleanUp() }
+        let target = dir.appendingPathComponent("target")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+        let watcher = FolderWatcher(folder: target) { _ in }
+        try FileManager.default.removeItem(at: target)
+        FileManager.default.createFile(atPath: target.path, contents: nil)
+        let change = watcher.change(paths: [watcher.path + "/"], flags: [0])
+        #expect(change == .folderGone)
+    }
+
+    @Test func doubleStartReturnsFalse() {
+        defer { cleanUp() }
+        let watcher = FolderWatcher(folder: dir) { _ in }
+        defer { watcher.stop() }
+        #expect(watcher.start(latency: 0.05))
+        #expect(!watcher.start(latency: 0.05))
     }
 }

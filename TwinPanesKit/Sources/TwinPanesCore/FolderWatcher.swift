@@ -1,4 +1,5 @@
 import CoreServices
+import Darwin
 import Foundation
 import Synchronization
 
@@ -54,14 +55,24 @@ public final class FolderWatcher: Sendable {
     deinit { stop() }
 
     static func realPath(_ path: String) -> String? {
+        let fd = open(path, O_RDONLY | O_CLOEXEC)
+        if fd >= 0 {
+            defer { Darwin.close(fd) }
+            var buf = [UInt8](repeating: 0, count: Int(MAXPATHLEN))
+            if fcntl(fd, F_GETPATH, &buf) != -1 {
+                return String(decoding: buf.prefix(while: { $0 != 0 }), as: UTF8.self)
+            }
+        }
         guard let resolved = realpath(path, nil) else { return nil }
         defer { free(resolved) }
         return String(cString: resolved)
     }
 
-    /// Starts the stream; false if FSEvents refused it.
+    /// Starts the stream; false if already started, stopped, or FSEvents refused it.
     @discardableResult
     public func start(latency: TimeInterval = 0.2) -> Bool {
+        let canStart = state.withLock { !$0.stopped && $0.stream == nil }
+        guard canStart else { return false }
         let relay = Unmanaged.passRetained(Relay(self))
         var context = FSEventStreamContext(
             version: 0, info: relay.toOpaque(), retain: nil, release: nil,
@@ -85,17 +96,20 @@ public final class FolderWatcher: Sendable {
             return false
         }
         let kept = state.withLock { state -> Bool in
-            guard !state.stopped else { return false }  // stopped while starting
+            guard !state.stopped, state.stream == nil else { return false }
             state.stream = stream
             state.relay = relay
             return true
         }
         if !kept {
-            FSEventStreamStop(stream)
-            FSEventStreamInvalidate(stream)
-            FSEventStreamRelease(stream)
             nonisolated(unsafe) let box = relay
-            queue.async { box.release() }
+            nonisolated(unsafe) let streamRef = stream
+            queue.async {
+                FSEventStreamStop(streamRef)
+                FSEventStreamInvalidate(streamRef)
+                FSEventStreamRelease(streamRef)
+                box.release()
+            }
         }
         return kept
     }
@@ -121,12 +135,16 @@ public final class FolderWatcher: Sendable {
             return (state.stream, state.relay)
         }
         guard let stream, let relay else { return }
-        FSEventStreamStop(stream)
-        FSEventStreamInvalidate(stream)
-        FSEventStreamRelease(stream)
-        // After any callback still running on the stream's serial queue.
+        // Tear down on the stream's serial queue so stop() never blocks @MainActor on
+        // fseventsd IPC; deliver() already drops events once stopped is true.
         nonisolated(unsafe) let box = relay
-        queue.async { box.release() }
+        nonisolated(unsafe) let streamRef = stream
+        queue.async {
+            FSEventStreamStop(streamRef)
+            FSEventStreamInvalidate(streamRef)
+            FSEventStreamRelease(streamRef)
+            box.release()
+        }
     }
 
     private var isStopped: Bool { state.withLock { $0.stopped } }
@@ -146,8 +164,21 @@ public final class FolderWatcher: Sendable {
         var relist = false
         for (path, flag) in zip(paths, flags) {
             let flag = Int(flag)
-            if flag & (kFSEventStreamEventFlagRootChanged | kFSEventStreamEventFlagUnmount) != 0 {
+            if flag & kFSEventStreamEventFlagRootChanged != 0 {
                 return .folderGone
+            }
+            if flag & kFSEventStreamEventFlagUnmount != 0 {
+                let eventPath =
+                    path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
+                let matchesSelf = eventPath == self.path || eventPath == "/"
+                if matchesSelf || self.path.hasPrefix(eventPath + "/") {
+                    return .folderGone
+                }
+                let url = URL(fileURLWithPath: eventPath)
+                if url.deletingLastPathComponent().path == self.path {
+                    names.insert(url.lastPathComponent)
+                }
+                continue
             }
             if flag & (kFSEventStreamEventFlagUserDropped | kFSEventStreamEventFlagKernelDropped)
                 != 0
@@ -162,8 +193,13 @@ public final class FolderWatcher: Sendable {
                 }
             }
             let url = URL(fileURLWithPath: path)
-            if path == self.path {
-                if !FileManager.default.fileExists(atPath: self.path) { return .folderGone }
+            if url.path == self.path {
+                var isDir: ObjCBool = false
+                if !FileManager.default.fileExists(atPath: self.path, isDirectory: &isDir)
+                    || !isDir.boolValue
+                {
+                    return .folderGone
+                }
             } else if url.deletingLastPathComponent().path == self.path {
                 names.insert(url.lastPathComponent)
             }
