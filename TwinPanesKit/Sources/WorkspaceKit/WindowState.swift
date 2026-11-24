@@ -37,6 +37,8 @@ public struct WindowState: Codable, Equatable, Sendable {
     public var right: PanelState
     public var activePanel: SlotID
     public var zoomed: TabPosition?
+    /// The left panel's share of the split, 0...1; nil starts the panels as halves.
+    public var dividerFraction: Double?
 
     public func encoded() throws -> Data {
         let encoder = JSONEncoder()
@@ -60,8 +62,27 @@ extension WindowState {
     }
 }
 
+extension WindowState {
+    /// The key a window's state is kept under in AppKit's restorable state.
+    static let restorationKey = "TwinPanes.windowState"
+
+    /// Writes the state into a window's restorable state, for AppKit restoration (D23).
+    public func encode(into coder: NSCoder) throws {
+        coder.encode(try encoded() as NSData, forKey: Self.restorationKey)
+    }
+
+    /// Reads what `encode(into:)` wrote. Throws `WindowStateError.missing` when the
+    /// coder holds none, and whatever `init(decoding:)` throws for what it holds.
+    public init(restorableStateFrom coder: NSCoder) throws {
+        guard let data = coder.decodeObject(of: NSData.self, forKey: Self.restorationKey)
+        else { throw WindowStateError.missing }
+        try self.init(decoding: data as Data)
+    }
+}
+
 public enum WindowStateError: Error, Equatable {
     case newerVersion(Int)
+    case missing
 }
 
 /// Rebuilds items from their saved state: one factory per kind, each with the newest

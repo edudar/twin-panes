@@ -7,7 +7,7 @@ import AppKit
 /// model but aren't drawn yet.
 @MainActor
 public final class MainFrameViewController: NSViewController, WorkspaceHost,
-    CommandScopeProviding, NSMenuItemValidation
+    CommandScopeProviding, NSMenuItemValidation, NSSplitViewDelegate
 {
     public let layout: MainFrameLayout
     private let closeCoordinator: CloseCoordinator
@@ -18,7 +18,9 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     private let statusLabel = NSTextField(labelWithString: "")
     private var token: ObservationToken?
     private var lastFocusedItemID: ItemID?
-    private var hasSplitEvenly = false
+    /// Set once the divider is placed, when the window first appears.
+    private var hasPlacedDivider = false
+    private var restoredDividerFraction: Double?
     /// Each item's own host; items hold theirs weakly.
     private var itemHosts: [ItemID: FrontItemHost] = [:]
 
@@ -39,6 +41,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         let root = NSView()
 
         split.isVertical = true
+        split.delegate = self
         split.dividerStyle = .thin
         split.translatesAutoresizingMaskIntoConstraints = false
         for slot in [SlotID.leftPanel, .rightPanel] {
@@ -107,6 +110,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
             item.onChange = { [weak self] in self?.render() }
         }
         focusCurrentItemIfChanged()
+        view.window?.invalidateRestorableState()
     }
 
     /// Moves keyboard focus into the item that just became current.
@@ -134,15 +138,47 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
 
     public override func viewDidAppear() {
         super.viewDidAppear()
-        // The panels start as two equal halves (docs/plans/M5.md, D-a). Earlier layouts
-        // run before the window has its size, and the split gives later growth to one side.
-        if !hasSplitEvenly {
-            hasSplitEvenly = true
+        // The panels start as two equal halves (docs/plans/M5.md, D-a), or where a
+        // restored window had them. Earlier layouts run before the window has its size,
+        // and the split gives later growth to one side.
+        if !hasPlacedDivider {
+            hasPlacedDivider = true
             view.layoutSubtreeIfNeeded()
-            split.setPosition((split.bounds.width - split.dividerThickness) / 2, ofDividerAt: 0)
+            let fraction = restoredDividerFraction ?? 0.5
+            split.setPosition(usableSplitWidth * fraction, ofDividerAt: 0)
         }
         lastFocusedItemID = nil
         focusCurrentItemIfChanged()
+    }
+
+    // MARK: Restoration (docs/plans/M5.md, D-c)
+
+    /// The window's tabs and divider, to save.
+    public var windowState: WindowState {
+        var state = layout.savedState
+        state.dividerFraction = placedDividerFraction ?? restoredDividerFraction
+        return state
+    }
+
+    private var usableSplitWidth: CGFloat { split.bounds.width - split.dividerThickness }
+
+    private var placedDividerFraction: Double? {
+        guard hasPlacedDivider, usableSplitWidth > 0,
+            let left = slotControllers[.leftPanel]?.view
+        else { return nil }
+        return Double(left.frame.width / usableSplitWidth)
+    }
+
+    public func splitViewDidResizeSubviews(_ notification: Notification) {
+        if hasPlacedDivider { view.window?.invalidateRestorableState() }
+    }
+
+    /// Puts back saved tabs and the divider. Call before the window first appears: the
+    /// divider is placed then, instead of the even split.
+    public func restore(_ state: WindowState, using restorer: ItemRestorer) {
+        layout.restore(state, using: restorer)
+        // Saved state is data from disk: keep the fraction a fraction.
+        restoredDividerFraction = state.dividerFraction.map { min(max($0, 0), 1) }
     }
 
     /// Makes the panel that holds `responder` the active one, so clicking or tabbing into

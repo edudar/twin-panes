@@ -117,6 +117,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
         window?.close()
     }
 
+    /// AppKit saves the window's restorable state; the layout invalidates it on changes.
+    public func window(_ window: NSWindow, willEncodeRestorableState state: NSCoder) {
+        // Encoding plain values doesn't fail; if it did, the window would only come
+        // back with the default tabs.
+        try? frameController.windowState.encode(into: state)
+    }
+
     public func windowShouldClose(_ sender: NSWindow) -> Bool {
         if closeApproved { return true }
         let items = layout.allItems
