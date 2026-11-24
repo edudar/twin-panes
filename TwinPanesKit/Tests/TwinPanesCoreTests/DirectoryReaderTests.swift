@@ -60,6 +60,8 @@ import UniformTypeIdentifiers
         #expect(try entry("notes.txt").type.conforms(to: .plainText))
         #expect(try entry("README").type == .data)
         #expect(try entry("odd.zzqqxx").kind == "Document")
+        let oddPkg = TypeNames.type(named: "Odd.zzqqpkg", folder: false, package: true)
+        #expect(oddPkg == .package && TypeNames.description(of: oddPkg) == "Package")
         #expect(try entry("link-to-folder").type == .folder)
         #expect(entries.allSatisfy { $0.kind.first?.isUppercase == true })
     }
@@ -74,6 +76,14 @@ import UniformTypeIdentifiers
         #expect(
             DirectoryReader.entryIfPresent(dir.appendingPathComponent("dangling"))?.isSymbolicLink
                 == true)
+
+        let cached = dir.appendingPathComponent("stale.bin")
+        try Data(count: 2).write(to: cached)
+        _ = try cached.resourceValues(forKeys: [.fileSizeKey])
+        try Data(count: 15).write(to: cached)
+        #expect(DirectoryReader.entryIfPresent(cached)?.size == 15)
+        try FileManager.default.removeItem(at: cached)
+        #expect(DirectoryReader.entryIfPresent(cached) == nil)
     }
 
     @Test func hiddenFilesOnRequest() throws {
@@ -102,6 +112,16 @@ import UniformTypeIdentifiers
         #expect(throws: DirectoryReaderError.needsAccess(locked)) {
             _ = try DirectoryReader.entries(of: locked)
         }
+        #expect(
+            DirectoryReaderError.notFound(missing).description
+                .localizedCaseInsensitiveContains("not found"))
+        #expect(
+            DirectoryReaderError.notAFolder(file).description
+                .localizedCaseInsensitiveContains("not a folder"))
+        #expect(
+            DirectoryReaderError.needsAccess(locked).description
+                .localizedCaseInsensitiveContains("no permission"))
+        #expect(DirectoryReaderError.failed(dir, "disk error").description == "disk error")
     }
 
     @Test func symlinksAndEmptyFolder() throws {
@@ -123,11 +143,16 @@ import UniformTypeIdentifiers
 
         let entries = try DirectoryReader.entries(of: dir)
         let appLink = try #require(entries.first { $0.url.lastPathComponent == "link-to-app" })
-        #expect(appLink.isSymbolicLink && appLink.isPackage && !appLink.isDirectory)
+        #expect(
+            appLink.isSymbolicLink && appLink.isPackage && !appLink.isDirectory
+                && appLink.isApplication && appLink.size == nil
+                && appLink.type == .applicationBundle)
         let fileLink = try #require(entries.first { $0.url.lastPathComponent == "link-to-file" })
         #expect(fileLink.isSymbolicLink && !fileLink.isDirectory && fileLink.size == 10)
         let broken = try #require(entries.first { $0.url.lastPathComponent == "broken-link" })
-        #expect(broken.isSymbolicLink && !broken.isDirectory)
+        #expect(
+            broken.isSymbolicLink && !broken.isDirectory && broken.size == nil
+                && broken.type == .symbolicLink)
     }
 
     @Test func grantsPickTheMostSpecificFolder() throws {

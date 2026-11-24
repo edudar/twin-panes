@@ -50,9 +50,12 @@ public struct DirectoryEntry: Hashable, Sendable {
 public enum TypeNames {
     private static let cache = Mutex<[UTType: String]>([:])
 
+    static var cachedCount: Int { cache.withLock { $0.count } }
+
     public static func description(of type: UTType) -> String {
+        if type.isDynamic { return "Document" }
         if let known = cache.withLock({ $0[type] }) { return known }
-        var text = type.isDynamic ? "Document" : (type.localizedDescription ?? "Document")
+        var text = type.localizedDescription ?? "Document"
         text = text.prefix(1).uppercased() + text.dropFirst()
         cache.withLock { $0[type] = text }
         return text
@@ -65,11 +68,12 @@ public enum TypeNames {
         guard !ext.isEmpty else { return package ? .package : .data }
         // The lookup matches only types under its base, data unless asked otherwise.
         let byName = UTType(filenameExtension: ext, conformingTo: package ? .package : .data)
-        return byName ?? (package ? .package : .data)
+        if let byName, !(package && byName.isDynamic) { return byName }
+        return package ? .package : .data
     }
 }
 
-public enum DirectoryReaderError: Error, Equatable, Sendable {
+public enum DirectoryReaderError: Error, Equatable, Sendable, CustomStringConvertible {
     /// The sandbox (or file permissions) refuses this folder; ask the user for access.
     case needsAccess(URL)
     case notFound(URL)
@@ -80,6 +84,15 @@ public enum DirectoryReaderError: Error, Equatable, Sendable {
     public var needsAccess: Bool {
         if case .needsAccess = self { true } else { false }
     }
+
+    public var description: String {
+        switch self {
+        case .needsAccess(let url): "No permission to open \(url.lastPathComponent)"
+        case .notFound(let url): "\(url.lastPathComponent) was not found"
+        case .notAFolder(let url): "\(url.lastPathComponent) is not a folder"
+        case .failed(_, let message): message
+        }
+    }
 }
 
 /// Reads folder listings (M1b). Synchronous: the caller decides where it runs.
@@ -88,6 +101,10 @@ public enum DirectoryReader {
     static let keys: [URLResourceKey] = [
         .isDirectoryKey, .isPackageKey, .isSymbolicLinkKey, .isHiddenKey, .fileSizeKey,
         .contentModificationDateKey,
+    ]
+    private static let keySet = Set(keys)
+    private static let targetKeySet: Set<URLResourceKey> = [
+        .isDirectoryKey, .isPackageKey, .fileSizeKey,
     ]
 
     /// The entries of `folder`, folders first, then by name as Finder sorts it.
@@ -111,39 +128,60 @@ public enum DirectoryReader {
                 }
                 throw DirectoryReaderError.failed(folder, error.localizedDescription)
             }
+        } catch {
+            throw DirectoryReaderError.failed(folder, error.localizedDescription)
         }
         return urls.map(entry).sorted(by: Self.finderOrder)
     }
 
     /// The entry at `url` read again, or nil if nothing is there now (D-f).
     public static func entryIfPresent(_ url: URL) -> DirectoryEntry? {
-        var info = stat()
-        guard lstat(url.path, &info) == 0 else { return nil }
-        return entry(url)
+        var url = url
+        url.removeAllCachedResourceValues()
+        guard let values = try? url.resourceValues(forKeys: keySet) else { return nil }
+        return entry(url, values: values)
     }
 
     static func entry(_ url: URL) -> DirectoryEntry {
-        let values = try? url.resourceValues(forKeys: Set(keys))
+        entry(url, values: try? url.resourceValues(forKeys: keySet))
+    }
+
+    static func entry(_ url: URL, values: URLResourceValues?) -> DirectoryEntry {
         let isLink = values?.isSymbolicLink ?? false
         var isDirectory = values?.isDirectory ?? false
         var isPackage = values?.isPackage ?? false
         var fileSize = values?.fileSize
+        var typeName = url.lastPathComponent
+        var brokenLink = false
         if isLink {
-            let target = try? url.resolvingSymlinksInPath()
-                .resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .fileSizeKey])
-            isDirectory = target?.isDirectory ?? false
-            isPackage = target?.isPackage ?? false
-            if let targetSize = target?.fileSize { fileSize = targetSize }
+            let resolved = url.resolvingSymlinksInPath()
+            var st = stat()
+            if stat(url.path, &st) == 0 {
+                let target = try? resolved.resourceValues(forKeys: targetKeySet)
+                isDirectory = target?.isDirectory ?? false
+                isPackage = target?.isPackage ?? false
+                let targetIsFolder = isDirectory && !isPackage
+                fileSize = (targetIsFolder || isPackage) ? nil : target?.fileSize
+                typeName = resolved.lastPathComponent
+            } else {
+                isDirectory = false
+                isPackage = false
+                fileSize = nil
+                brokenLink = true
+            }
         }
         let isFolder = isDirectory && !isPackage
-        let name = url.lastPathComponent
+        let type: UTType =
+            brokenLink
+            ? .symbolicLink
+            : TypeNames.type(named: typeName, folder: isFolder, package: isPackage)
         return DirectoryEntry(
-            url: url, name: name,
+            url: url, name: url.lastPathComponent,
             isDirectory: isFolder, isPackage: isPackage, isSymbolicLink: isLink,
             isHidden: values?.isHidden ?? false,
-            size: isFolder ? nil : fileSize.map { UInt64($0) },
+            size: (isFolder || isPackage) ? nil : fileSize.flatMap { UInt64(exactly: $0) },
             modified: values?.contentModificationDate,
-            type: TypeNames.type(named: name, folder: isFolder, package: isPackage))
+            type: type)
     }
 
     static func finderOrder(_ a: DirectoryEntry, _ b: DirectoryEntry) -> Bool {
@@ -154,7 +192,13 @@ public enum DirectoryReader {
     /// The user's real home folder. Inside the sandbox `FileManager`'s home is the
     /// app's container, which is not what a file manager should start in.
     public static var realHomeDirectory: URL {
-        if let entry = getpwuid(getuid()), let dir = entry.pointee.pw_dir {
+        let bufSize = max(sysconf(_SC_GETPW_R_SIZE_MAX), 4096)
+        var pwd = passwd()
+        var buffer = [CChar](repeating: 0, count: bufSize)
+        var result: UnsafeMutablePointer<passwd>?
+        if getpwuid_r(getuid(), &pwd, &buffer, bufSize, &result) == 0,
+            let dir = result?.pointee.pw_dir
+        {
             return URL(fileURLWithPath: String(cString: dir), isDirectory: true)
         }
         return FileManager.default.homeDirectoryForCurrentUser

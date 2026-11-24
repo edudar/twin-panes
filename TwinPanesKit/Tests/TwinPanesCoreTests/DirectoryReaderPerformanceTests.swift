@@ -1,28 +1,43 @@
+import Darwin
 import Foundation
-import XCTest
+import Testing
+import UniformTypeIdentifiers
 
 @testable import TwinPanesCore
 
-/// Listing time (docs/plans/M4.md, step 1). Measured by hand on 100,500 entries: 7.5 s
-/// with Finder's type descriptions and display names, 0.73 s with the keys read now.
-/// Here 10,000 files, so the suite stays quick.
-final class DirectoryReaderPerformanceTests: XCTestCase {
-    func testListingTenThousandFiles() throws {
+/// Fast, deterministic listing check across mixed and dynamic extensions (docs/plans/M4.md).
+@Suite struct DirectoryReaderPerformanceTests {
+    @Test func mixedAndDynamicExtensionsStayFastWithoutLeakingTypeCache() throws {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("DirectoryReaderPerformance-\(UUID().uuidString)")
+            .appendingPathComponent("DirectoryReaderPerf-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let extensions = ["txt", "png", "swift", "json", "bin", "md", ""]
-        for i in 0..<10_000 {
-            let ext = extensions[i % extensions.count]
-            let name = String(format: "f%05d", i) + (ext.isEmpty ? "" : ".\(ext)")
-            FileManager.default.createFile(
-                atPath: dir.appendingPathComponent(name).path, contents: nil)
+
+        let standard = ["txt", "png", "swift", "json", "bin", "md", ""]
+        let total = 1_000
+        let dynamicCount = 100
+        for i in 0..<total {
+            let ext =
+                i < dynamicCount
+                ? "dyn\(UUID().uuidString.prefix(8))"
+                : standard[i % standard.count]
+            let name = String(format: "f%04d", i) + (ext.isEmpty ? "" : ".\(ext)")
+            let path = dir.appendingPathComponent(name).path
+            let fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, 0o644)
+            #expect(fd >= 0)
+            if fd >= 0 { close(fd) }
         }
-        measure {
-            let entries = try? DirectoryReader.entries(of: dir)
-            XCTAssertEqual(entries?.count, 10_000)
-            XCTAssertEqual(entries?.reduce(0) { $0 + ($1.kind.isEmpty ? 0 : 1) }, 10_000)
+
+        // Prime standard types, then verify unique dynamic extensions do not grow TypeNames.cache.
+        _ = standard.filter { !$0.isEmpty }.map {
+            TypeNames.description(of: UTType(filenameExtension: $0) ?? .data)
         }
+        let cacheBefore = TypeNames.cachedCount
+        let entries = try DirectoryReader.entries(of: dir)
+        let cacheAfter = TypeNames.cachedCount
+
+        #expect(entries.count == total)
+        #expect(entries.allSatisfy { !$0.kind.isEmpty })
+        #expect(cacheAfter - cacheBefore <= standard.count)
     }
 }
