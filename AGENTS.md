@@ -27,6 +27,67 @@ milestones). Read the relevant parts of PLAN.md before changing behaviour.
    layout (never by forcing view frames). Milestones must deliver something usable end to
    end, on real files.
 
+## Code design
+
+These rules apply to code you write or change. Existing code may not follow them:
+don't copy its violations into new code, and don't refactor code outside your task
+to fix them. Note what you saw in the summary instead (or in PLAN.md §9 if it's
+worth scheduling). Where the rules conflict, the earlier one wins.
+
+1. **Correct and readable before clever.** Code is read far more than it's written.
+   Prefer the plain version unless a measurement says otherwise.
+2. **Names say what things mean.** Name variables, types and functions after what
+   they are in the problem, not their type or role in the code (`unsavedRanges`, not
+   `list2`; no `Manager`, `Helper`, `Util`, `Data`, `Info`). A name that needs a
+   comment to explain it is the wrong name. Booleans read as facts (`isDirty`,
+   `canSave`).
+3. **One responsibility per unit.** A type or module has one reason to change. If
+   describing it takes "and", or its parts don't use each other's state, split it.
+   A function does one thing at one level of abstraction: it either decides or does
+   the detail, not both. Extract when a block needs a comment to say what it does,
+   not to reach a line count.
+4. **Dependencies point inward.** Domain logic doesn't depend on UI, frameworks,
+   storage or the OS; those depend on it. Business rules must be testable without
+   a window, a disk or a network. Cross a boundary with a small protocol owned by
+   the inner side, and pass dependencies in (initialiser parameters); don't reach
+   for globals or singletons from inside the logic.
+5. **No speculative abstraction.** Add a protocol, generic, layer or extension
+   point only when there's a second implementation or a test double that needs it
+   now. Duplicate twice before extracting a shared helper (rule of three), and
+   only merge code that changes for the same reason.
+6. **No hidden effects.** A function either answers a question or changes state,
+   not both, and its name says which. Don't mutate arguments or shared state
+   that the signature doesn't make obvious. Prefer values and immutability;
+   keep mutable state in one owner.
+7. **Errors are explicit.** Handle or propagate every error; never swallow one
+   silently or turn it into a default value without saying why. Validate at the
+   boundary, then trust the data inside. No force-unwraps or `fatalError` for
+   conditions that can happen at runtime.
+8. **Small, honest interfaces.** Keep things as private as possible. Few
+   parameters (group related ones into a type past about three); no Boolean flag
+   that switches a function between two behaviours: write two functions.
+9. **Tests are code too.** Each test checks one behaviour, has a name that states
+   it, and is fast, independent and repeatable. Test through public behaviour,
+   not private details (see also "Verifying" below).
+10. **Every comment has a reason to exist.** A comment that restates what the code
+    already says is noise: it costs reading time and goes stale when the code
+    changes. Delete it, or improve the names until it isn't needed.
+    - Keep a comment only when it says something the code can't: why it's done
+      this way, a constraint or invariant, a trade-off or rejected alternative, a
+      workaround and what it works around, or a reference (a plan section, a bug,
+      a spec).
+    - Public declarations whose contract isn't obvious from the signature get a
+      doc comment stating it: what it promises, what it expects, what it throws,
+      which thread or actor it runs on. This is an app, not a published library,
+      so `public` marks a module boundary, not an API for outside users.
+    - Test: if deleting the comment loses no information a reader couldn't get
+      from the code in a few seconds, delete it.
+    - No commented-out code, no changelogs or author notes in comments (that's what
+      version control is for), no `TODO` without where it's tracked.
+
+Before handing back a change, check its diff against this list and fix what it
+breaks, or say why you didn't.
+
 ## Verifying
 
 After every fix or change — and before every commit — build and run all of these without
