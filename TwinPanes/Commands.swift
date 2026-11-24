@@ -164,12 +164,12 @@ enum DefaultCommands {
             KeyChord(Self.arrow(NSUpArrowFunctionKey), .command), to: .browserParent, in: browser)
         registry.bind(KeyChord("\u{7f}"), to: .browserParent, in: fileList)
         registry.bind(KeyChord("g", [.command, .shift]), to: .browserGoToFolder, in: browser)
-        registry.bind(KeyChord(">", .command), to: .browserToggleHidden, in: browser)
+        registry.bind(KeyChord(">", .command), to: .browserToggleHidden, in: browser)  // ⇧⌘.
         registry.bind(KeyChord("[", .command), to: .browserBack, in: browser)
         registry.bind(
             KeyChord(Self.arrow(NSDownArrowFunctionKey), [.command, .option]),
             to: .browserShowPackageContents, in: browser)
-        registry.bind(KeyChord("]", .command), to: .browserForward, in: browser)  // ⇧⌘.
+        registry.bind(KeyChord("]", .command), to: .browserForward, in: browser)
         registry.bind(KeyChord("s", .command), to: .save, in: editor)
         registry.bind(KeyChord("s", [.command, .shift]), to: .saveAs, in: editor)
         registry.bind(KeyChord("f", .command), to: .editorFind, in: editor)

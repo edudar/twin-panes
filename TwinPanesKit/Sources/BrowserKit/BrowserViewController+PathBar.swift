@@ -43,7 +43,8 @@ extension BrowserViewController: NSTextFieldDelegate {
 
     @objc func pathBarClicked(_ sender: NSPathControl) {
         if let clicked = sender.clickedPathItem,
-            let index = sender.pathItems.firstIndex(of: clicked), pathURLs.indices.contains(index)
+            let index = sender.pathItems.firstIndex(where: { $0 === clicked }),
+            pathURLs.indices.contains(index)
         {
             goToPathComponent(pathURLs[index])
         } else {
@@ -55,6 +56,10 @@ extension BrowserViewController: NSTextFieldDelegate {
     /// (or the one leading to it).
     func goToPathComponent(_ url: URL) {
         guard let item else { return }
+        if url.standardizedFileURL.path == item.folder.standardizedFileURL.path {
+            view.window?.makeFirstResponder(tableView)
+            return
+        }
         let here = item.folder.standardizedFileURL.pathComponents
         let there = url.standardizedFileURL.pathComponents
         let selecting = here.count > there.count ? here[there.count] : nil
@@ -65,10 +70,14 @@ extension BrowserViewController: NSTextFieldDelegate {
     /// Swaps the field in, with the whole path selected.
     func editPath() {
         guard let item else { return }
-        pathField.stringValue = item.folder.path
-        pathField.isHidden = false
-        pathControl.isHidden = true
-        view.window?.makeFirstResponder(pathField)
+        if !isEditingPath {
+            pathField.stringValue = item.folder.path
+            pathField.isHidden = false
+            pathControl.isHidden = true
+        }
+        if pathField.currentEditor() == nil {
+            view.window?.makeFirstResponder(pathField)
+        }
         pathField.currentEditor()?.selectAll(nil)
     }
 

@@ -257,6 +257,112 @@ private final class StatusHost: WorkspaceHost {
                 doCommandBy: #selector(NSResponder.cancelOperation(_:))))
         #expect(!controller.isEditingPath && !controller.pathControl.isHidden)
     }
+
+    @Test func relativePathAndTrailingNewlineInPathEntered() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("a/b"), withIntermediateDirectories: true)
+        let grants = FolderGrants(
+            defaults: UserDefaults(suiteName: root.appendingPathComponent("a/d").path)!)
+        let item = BrowserItem(folder: root.appendingPathComponent("a"), grants: grants) { _, _ in
+        }
+        let controller = item.controller
+        _ = controller.view
+        await item.listed()
+
+        controller.pathField.stringValue = "b\n"
+        controller.pathEntered(controller.pathField)
+        await item.listed()
+        #expect(item.folder.path == root.appendingPathComponent("a/b").path)
+
+        controller.pathField.stringValue = "..\n"
+        controller.pathEntered(controller.pathField)
+        await item.listed()
+        #expect(item.folder.path == root.appendingPathComponent("a").path)
+    }
+
+    @Test func editingPathPreservesTypedTextAndDisablesNavigationCommands() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let appURL = root.appendingPathComponent("App.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
+        let grants = FolderGrants(
+            defaults: UserDefaults(suiteName: root.appendingPathComponent("d").path)!)
+        let item = BrowserItem(folder: root, grants: grants) { _, _ in }
+        let controller = item.controller
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 300), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        defer { window.close() }
+        await item.listed()
+
+        item.backStack = [HistoryEntry(folder: appURL, selected: nil)]
+        item.forwardStack = [HistoryEntry(folder: appURL, selected: nil)]
+        controller.tableView.selectRowIndexes(
+            IndexSet(integer: controller.showsParentRow ? 1 : 0), byExtendingSelection: false)
+        func enabled(_ action: Selector) -> Bool {
+            controller.validateMenuItem(NSMenuItem(title: "", action: action, keyEquivalent: ""))
+        }
+
+        #expect(controller.commandScopes == [.item(.browser)])
+        #expect(enabled(#selector(BrowserViewController.browserParent(_:))))
+        #expect(enabled(#selector(BrowserViewController.browserBack(_:))))
+
+        controller.browserGoToFolder(nil)
+        #expect(controller.isEditingPath)
+        #expect(controller.commandScopes == [.item(.browser)])
+        #expect(!enabled(#selector(BrowserViewController.browserOpen(_:))))
+        #expect(!enabled(#selector(BrowserViewController.browserParent(_:))))
+        #expect(!enabled(#selector(BrowserViewController.browserShowPackageContents(_:))))
+        #expect(!enabled(#selector(BrowserViewController.browserBack(_:))))
+        #expect(!enabled(#selector(BrowserViewController.browserForward(_:))))
+        #expect(enabled(#selector(BrowserViewController.browserGoToFolder(_:))))
+
+        let editor = try #require(controller.pathField.currentEditor() as? NSTextView)
+        editor.string = "typed/sub"
+        controller.browserGoToFolder(nil)
+        #expect(controller.isEditingPath)
+        #expect(controller.pathField.currentEditor()?.string == "typed/sub")
+
+        controller.showPathBar()
+        #expect(enabled(#selector(BrowserViewController.browserParent(_:))))
+        #expect(enabled(#selector(BrowserViewController.browserBack(_:))))
+    }
+
+    @Test func clickingCurrentPathComponentDoesNotRelist() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("a"), withIntermediateDirectories: true)
+        let grants = FolderGrants(
+            defaults: UserDefaults(suiteName: root.appendingPathComponent("a/d").path)!)
+        let item = BrowserItem(folder: root, grants: grants) { _, _ in }
+        let controller = item.controller
+        _ = controller.view
+        await item.listed()
+
+        controller.goToPathComponent(root)
+        #expect(!item.isListing)
+        #expect(item.entries.map(\.name) == ["a"])
+    }
+
+    @Test func programmaticSortUpdatesTableSortDescriptors() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("a"), withIntermediateDirectories: true)
+        let grants = FolderGrants(
+            defaults: UserDefaults(suiteName: root.appendingPathComponent("a/d").path)!)
+        let item = BrowserItem(folder: root, grants: grants) { _, _ in }
+        let controller = item.controller
+        _ = controller.view
+        await item.listed()
+
+        let order = ListingOrder(column: .size, ascending: false)
+        item.sort(by: order)
+        #expect(
+            controller.tableView.sortDescriptors
+                == [NSSortDescriptor(key: ListingOrder.Column.size.rawValue, ascending: false)])
+    }
 }
 
 /// Packages list as files; Show Package Contents enters one (docs/plans/M4.md, D-i).

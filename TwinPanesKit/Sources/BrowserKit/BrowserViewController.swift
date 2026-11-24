@@ -131,13 +131,14 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     func reloadKeepingSelection(
         scrolling: Bool = false, asked: Set<String> = [], found: [String: Int] = [:]
     ) {
-        guard isViewLoaded, item != nil else { return }
+        guard isViewLoaded, let item else { return }
         // The rows of the names asked about were found off the main actor; only a name
         // that wasn't asked about (the selection moved meanwhile) is searched for here.
         func row(named name: String) -> Int? {
             guard asked.contains(name) else { return self.row(named: name) }
             return found[name].map { $0 + (showsParentRow ? 1 : 0) }
         }
+        showSortIndicator(item.order)
         updateAccessPrompt()
         let selected = selectedName
         let onParent = selectedParentRow
@@ -309,7 +310,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
 
     @objc func pathEntered(_ sender: NSTextField) {
         guard let item else { return }
-        var text = sender.stringValue.trimmingCharacters(in: .whitespaces)
+        var text = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             sender.stringValue = item.folder.path
             return
@@ -317,7 +318,12 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         if text == "~" || text.hasPrefix("~/") {
             text = DirectoryReader.realHomeDirectory.path + text.dropFirst()
         }
-        if item.go(to: URL(fileURLWithPath: text, isDirectory: true)) {
+        let target =
+            text.hasPrefix("/")
+            ? URL(fileURLWithPath: text, isDirectory: true)
+            : URL(fileURLWithPath: text, isDirectory: true, relativeTo: item.folder)
+                .standardizedFileURL
+        if item.go(to: target) {
             view.window?.makeFirstResponder(tableView)
         } else {
             sender.stringValue = item.folder.path
@@ -392,17 +398,18 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         guard let item else { return false }
         switch menuItem.action {
         case #selector(browserOpen(_:)):
-            return !item.needsAccess && (selectedEntry != nil || isParentRowSelected)
+            return !isEditingPath && !item.needsAccess
+                && (selectedEntry != nil || isParentRowSelected)
         case #selector(browserView(_:)), #selector(browserEdit(_:)):
             return selectedEntry != nil
         case #selector(browserParent(_:)):
-            return item.folder.path != "/"
+            return !isEditingPath && item.folder.path != "/"
         case #selector(browserShowPackageContents(_:)):
-            return selectedEntry?.isPackage == true
+            return !isEditingPath && selectedEntry?.isPackage == true
         case #selector(browserBack(_:)):
-            return !item.backStack.isEmpty
+            return !isEditingPath && !item.backStack.isEmpty
         case #selector(browserForward(_:)):
-            return !item.forwardStack.isEmpty
+            return !isEditingPath && !item.forwardStack.isEmpty
         case #selector(browserToggleHidden(_:)):
             menuItem.state = item.showsHidden ? .on : .off
             return true
