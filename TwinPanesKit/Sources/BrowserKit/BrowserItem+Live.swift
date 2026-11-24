@@ -122,17 +122,32 @@ extension BrowserItem {
                     return
                 case .done:
                     self.relistLister = nil
-                    self.readsInFlight -= 1
                     self.pendingReplacement = all  // swapped in off the main actor
                     self.pendingBatch = []
                     self.pendingRemovals = []
                     self.pendingHasListed = false
+                    self.relistFinished(generation: wanted)
+                    self.readsInFlight -= 1
                     self.applyPending()
-                case .failed:
+                case .failed(let error):
                     self.relistLister = nil
-                    self.apply(removing: [], adding: [])
+                    switch error {
+                    case .notFound:
+                        self.leaveVanishedFolder()
+                    case .needsAccess:
+                        self.readsInFlight -= 1
+                        self.watcher?.stop()
+                        self.watcher = nil
+                        self.relistRequested = false
+                        self.isRelisting = false
+                        self.needsAccess = true
+                        self.listingFinished()
+                    case .notAFolder, .failed:
+                        self.notice = "Can’t list “\(self.folder.path)”: \(error)"
+                        self.relistFinished(generation: wanted)
+                        self.apply(removing: [], adding: [])
+                    }
                 }
-                self.relistFinished(generation: wanted)
             }
         }
     }

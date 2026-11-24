@@ -101,7 +101,7 @@ public final class BrowserItem: WorkspaceItem {
     var backStack: [HistoryEntry] = []
     var forwardStack: [HistoryEntry] = []
     /// Set when the sandbox refuses the folder until the user grants access.
-    public private(set) var needsAccess = false
+    public internal(set) var needsAccess = false
     /// False until the first listing; the view lists the folder when it first loads.
     public private(set) var hasListed = false
     /// Access to the current folder, held for as long as this tab shows it (§5).
@@ -147,11 +147,18 @@ public final class BrowserItem: WorkspaceItem {
         defer { step?.end() }
         let target = (url ?? folder).standardizedFileURL
         // Still under the same grant: keep the token rather than start access again.
-        let grant = grants.grant(covering: target)
-        let newScope =
-            grant != nil && grant?.standardizedFileURL == scope?.url.standardizedFileURL
-            ? scope : grants.scope(covering: target)
-        let problem = FolderLister.check(target)
+        let newScope: SecurityScope?
+        if let scope,
+            let grant = grants.grant(covering: target),
+            grant.standardizedFileURL == scope.url.standardizedFileURL
+        {
+            newScope = scope
+        } else {
+            newScope = grants.scope(covering: target)
+        }
+        let problem = withExtendedLifetime(newScope) {
+            FolderLister.check(target)
+        }
         if let problem, !problem.needsAccess {
             if !quietly {
                 host?.showStatus("Can’t open “\(target.path)”: \(problem)")
@@ -216,6 +223,7 @@ public final class BrowserItem: WorkspaceItem {
         pendingHidden = nil
         isMerging = false
         isListing = false
+        finishWaiting()
     }
 
     /// The order the rows are in, or are being sorted into; it outlives navigation.
@@ -255,8 +263,13 @@ public final class BrowserItem: WorkspaceItem {
             if !isMerging { listingFinished(reloading: false) }  // the last batch is shown
         case .failed(let error):
             isListing = false
+            pendingBatch = []
+            pendingRemovals = []
+            pendingReplacement = nil
+            pendingHasListed = false
+            isMerging = false
             needsAccess = error.needsAccess
-            host?.showStatus("Can’t list “\(folder.path)”: \(error)")
+            notice = "Can’t list “\(folder.path)”: \(error)"
             listingFinished()
         }
     }
@@ -405,7 +418,13 @@ public final class BrowserItem: WorkspaceItem {
     /// Records a folder the user granted in an open panel and lists it.
     public func granted(_ url: URL) {
         try? grants.add(url)
-        go(to: url == folder ? nil : url)
+        go(to: Self.url(url, covers: folder) ? nil : url)
+    }
+
+    private static func url(_ parent: URL, covers child: URL) -> Bool {
+        let parentParts = parent.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        let childParts = child.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+        return childParts.starts(with: parentParts)
     }
 
     public func willClose() { stopListing() }

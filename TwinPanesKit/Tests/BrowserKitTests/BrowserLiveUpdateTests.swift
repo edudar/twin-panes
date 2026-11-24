@@ -3,6 +3,15 @@ import Testing
 
 @testable import BrowserKit
 @testable import TwinPanesCore
+@testable import WorkspaceKit
+
+@MainActor
+private final class RecordingHost: WorkspaceHost {
+    var statuses: [String] = []
+    func showStatus(_ message: String) {
+        statuses.append(message)
+    }
+}
 
 /// Live updates in the tab (docs/plans/M4.md, D-f, step 9).
 @MainActor
@@ -315,5 +324,80 @@ import Testing
         #expect(item.relistsStarted == 1)
         #expect(item.readsInFlight == beforeReads + 1)
         await item.listed()
+    }
+
+    @Test func listedResumesWhenWillCloseIsCalledMidListing() async throws {
+        defer { cleanUp() }
+        let big = root.appendingPathComponent("big-close")
+        try FileManager.default.createDirectory(at: big, withIntermediateDirectories: true)
+        for i in 0..<3_000 {
+            FileManager.default.createFile(
+                atPath: big.appendingPathComponent("f\(i)").path, contents: nil)
+        }
+        item.go(to: big)
+        #expect(item.isListing)
+        let item = self.item
+        let resumed = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
+            var finished = false
+            Task { @MainActor in
+                await item.listed()
+                guard !finished else { return }
+                finished = true
+                done.resume(returning: true)
+            }
+            Task { @MainActor in
+                await Task.yield()
+                item.willClose()
+                try? await Task.sleep(for: .seconds(2))
+                guard !finished else { return }
+                finished = true
+                done.resume(returning: false)
+            }
+        }
+        #expect(resumed)
+    }
+
+    @Test func receivedFailedPreservesErrorStatusAndSetsNeedsAccess() async throws {
+        defer { cleanUp() }
+        let host = RecordingHost()
+        item.host = host
+        item.isMerging = true
+        item.pendingBatch = [makeEntry("stale.txt")]
+        item.pendingRemovals = ["b.txt"]
+        item.pendingHasListed = true
+        item.received(.failed(.needsAccess(root)))
+        #expect(item.needsAccess)
+        #expect(!item.isMerging)
+        #expect(item.pendingBatch.isEmpty)
+        #expect(item.pendingRemovals.isEmpty)
+        #expect(!item.pendingHasListed)
+        #expect(host.statuses.last?.contains("0 items") == false)
+        #expect(host.statuses.last?.contains("No permission") == true)
+
+        item.received(.failed(.failed(root, "boom")))
+        #expect(!item.needsAccess)
+        #expect(host.statuses.last?.contains("boom") == true)
+        #expect(host.statuses.last?.contains("items") == false)
+    }
+
+    @Test func grantedCoveringParentKeepsDeniedSubfolder() async throws {
+        defer { cleanUp() }
+        let sub = root.appendingPathComponent("sub/deeper")
+        item.go(to: sub)
+        await item.listed()
+        item.granted(root)
+        #expect(item.folder.path == sub.path)
+        await item.listed()
+    }
+
+    @Test func smallFolderQueuedRelistDoesNotResumeListedPrematurely() async throws {
+        defer { cleanUp() }
+        item.folderChanged(.relist)
+        item.folderChanged(.relist)
+        #expect(item.relistsStarted == 1)
+        #expect(item.relistRequested)
+        await item.listed()
+        #expect(item.relistsStarted == 2)
+        #expect(!item.isRelisting)
     }
 }
