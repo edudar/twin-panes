@@ -9,6 +9,37 @@ final class FileListTableView: NSTableView, CommandScopeProviding {
     var commandScopes: [BindingScope] { [.item(.browser, part: "fileList")] }
     /// The icons drawn for the rows no longer match: a new appearance or screen scale.
     var iconsChanged: (() -> Void)?
+    /// Locale or time zone changed: Size and Date Modified cells need reformatting.
+    var formattingChanged: (() -> Void)?
+    nonisolated(unsafe) private var formattingObservers: [NSObjectProtocol] = []
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        observeFormatting()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    deinit {
+        for observer in formattingObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func observeFormatting() {
+        for name in [
+            NSLocale.currentLocaleDidChangeNotification,
+            Notification.Name.NSSystemTimeZoneDidChange,
+        ] {
+            let observer = NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.formattingChanged?() }
+            }
+            formattingObservers.append(observer)
+        }
+    }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
@@ -96,7 +127,9 @@ final class FileCell: NSTableCellView {
         defer { step?.end() }
         var x: CGFloat = 2
         if !secondary {  // the name column, whose icon may still be on its way
-            icon?.draw(in: NSRect(x: x, y: (bounds.height - 16) / 2, width: 16, height: 16))
+            icon?.draw(
+                in: NSRect(
+                    x: x, y: ((bounds.height - 16) / 2).rounded(), width: 16, height: 16))
             x += 22
         }
         guard let context = NSGraphicsContext.current?.cgContext else { return }
@@ -116,7 +149,7 @@ final class FileCell: NSTableCellView {
         context.textMatrix = .identity
         let (ascent, descent) = (Self.font.ascender, -Self.font.descender)
         context.textPosition = CGPoint(
-            x: alignment == .right ? x + available - width : x,
+            x: alignment == .right ? max(x, x + available - width) : x,
             y: ((bounds.height - ascent - descent) / 2 + descent).rounded())
         CTLineDraw(line, context)
     }
@@ -391,6 +424,7 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         tableView.doubleAction = #selector(browserOpen(_:))
         tableView.setAccessibilityIdentifier("fileList")
         tableView.iconsChanged = { [weak self] in self?.refreshIcons() }
+        tableView.formattingChanged = { [weak self] in self?.refreshFormatting() }
         if let iconObserver { NotificationCenter.default.removeObserver(iconObserver) }
         iconObserver = NotificationCenter.default.addObserver(
             forName: IconCache.didChange, object: IconCache.shared, queue: .main
@@ -482,14 +516,33 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         if let cell = tableView.makeView(withIdentifier: identifier, owner: self) {
             return cell
         }
-        let label = NSTextField(labelWithString: "..")
-        label.setAccessibilityLabel("Parent folder")
-        let icon = NSImageView(image: IconCache.shared.folder)
-        let stack = NSStackView(views: [icon, label])
-        stack.spacing = 6
-        stack.identifier = identifier
-        stack.setAccessibilityIdentifier("parentRow")
-        return stack
+        let cell = NSTableCellView()
+        cell.identifier = identifier
+        cell.setAccessibilityIdentifier("parentRow")
+
+        let imageView = NSImageView(image: IconCache.shared.folder)
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        let textField = NSTextField(labelWithString: "..")
+        textField.font = FileCell.font
+        textField.lineBreakMode = .byTruncatingMiddle
+        textField.setAccessibilityLabel("Parent folder")
+        textField.translatesAutoresizingMaskIntoConstraints = false
+
+        cell.addSubview(imageView)
+        cell.addSubview(textField)
+        cell.imageView = imageView
+        cell.textField = textField
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
+            imageView.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 16),
+            imageView.heightAnchor.constraint(equalToConstant: 16),
+            textField.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 6),
+            textField.trailingAnchor.constraint(
+                lessThanOrEqualTo: cell.trailingAnchor, constant: -2),
+            textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+        return cell
     }
 
     /// The icon for `entry` in the table's current scale and appearance.
@@ -507,10 +560,31 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         let column = nameColumn
         guard column >= 0 else { return }
         tableView.enumerateAvailableRowViews { rowView, row in
+            if showsParentRow, row == 0 {
+                (rowView.view(atColumn: column) as? NSTableCellView)?.imageView?.image =
+                    IconCache.shared.folder
+                return
+            }
             guard let cell = rowView.view(atColumn: column) as? FileCell,
                 let entry = entry(atRow: row)
             else { return }
             cell.icon = icon(for: entry)
+        }
+    }
+
+    /// Locale or time zone changed: update the visible Size and Date Modified cells.
+    func refreshFormatting() {
+        let columns: [(Int, Column)] = [Column.size, .modified].compactMap { column in
+            let index = tableView.column(withIdentifier: .init(column.rawValue))
+            return index >= 0 ? (index, column) : nil
+        }
+        guard !columns.isEmpty else { return }
+        tableView.enumerateAvailableRowViews { rowView, row in
+            guard let entry = entry(atRow: row) else { return }
+            for (index, column) in columns {
+                guard let cell = rowView.view(atColumn: index) as? FileCell else { continue }
+                cell.text = text(for: entry, column)
+            }
         }
     }
 

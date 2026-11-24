@@ -79,14 +79,17 @@ final class RecentFiles: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        let (entries, lost) = store.snapshot()
         for entry in entries {
             let item = NSMenuItem(
                 title: entry.url.lastPathComponent,
                 action: #selector(AppActions.openRecentFile(_:)), keyEquivalent: "")
             item.representedObject = entry.data
             item.toolTip = entry.url.path
-            item.image = NSWorkspace.shared.icon(forFile: entry.url.path)
-            item.image?.size = NSSize(width: 16, height: 16)
+            if let icon = NSWorkspace.shared.icon(forFile: entry.url.path).copy() as? NSImage {
+                icon.size = NSSize(width: 16, height: 16)
+                item.image = icon
+            }
             menu.addItem(item)
         }
         for url in lost {
@@ -97,15 +100,18 @@ final class RecentFiles: NSObject, NSMenuDelegate {
             item.toolTip = url.path
             menu.addItem(item)
         }
-        if menu.items.isEmpty {
+        let isEmpty = entries.isEmpty && lost.isEmpty
+        if isEmpty {
             let none = NSMenuItem(title: "No Recent Files", action: nil, keyEquivalent: "")
             none.isEnabled = false
             menu.addItem(none)
         }
         menu.addItem(.separator())
-        menu.addItem(
-            NSMenuItem(
-                title: "Clear Menu", action: #selector(AppActions.clearRecentFiles(_:)),
-                keyEquivalent: ""))
+        let clearItem = NSMenuItem(
+            title: "Clear Menu",
+            action: isEmpty ? nil : #selector(AppActions.clearRecentFiles(_:)),
+            keyEquivalent: "")
+        clearItem.isEnabled = !isEmpty
+        menu.addItem(clearItem)
     }
 }
