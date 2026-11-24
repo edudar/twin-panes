@@ -59,7 +59,7 @@ public final class StepRecorder {
     /// Enough for a gate's worth of cell draws; older records are dropped past this.
     let limit: Int
 
-    public init(limit: Int = 200_000) { self.limit = limit }
+    public init(limit: Int = 200_000) { self.limit = max(1, limit) }
 
     public func reset() { records.removeAll(keepingCapacity: true) }
 
@@ -67,7 +67,7 @@ public final class StepRecorder {
         _ name: String, from start: ContinuousClock.Instant, to end: ContinuousClock.Instant,
         onCPU: Duration = .zero
     ) {
-        if records.count >= limit { records.removeFirst(records.count / 2) }
+        if records.count >= limit { records.removeFirst(max(1, records.count / 2)) }
         records.append((name, start, end, onCPU))
     }
 
@@ -78,6 +78,7 @@ public final class StepRecorder {
     )
         -> [Step]
     {
+        guard start < end else { return [] }
         var byName: [String: (Int, Duration, Duration, Duration, Duration)] = [:]
         for record in records where record.end > start && record.start < end {
             let inside = min(record.end, end) - max(record.start, start)

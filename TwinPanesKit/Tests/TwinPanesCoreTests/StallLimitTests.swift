@@ -42,6 +42,12 @@ import Testing
         #expect(StallLimit(base: base, measured: .seconds(1), reference: .zero).factor == 1)
     }
 
+    @Test func factorIsAtLeastOneEvenWhenMaxFactorIsBelowOne() {
+        let limit = StallLimit(
+            base: base, measured: .milliseconds(20), reference: reference, maxFactor: 0.5)
+        #expect(limit.factor >= 1 && limit.limit >= base)
+    }
+
     /// A run slowed by something else doesn't count against the machine.
     @Test func theFastestRunIsTheMeasure() {
         var run = 0

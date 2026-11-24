@@ -22,7 +22,7 @@ public struct StallLimit: Sendable, Equatable {
     ) {
         self.base = base
         let ratios = zip(measured, reference).map { $1 > .zero ? $0 / $1 : 1 }
-        factor = min(maxFactor, max(1, ratios.max() ?? 1))
+        factor = max(1, min(maxFactor, ratios.max() ?? 1))
     }
 
     public var limit: Duration { base * factor }
@@ -31,10 +31,12 @@ public struct StallLimit: Sendable, Equatable {
     /// can do, not how busy it happened to be during one of them, nor how long the
     /// thread waited for a core.
     public static func fastestOnCPU(of runs: Int, _ body: () -> Void) -> Duration {
-        (0..<max(1, runs)).map { _ in
+        (0..<max(1, runs)).compactMap { _ in
             let start = GapMeter.threadCPU()
             body()
-            return GapMeter.threadCPU() - start
+            let end = GapMeter.threadCPU()
+            guard end > .zero, end >= start else { return nil }
+            return end - start
         }.min() ?? .zero
     }
 

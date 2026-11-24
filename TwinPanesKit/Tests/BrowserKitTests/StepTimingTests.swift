@@ -50,6 +50,15 @@ import Testing
         #expect(recorder.steps(from: at(-1), to: at(100)).isEmpty)
     }
 
+    @Test func zeroLimitClampsToOneAndInvertedSpanReturnsEmpty() {
+        let recorder = StepRecorder(limit: 0)
+        recorder.record("a", from: at(0), to: at(5))
+        recorder.record("b", from: at(5), to: at(25))
+        #expect(recorder.steps(from: at(0), to: at(30)).map(\.name) == ["b"])
+        #expect(recorder.steps(from: at(10), to: at(10)).isEmpty)
+        #expect(recorder.steps(from: at(20), to: at(10)).isEmpty)
+    }
+
     /// A step that waited (for a core, a lock, the disk) shows little time on the CPU.
     @Test func stepsSayHowMuchOfTheirTimeWasOnTheCPU() {
         let recorder = StepRecorder()
@@ -58,10 +67,8 @@ import Testing
         let before = ContinuousClock.now
         StepTiming.measure("waiting") { Thread.sleep(forTimeInterval: 0.03) }
         StepTiming.measure("working") {
-            let end = ContinuousClock.now + .milliseconds(30)
-            var spins = 0
-            while ContinuousClock.now < end { spins &+= 1 }
-            #expect(spins > 0)
+            let end = StepTiming.threadCPU() + .milliseconds(25)
+            while StepTiming.threadCPU() < end {}
         }
         let steps = Dictionary(
             uniqueKeysWithValues: recorder.steps(from: before, to: .now).map { ($0.name, $0) })

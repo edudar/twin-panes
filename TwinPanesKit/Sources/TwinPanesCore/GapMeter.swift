@@ -19,12 +19,19 @@ public struct GapMeter: Sendable {
 
     /// A heartbeat at `wall`, when the thread had used `cpu` in all.
     public mutating func beat(at wall: ContinuousClock.Instant, cpu: Duration) {
-        defer { last = (wall, cpu) }
-        guard let last else { return }
+        guard let last else {
+            self.last = (wall, cpu)
+            return
+        }
         let gap = wall - last.wall
-        let busy = cpu - last.cpu
         if gap > worstWall { (worstWall, worstWallEnd) = (gap, wall) }
+        guard cpu > .zero, cpu >= last.cpu else {
+            self.last = (wall, last.cpu)
+            return
+        }
+        let busy = cpu - last.cpu
         if busy > worstBusy { (worstBusy, worstBusyEnd, worstBusyWall) = (busy, wall, gap) }
+        self.last = (wall, cpu)
     }
 
     /// The calling thread's CPU time so far.

@@ -1,8 +1,15 @@
 import AppKit
 import Testing
+import WorkspaceKit
 
 @testable import BrowserKit
 @testable import TwinPanesCore
+
+@MainActor
+private final class StatusHost: WorkspaceHost {
+    var statuses: [String] = []
+    func showStatus(_ message: String) { statuses.append(message) }
+}
 
 /// Back and forward per tab (docs/plans/M4.md, D-d, step 7).
 @MainActor
@@ -112,6 +119,55 @@ import Testing
         item.controller.browserBack(nil)
         await item.listed()
         #expect(enabled(#selector(BrowserViewController.browserForward(_:))))
+    }
+
+    @Test func skippedNoticeSurvivesListingAndShowsWhenAllEntriesVanished() async throws {
+        defer { cleanUp() }
+        let suite = root.appendingPathComponent("c/notice-defaults").path
+        let grants = FolderGrants(defaults: UserDefaults(suiteName: suite)!)
+        let observed = BrowserItem(folder: root, grants: grants) { _, _ in }
+        let host = StatusHost()
+        observed.host = host
+        _ = observed.viewController.view
+        await observed.listed()
+
+        observed.go(to: root.appendingPathComponent("b"))
+        await observed.listed()
+        observed.go(to: root.appendingPathComponent("a"))
+        await observed.listed()
+        try FileManager.default.removeItem(at: root.appendingPathComponent("b"))
+
+        observed.goBack()
+        await observed.listed()
+        #expect(host.statuses.last == "Skipped “b”: no longer there")
+
+        // Now go to "c", delete "a", and goBack from "c" when all back entries are gone.
+        observed.go(to: root.appendingPathComponent("c"))
+        await observed.listed()
+        try FileManager.default.removeItem(at: root.appendingPathComponent("a"))
+        observed.backStack = [HistoryEntry(folder: root.appendingPathComponent("a"), selected: nil)]
+        observed.goBack()
+        #expect(host.statuses.last == "Skipped “a”: no longer there")
+    }
+
+    @Test func rootCameFromIsNilAndNoDuplicateBackStackLoop() async throws {
+        defer { cleanUp() }
+        let slash = URL(fileURLWithPath: "/", isDirectory: true)
+        let grants = FolderGrants(
+            defaults: UserDefaults(suiteName: root.appendingPathComponent("c/root-defaults").path)!)
+        let rootItem = BrowserItem(folder: slash, grants: grants) { _, _ in }
+        _ = rootItem.viewController.view
+        await rootItem.listed()
+        rootItem.backStack = [HistoryEntry(folder: slash, selected: nil)]
+        rootItem.goBack()
+        await rootItem.listed()
+        #expect(!rootItem.controller.namesToKeep.contains("/"))
+        #expect(!rootItem.canGoForward)
+
+        // Pending wantedSelection is preserved by `here` when selectedName is nil.
+        item.controller.startShowing(selecting: "z.txt")
+        #expect(item.controller.selectedName == nil)
+        #expect(item.here.selected == "z.txt")
     }
 }
 

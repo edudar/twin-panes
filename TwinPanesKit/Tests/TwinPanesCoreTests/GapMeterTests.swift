@@ -36,4 +36,10 @@ import Testing
         #expect(meter.worstBusyEnd == t0 + .milliseconds(100))
         #expect(meter.worstBusyWall == .milliseconds(40))
     }
+
+    @Test func aZeroCPUSampleIsIgnoredWithoutCorruptingTheNextBeat() {
+        let meter = beats([(0, 10), (20, 0), (30, 15)])
+        #expect(meter.worstWall == .milliseconds(20))
+        #expect(meter.worstBusy == .milliseconds(5))
+    }
 }
