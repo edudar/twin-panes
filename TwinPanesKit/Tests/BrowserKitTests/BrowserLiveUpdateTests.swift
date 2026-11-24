@@ -248,4 +248,72 @@ import Testing
         }
         #expect(shownNames == ["sub", "d.txt", "b.txt"])
     }
+
+    private func makeEntry(_ name: String, size: UInt64 = 1) -> DirectoryEntry {
+        DirectoryEntry(
+            url: root.appendingPathComponent(name), name: name, isDirectory: false,
+            isPackage: false, isSymbolicLink: false, isHidden: false, size: size, modified: nil,
+            type: .data)
+    }
+
+    @Test func deleteWhileMergingPurgesBufferedEntry() async throws {
+        defer { cleanUp() }
+        item.isMerging = true
+        item.readsInFlight = 2
+        item.apply(removing: ["b.txt"], adding: [makeEntry("b.txt", size: 10)])
+        item.apply(removing: ["b.txt"], adding: [])
+        item.isMerging = false
+        item.applyPending()
+        #expect(!names.contains("b.txt"))
+    }
+
+    @Test func relistPendingReplacementDropsStalePendingEdits() async throws {
+        defer { cleanUp() }
+        item.isMerging = true
+        item.pendingBatch = [makeEntry("stale.txt")]
+        item.pendingRemovals = ["b.txt"]
+        item.pendingHasListed = true
+        item.relist()
+        for _ in 0..<100 where item.pendingReplacement == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(item.pendingReplacement != nil)
+        #expect(item.pendingBatch.isEmpty)
+        #expect(item.pendingRemovals.isEmpty)
+        #expect(!item.pendingHasListed)
+        item.isMerging = false
+        item.applyPending()
+        #expect(names == ["sub", "b.txt", "d.txt"])
+    }
+
+    @Test func outOfOrderReadFinishedDoesNotOverwriteNewerRead() async throws {
+        defer { cleanUp() }
+        item.latestReadSequence["b.txt"] = 2
+        item.readsInFlight = 2
+        item.readFinished(["b.txt"], [], generation: item.generation, sequence: 2)
+        item.readFinished(
+            ["b.txt"], [makeEntry("b.txt", size: 999)], generation: item.generation, sequence: 1)
+        #expect(!names.contains("b.txt"))
+    }
+
+    @Test func stopListingCancelsInFlightRelistLister() async throws {
+        defer { cleanUp() }
+        item.relist()
+        let lister = try #require(item.relistLister)
+        item.willClose()
+        #expect(lister.isCancelled)
+        #expect(item.relistLister == nil)
+    }
+
+    @Test func readChangedWhileListingWithRelistRequestedSkipsRedundantRead() async throws {
+        defer { cleanUp() }
+        let beforeReads = item.readsInFlight
+        item.relistRequested = true
+        item.changedWhileListing = ["b.txt", "d.txt"]
+        item.readChangedWhileListing()
+        #expect(item.changedWhileListing.isEmpty)
+        #expect(item.relistsStarted == 1)
+        #expect(item.readsInFlight == beforeReads + 1)
+        await item.listed()
+    }
 }

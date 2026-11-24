@@ -1,4 +1,5 @@
 import AppKit
+import Synchronization
 import TwinPanesCore
 import WorkspaceKit
 
@@ -52,7 +53,14 @@ public final class BrowserItem: WorkspaceItem {
     public private(set) var isListing = false
     /// Bumped by every navigation: work started for an older one is dropped.
     private(set) var generation = 0
-    private(set) var lister: FolderLister?
+    private(set) var lister: FolderLister? {
+        didSet { activeTasks.setLister(lister) }
+    }
+    var relistLister: FolderLister? {
+        didSet { activeTasks.setRelistLister(relistLister) }
+    }
+    var readSequence = 0
+    var latestReadSequence: [String: Int] = [:]
     /// Batches waiting for the merge that's running off the main actor.
     var pendingBatch: [DirectoryEntry] = []
     /// A new order waiting for the same; applied before the waiting batches.
@@ -67,7 +75,10 @@ public final class BrowserItem: WorkspaceItem {
     var pendingReplacement: [DirectoryEntry]?
     /// Names that changed while the folder was still listing, read once it's done.
     var changedWhileListing: Set<String> = []
-    var watcher: FolderWatcher?
+    var watcher: FolderWatcher? {
+        didSet { activeTasks.setWatcher(watcher) }
+    }
+    private let activeTasks = ActiveTasks()
     /// Called after each live update reaches the rows; for tests.
     var didUpdate: (() -> Void)?
     /// Live-update reads (and a full re-list) still running off the main actor.
@@ -84,7 +95,7 @@ public final class BrowserItem: WorkspaceItem {
         !pendingBatch.isEmpty || pendingOrder != nil || pendingHidden != nil
             || !pendingRemovals.isEmpty || pendingReplacement != nil
     }
-    private var isMerging = false
+    var isMerging = false
     private var listedWaiters: [CheckedContinuation<Void, Never>] = []
     /// Folders to go back and forward to, most recent last (D-d).
     var backStack: [HistoryEntry] = []
@@ -103,6 +114,10 @@ public final class BrowserItem: WorkspaceItem {
         self.folder = folder.standardizedFileURL
         self.grants = grants
         self.openFile = openFile
+    }
+
+    deinit {
+        activeTasks.cancelAll()
     }
 
     public var title: String {
@@ -169,20 +184,25 @@ public final class BrowserItem: WorkspaceItem {
     private func startListing() {
         let lister = FolderLister(folder: folder)
         let wanted = generation
+        let activeScope = self.scope
         self.lister = lister
         isListing = true
         lister.start { [weak self] event in
-            guard let self, self.generation == wanted else { return }
-            self.received(event)
+            withExtendedLifetime(activeScope) {
+                guard let self, self.generation == wanted else { return }
+                self.received(event)
+            }
         }
     }
 
     func stopListing() {
-        lister?.cancel()
+        activeTasks.cancelAll()
         lister = nil
-        watcher?.stop()
+        relistLister = nil
         watcher = nil
         generation += 1
+        readSequence = 0
+        latestReadSequence = [:]
         pendingBatch = []
         pendingRemovals = []
         pendingReplacement = nil
@@ -406,5 +426,39 @@ public final class BrowserItem: WorkspaceItem {
                 "\(folder.path) · \(entries.count.formatted()) items (\(folders.formatted()) folders)"
                     + (hidden > 0 ? ", \(hidden.formatted()) hidden" : ""))
         }
+    }
+}
+
+/// Holds active background tasks so `BrowserItem.deinit` can cancel them without `isolated deinit`.
+private final class ActiveTasks: Sendable {
+    struct State: Sendable {
+        var lister: FolderLister?
+        var relistLister: FolderLister?
+        var watcher: FolderWatcher?
+    }
+
+    private let state = Mutex(State())
+
+    func setLister(_ lister: FolderLister?) {
+        state.withLock { $0.lister = lister }
+    }
+
+    func setRelistLister(_ lister: FolderLister?) {
+        state.withLock { $0.relistLister = lister }
+    }
+
+    func setWatcher(_ watcher: FolderWatcher?) {
+        state.withLock { $0.watcher = watcher }
+    }
+
+    func cancelAll() {
+        let current = state.withLock { state in
+            let copy = state
+            state = State()
+            return copy
+        }
+        current.lister?.cancel()
+        current.relistLister?.cancel()
+        current.watcher?.stop()
     }
 }

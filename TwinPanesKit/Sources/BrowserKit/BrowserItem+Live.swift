@@ -45,9 +45,11 @@ extension BrowserItem {
     }
 
     func readChangedWhileListing() {
-        if relistRequested, !isRelisting {
+        if relistRequested || changedWhileListing.count > 1_000 {
             relistRequested = false
+            changedWhileListing = []
             relist()
+            return
         }
         guard !changedWhileListing.isEmpty else { return }
         let names = changedWhileListing
@@ -59,24 +61,39 @@ extension BrowserItem {
     func read(_ names: Set<String>) {
         let wanted = generation
         let folder = self.folder
+        let activeScope = self.scope
+        readSequence += 1
+        let seq = readSequence
+        for name in names {
+            latestReadSequence[name] = seq
+        }
         IconCache.shared.forget(names, in: folder)
         readsInFlight += 1
         // Only a weak box crosses: even `self?` held over the hop would keep a closed
         // tab alive until the main actor ran it.
         let box = WeakItem(self)
         Task.detached(priority: .userInitiated) {
-            let entries = names.compactMap {
-                DirectoryReader.entryIfPresent(folder.appendingPathComponent($0))
+            let entries = withExtendedLifetime(activeScope) {
+                names.compactMap {
+                    DirectoryReader.entryIfPresent(folder.appendingPathComponent($0))
+                }
             }
-            await MainActor.run { box.item?.readFinished(names, entries, generation: wanted) }
+            await MainActor.run {
+                box.item?.readFinished(names, entries, generation: wanted, sequence: seq)
+            }
         }
     }
 
-    private func readFinished(
-        _ names: Set<String>, _ entries: [DirectoryEntry], generation wanted: Int
+    func readFinished(
+        _ names: Set<String>, _ entries: [DirectoryEntry], generation wanted: Int, sequence seq: Int
     ) {
         guard generation == wanted else { return }
-        apply(removing: names, adding: entries)
+        let activeNames = names.filter { latestReadSequence[$0] == seq }
+        for name in activeNames {
+            latestReadSequence.removeValue(forKey: name)
+        }
+        let activeEntries = entries.filter { activeNames.contains($0.name) }
+        apply(removing: activeNames, adding: activeEntries)
     }
 
     /// FSEvents lost track: list the whole folder again in the background and swap it
@@ -91,22 +108,32 @@ extension BrowserItem {
         isRelisting = true
         relistsStarted += 1
         let wanted = generation
+        let activeScope = self.scope
         let lister = FolderLister(folder: folder)
+        self.relistLister = lister
         var all: [DirectoryEntry] = []
         readsInFlight += 1
         lister.start { [weak self] event in
-            guard let self, self.generation == wanted else { return }
-            switch event {
-            case .batch(let batch):
-                all += batch
-                return
-            case .done:
-                self.readsInFlight -= 1
-                self.pendingReplacement = all  // swapped in off the main actor
-                self.applyPending()
-            case .failed: self.apply(removing: [], adding: [])
+            withExtendedLifetime(activeScope) {
+                guard let self, self.generation == wanted else { return }
+                switch event {
+                case .batch(let batch):
+                    all += batch
+                    return
+                case .done:
+                    self.relistLister = nil
+                    self.readsInFlight -= 1
+                    self.pendingReplacement = all  // swapped in off the main actor
+                    self.pendingBatch = []
+                    self.pendingRemovals = []
+                    self.pendingHasListed = false
+                    self.applyPending()
+                case .failed:
+                    self.relistLister = nil
+                    self.apply(removing: [], adding: [])
+                }
+                self.relistFinished(generation: wanted)
             }
-            self.relistFinished(generation: wanted)
         }
     }
 
@@ -127,9 +154,10 @@ extension BrowserItem {
         }
     }
 
-    private func apply(removing names: Set<String>, adding entries: [DirectoryEntry]) {
+    func apply(removing names: Set<String>, adding entries: [DirectoryEntry]) {
         readsInFlight -= 1
         pendingRemovals.formUnion(names)
+        pendingBatch.removeAll { names.contains($0.name) }
         pendingBatch += entries
         if names.isEmpty && entries.isEmpty { return listingFinished() }
         applyPending()
