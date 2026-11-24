@@ -23,13 +23,19 @@ public final class FolderGrants {
     /// Starts access through the most specific grant that contains `url`, refreshing
     /// its bookmark if stale. Nil when no grant covers it.
     public func scope(covering url: URL) -> SecurityScope? {
-        guard let best = best(covering: url) else { return nil }
-        let scope = SecurityScope(url: best.url)
-        if best.stale {
-            try? store.refresh(best.url)
+        let isSandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+        for candidate in coveringEntries(for: url) {
+            let scope = SecurityScope(url: candidate.url)
+            if scope.isActive || !isSandboxed {
+                if scope.isActive, candidate.stale {
+                    try? store.refresh(candidate.url)
+                    cachedEntries = nil
+                }
+                return scope
+            }
             cachedEntries = nil
         }
-        return scope
+        return nil
     }
 
     /// The granted folder whose access `scope(covering:)` would start for `url`, without
@@ -38,30 +44,79 @@ public final class FolderGrants {
     public func grant(covering url: URL) -> URL? { best(covering: url)?.url }
 
     private func best(covering url: URL) -> (url: URL, stale: Bool)? {
-        let target = url.standardizedFileURL.pathComponents
-        var best: (url: URL, stale: Bool, depth: Int)?
-        for entry in resolvedEntries() {
-            let parts = entry.url.standardizedFileURL.pathComponents
-            if target.starts(with: parts), parts.count > (best?.depth ?? -1) {
-                best = (entry.url, entry.stale, parts.count)
+        coveringEntries(for: url).first.map { ($0.url, $0.stale) }
+    }
+
+    private func coveringEntries(for url: URL) -> [(url: URL, stale: Bool, depth: Int)] {
+        let target = URL(fileURLWithPath: BookmarkStore.canonicalPath(url)).pathComponents
+        let caseSensitive = BookmarkStore.isCaseSensitive(url)
+        let targetVolume = BookmarkStore.volumeURL(of: url)
+        return resolvedEntries().compactMap { entry in
+            if let targetVolume,
+                let entryVolume = BookmarkStore.volumeURL(of: entry.url),
+                targetVolume != entryVolume
+            {
+                return nil
             }
+            let parts = URL(fileURLWithPath: BookmarkStore.canonicalPath(entry.url)).pathComponents
+            guard
+                Self.startsWith(
+                    target, prefix: parts,
+                    caseSensitive: caseSensitive && BookmarkStore.isCaseSensitive(entry.url))
+            else { return nil }
+            return (entry.url, entry.stale, parts.count)
         }
-        return best.map { ($0.url, $0.stale) }
+        .sorted { $0.depth > $1.depth }
     }
 
     /// The most specific granted folder containing `url` whose bookmark no longer
     /// resolves (renamed, moved or unmounted), as it last was: the place to ask for
     /// access again (D-g).
     public func lostGrant(covering url: URL) -> URL? {
-        let target = url.standardizedFileURL.pathComponents
+        let target = URL(fileURLWithPath: BookmarkStore.canonicalPath(url)).pathComponents
+        let caseSensitive = BookmarkStore.isCaseSensitive(url)
         return store.lost
-            .filter { target.starts(with: $0.standardizedFileURL.pathComponents) }
-            .max { $0.pathComponents.count < $1.pathComponents.count }
+            .compactMap { lost -> (url: URL, depth: Int)? in
+                let parts = URL(fileURLWithPath: BookmarkStore.canonicalPath(lost)).pathComponents
+                guard
+                    Self.startsWith(
+                        target, prefix: parts,
+                        caseSensitive: caseSensitive && BookmarkStore.isCaseSensitive(lost))
+                else { return nil }
+                return (lost, parts.count)
+            }
+            .max { $0.depth < $1.depth }?
+            .url
     }
 
     public func removeAll() {
         store.removeAll()
         cachedEntries = nil
+    }
+
+    /// Drops the grant for `folder` and clears cached entries.
+    public func forget(_ folder: URL) {
+        store.forget(folder)
+        cachedEntries = nil
+    }
+
+    /// Clears cached entries so the next lookup re-resolves from the store.
+    public func invalidate() {
+        cachedEntries = nil
+    }
+
+    private static func startsWith(
+        _ target: [String], prefix: [String], caseSensitive: Bool
+    ) -> Bool {
+        guard target.count >= prefix.count else { return false }
+        for (lhs, rhs) in zip(target, prefix) {
+            if caseSensitive {
+                if lhs != rhs { return false }
+            } else {
+                if lhs.caseInsensitiveCompare(rhs) != .orderedSame { return false }
+            }
+        }
+        return true
     }
 
     private func resolvedEntries() -> [BookmarkStore.Entry] {
