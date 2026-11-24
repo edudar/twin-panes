@@ -277,6 +277,15 @@ public final class HexView: NSView {
         needsDisplay = true
     }
 
+    /// The first row at least partly on screen.
+    public var topRow: UInt64 { position.topRow }
+
+    /// Scrolls so `row` is the top row, as far as the content allows.
+    public func scroll(toTopRow row: UInt64) {
+        position.scrollToTop(row: row)
+        didScroll()
+    }
+
     /// Moves the cursor to `offset` and scrolls it into view, a third from the top.
     public func go(to offset: UInt64) {
         selection.move(to: offset)
