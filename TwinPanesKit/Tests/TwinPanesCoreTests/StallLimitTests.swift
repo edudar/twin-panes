@@ -52,4 +52,17 @@ import Testing
         #expect(run == 3)
         #expect(fastest < .milliseconds(25))
     }
+
+    /// Timed in the thread's CPU time, like the stall check: waiting doesn't count.
+    @Test func theFastestOnTheCPUIgnoresWaiting() {
+        let waiting = StallLimit.fastestOnCPU(of: 2) { Thread.sleep(forTimeInterval: 0.03) }
+        #expect(waiting < .milliseconds(10))
+        let working = StallLimit.fastestOnCPU(of: 2) {
+            let end = ContinuousClock.now + .milliseconds(20)
+            var spins = 0
+            while ContinuousClock.now < end { spins &+= 1 }
+            #expect(spins > 0)
+        }
+        #expect(working > .milliseconds(10))
+    }
 }

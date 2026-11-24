@@ -40,10 +40,10 @@ limit between two 5 ms heartbeats. It counts the main thread's CPU time in each 
 not the gap itself: on a shared CI machine the thread can wait for a core for longer
 than any stall the app causes. Each step prints its longest gap and its busiest one,
 and what ran during a busiest gap over the limit. The limit is 50 ms on the dev Mac, scaled to the
-machine: the smoke test first times two fixed workloads, drawing and sorting names, and
-building a screenful of table rows. A Mac that runs either slower gets a
-proportionally longer limit, set by the slower of the two, up to 4 times (200 ms). It
-prints the times and the limit. The run takes one to two and a half minutes:
+machine: before each check the smoke test times two fixed workloads in main-thread
+CPU time, drawing and sorting names, and building a screenful of table rows. A Mac
+that runs either slower gets a proportionally longer limit, set by the slower of the
+two, up to 4 times (200 ms). It prints the times and the limit for each check. The run takes one to two and a half minutes:
 
 ```bash
 build/DerivedData/Build/Products/Debug/Twin\ Panes.app/Contents/MacOS/Twin\ Panes --smoke-test

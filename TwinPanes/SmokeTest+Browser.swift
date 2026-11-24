@@ -38,8 +38,12 @@ extension SmokeTest {
     /// 50 ms on the dev Mac between two heartbeats, scaled to this machine
     /// (`stallLimit()`). Gaps it spent waiting for a core are printed, not counted.
     func bigFolder(_ check: (Bool, String) -> Void, browser: BrowserItem, window: NSWindow) async {
-        // Measured first, while the machine is quiet.
-        let stall = Self.stallLimit()
+        // The table-rows workload's window, made once: making one waits on the window server.
+        let referenceWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        referenceWindow.isReleasedWhenClosed = false
+        defer { referenceWindow.close() }
         let count = 100_000
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("smoke-big-\(UUID().uuidString)", isDirectory: true)
@@ -47,13 +51,18 @@ extension SmokeTest {
         guard made else { return check(false, "create a 100k-file folder") }
         let before = browser.folder
         defer { browser.go(to: before) }  // where the rest of the smoke test expects it
-        let limit = Self.milliseconds(stall.limit)
-        let limitText = String(format: "%.0f", limit)
         let heart = Heartbeat()
         let recorder = StepRecorder()
         StepTiming.recorder = recorder
         defer { StepTiming.recorder = nil }
         func gate(_ what: String, _ body: () async -> Void) async {
+            // Measured again for each check: a shared runner's speed changes as it runs.
+            // Its leftovers (the table's layers, autoreleased objects) are cleared before
+            // the check starts, so they don't count against it.
+            let stall = autoreleasepool { Self.stallLimit(rowsIn: referenceWindow) }
+            await settle(milliseconds: 100)
+            let limit = Self.milliseconds(stall.limit)
+            let limitText = String(format: "%.0f", limit)
             recorder.reset()
             heart.start()
             await body()
@@ -167,21 +176,18 @@ extension SmokeTest {
     /// check means the same everywhere.
     /// Two workloads, since a Mac without a GPU (CI's runners) can draw at one pace and
     /// build table rows at another; the slower one sets the limit.
-    static func stallLimit() -> StallLimit {
-        let drawing = StallLimit.fastest(of: 5) { referenceWork() }
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled],
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        defer { window.close() }
-        let rows = StallLimit.fastest(of: 9) { referenceRows(in: window) }
+    static func stallLimit(rowsIn window: NSWindow) -> StallLimit {
+        // On the CPU, like the check itself: time spent waiting for a core counts in
+        // neither.
+        let drawing = StallLimit.fastestOnCPU(of: 3) { referenceWork() }
+        let rows = StallLimit.fastestOnCPU(of: 5) { referenceRows(in: window) }
         let stall = StallLimit(
             base: .milliseconds(50), measured: [drawing, rows],
             reference: [referenceTime, referenceRowsTime])
         print(
             String(
-                format: "  info reference work: drawing %.1f ms (%.1f on the dev Mac), table rows"
-                    + " %.1f ms (%.1f); stall limit %.0f ms",
+                format: "  info reference work: drawing %.1f ms (dev Mac %.1f), table rows"
+                    + " %.1f ms (%.1f): limit %.0f ms",
                 milliseconds(drawing), milliseconds(referenceTime), milliseconds(rows),
                 milliseconds(referenceRowsTime), milliseconds(stall.limit)))
         return stall
@@ -189,7 +195,6 @@ extension SmokeTest {
 
     /// A screenful of table rows built as the file list builds a folder's first rows: a
     /// new four-column table of drawn cells in an offscreen window, laid out and drawn.
-    /// The window is made once, outside the timing: making one waits on the window server.
     static func referenceRows(in window: NSWindow) {
         let table = NSTableView()
         table.style = .fullWidth

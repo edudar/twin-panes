@@ -27,8 +27,18 @@ public struct StallLimit: Sendable, Equatable {
 
     public var limit: Duration { base * factor }
 
-    /// The fastest of `runs` runs of `body`: what the machine can do, not how busy it
-    /// happened to be during one of them.
+    /// The fastest of `runs` runs of `body` in this thread's CPU time: what the machine
+    /// can do, not how busy it happened to be during one of them, nor how long the
+    /// thread waited for a core.
+    public static func fastestOnCPU(of runs: Int, _ body: () -> Void) -> Duration {
+        (0..<max(1, runs)).map { _ in
+            let start = GapMeter.threadCPU()
+            body()
+            return GapMeter.threadCPU() - start
+        }.min() ?? .zero
+    }
+
+    /// The fastest of `runs` runs of `body` on the clock.
     public static func fastest(of runs: Int, _ body: () -> Void) -> Duration {
         let clock = ContinuousClock()
         return (0..<max(1, runs)).map { _ in clock.measure(body) }.min() ?? .zero

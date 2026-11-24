@@ -1114,7 +1114,14 @@ byte histogram.
     (on a lock or the disk) isn't caught by this gate. The heaviest step left everywhere was
     leaving a 100k folder that moved away, and 23–26 ms of it (dev Mac) was the
     smoke test's own `FileManager.moveItem` on the main thread; it now moves the
-    folder off it, as another app would.
+    folder off it, as another app would. CI then passed on two runners at a time, but
+    a runner's speed changed within a run (macOS 15's drawing workload: 79 ms in one
+    run, 115–128 ms in the two before), so a limit measured once at the start didn't
+    hold for later checks. The workloads now run again before each check, timed in
+    CPU time like the check itself, and the run loop settles before the check starts
+    so their leftovers don't count. Switching appearance remains the least steady
+    check (22–55 ms on the dev Mac): nearly all of it is AppKit redrawing the window,
+    not timed steps.
   - *Volumes in the sidebar* and the global hidden-files default: M5 and M10.
   - *External volumes by hand*: granting a whole drive and a renamed volume asking
     again aren't automated (they need real drives), like the M3c volume spike.
