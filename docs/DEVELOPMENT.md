@@ -32,6 +32,17 @@ Logic tests for every library module run with SwiftPM:
 swift test --package-path TwinPanesKit
 ```
 
+CI also runs the tests under Thread Sanitizer and builds the package for x86_64,
+which GitHub's CodeQL uses:
+
+```bash
+swift test --sanitize=thread --package-path TwinPanesKit
+```
+
+```bash
+swift build --package-path TwinPanesKit --triple x86_64-apple-macosx15.0
+```
+
 The smoke test drives the built app. It opens two windows, browses a real
 folder, and opens a 4 GiB sparse file to check open time, frame time and memory.
 It also creates a 100,000-file folder and fails if listing, sorting, filtering,
@@ -66,7 +77,7 @@ Manual checks, such as the sandbox spike, are in
 | `TwinPanes/` | App sources: entry point, menus, command bindings, recent files, the smoke test, and `AppIcon.icon`, the Icon Composer app icon. |
 | `Config/` | Build settings (`.xcconfig`), `Info.plist` additions and entitlements. |
 | `TwinPanesKit/` | One Swift package with every library module and its tests. |
-| `docs/` | The plan, runbooks and images. `docs/plans/` holds one plan per milestone, written and reviewed before the work starts. |
+| `docs/` | The plan, runbooks and images. `docs/plans/` holds one plan per milestone, written and reviewed before the work starts; `docs/reviews/` holds one fix plan per code review. |
 
 Modules in `TwinPanesKit/Sources/` are sibling folders, and their dependencies
 point one way only, enforced by `Package.swift`:
@@ -92,9 +103,6 @@ failed smoke check shows as an annotation on the run page.
 
 ## Commits
 
-Keep each commit at most about 250 changed lines and about one thing, so it can
-be read on its own. Every commit should build and pass `swift test`.
-
-The full working rules (test-first order, fixing bugs one at a time, what to verify
-before a commit, documentation and UI conventions) are in [AGENTS.md](../AGENTS.md),
-which coding agents read automatically.
+Commit size, approval and verification rules are in [AGENTS.md](../AGENTS.md), along
+with the rest of the working rules (test-first order, bug fixes, code design,
+documentation). Coding agents read it automatically.

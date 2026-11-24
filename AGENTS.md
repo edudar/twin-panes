@@ -1,27 +1,39 @@
 # Working on Twin Panes
 
-Instructions for every coding agent (Claude Code, Codex, Cursor, Copilot, Gemini CLI and
-others) and every contributor in this repository, collected from the maintainer's
-feedback. Follow them without being asked again.
+Instructions for every coding agent and every contributor in this repository, collected
+from the maintainer's feedback. Follow them without being asked again. This file is the
+single source: Claude Code reads it through `CLAUDE.md`, Gemini CLI through
+`.gemini/settings.json`, and Codex, Cursor and Copilot read `AGENTS.md` directly. Don't
+copy these rules into other files; point to this one.
 
 Background: [README.md](README.md) (what the app is), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 (build, test, layout), [docs/PLAN.md](docs/PLAN.md) (decisions, architecture,
 milestones). Read the relevant parts of PLAN.md before changing behaviour.
 
+When instructions conflict, the maintainer's instruction in the current task wins, then
+this file, then [docs/PLAN.md](docs/PLAN.md), then the patterns in existing code.
+
 ## How to write code
 
 1. **Interface first, then tests, then implementation.** Define the types, protocols and
-   signatures (doc comments, stub bodies). Write tests against them and watch them fail.
-   Then implement until they pass. This is the order of work, not of commits.
-2. **Bugs: one at a time.** For each bug: failing test → fix → verify → commit, and only
-   then start the next. Order fixes so each commit is safe on its own (a fix that surfaces
-   new errors lands after the fix that handles them).
-3. **Plan before big work.** For multi-part work (a milestone, a review's fix list),
-   write a plan with severity or priority, get it reviewed, then implement. Every
-   milestone starts with its plan saved as `docs/plans/<milestone>.md` (for example
-   `docs/plans/M3a.md`): context, decisions, behaviour, the commit sequence and how
-   it's verified. Keep that file true while the milestone is in progress (status line,
-   changed steps); once it's done, PLAN.md's "As built" notes are the record.
+   signatures (doc comments, stub bodies that call `fatalError("Implementation
+   incoming")`). Write tests against them and watch them fail. Then implement until they
+   pass. This is the order of work, not of commits: never commit a stub.
+2. **Bugs: one commit each.** Each bug gets its own failing test → fix → verify, and its
+   own commit. Order fixes so each commit is safe on its own (a fix that surfaces new
+   errors lands after the fix that handles them). See "Commits and pushing" for when to
+   stop for approval.
+3. **Plan before big work.** For multi-part work, write a plan with severity or priority,
+   get it reviewed, then implement.
+   - A milestone starts with its plan saved as `docs/plans/<milestone>.md` (for example
+     `docs/plans/M3a.md`): context, decisions, behaviour, the commit sequence and how
+     it's verified.
+   - A review's fix list is saved as `docs/reviews/<topic>.md`: the findings, their
+     severity, and the commit sequence that fixes them.
+   - Keep the file true while the work is in progress (status line, changed steps).
+     Once the work is done the file is frozen; PLAN.md's "As built" notes are the
+     record. The one later edit allowed is adding a link to a review in `docs/reviews/`
+     that fixes something the plan delivered.
 4. **Prove it in the real app.** A feature isn't done because unit tests pass: the smoke
    test (`--smoke-test`) must exercise it in the running, sandboxed app with its real
    layout (never by forcing view frames). Milestones must deliver something usable end to
@@ -33,6 +45,12 @@ These rules apply to code you write or change. Existing code may not follow them
 don't copy its violations into new code, and don't refactor code outside your task
 to fix them. Note what you saw in the summary instead (or in PLAN.md §9 if it's
 worth scheduling). Where the rules conflict, the earlier one wins.
+
+The rules govern the project's own code and logic. Where the language, a framework or
+the standard library sets a convention, the convention wins: overrides and protocol
+conformances keep the framework's signatures (an `animated: Bool` parameter, a
+delegate method), and APIs modelled on the standard library may follow its shape
+(`popFirst()` both changes state and returns a value).
 
 1. **Correct and readable before clever.** Code is read far more than it's written.
    Prefer the plain version unless a measurement says otherwise.
@@ -48,13 +66,16 @@ worth scheduling). Where the rules conflict, the earlier one wins.
    not to reach a line count.
 4. **Dependencies point inward.** Domain logic doesn't depend on UI, frameworks,
    storage or the OS; those depend on it. Business rules must be testable without
-   a window, a disk or a network. Cross a boundary with a small protocol owned by
-   the inner side, and pass dependencies in (initialiser parameters); don't reach
-   for globals or singletons from inside the logic.
+   a window, a disk or a network. Pass dependencies in (initialiser parameters);
+   don't reach for globals or singletons from inside the logic. Where a test needs
+   to stand in for the outer side, cross the boundary with a small protocol owned
+   by the inner side; that test double is the second implementation rule 5 asks for.
 5. **No speculative abstraction.** Add a protocol, generic, layer or extension
    point only when there's a second implementation or a test double that needs it
    now. Duplicate twice before extracting a shared helper (rule of three), and
-   only merge code that changes for the same reason.
+   only merge code that changes for the same reason. This is about sharing code
+   between call sites; extracting a block inside one unit to name it (rule 3)
+   needs no second use.
 6. **No hidden effects.** A function either answers a question or changes state,
    not both, and its name says which. Don't mutate arguments or shared state
    that the signature doesn't make obvious. Prefer values and immutability;
@@ -90,15 +111,24 @@ breaks, or say why you didn't.
 
 ## Verifying
 
-After every fix or change — and before every commit — build and run all of these without
-waiting to be asked:
+After every change to code, tests, build settings or the project file — and before
+every commit of one — build and run all of these without waiting to be asked. They
+match what CI runs. A change that touches only documentation needs none of them.
 
 ```bash
 swift format lint --strict --recursive TwinPanesKit TwinPanes
 ```
 
 ```bash
-swift test --package-path TwinPanesKit
+swift test --parallel --package-path TwinPanesKit
+```
+
+```bash
+swift test --sanitize=thread --package-path TwinPanesKit
+```
+
+```bash
+swift build --package-path TwinPanesKit --triple x86_64-apple-macosx15.0
 ```
 
 ```bash
@@ -109,12 +139,17 @@ xcodebuild -project TwinPanes.xcodeproj -scheme TwinPanes -destination 'platform
 build/DerivedData/Build/Products/Debug/Twin\ Panes.app/Contents/MacOS/Twin\ Panes --smoke-test
 ```
 
+The smoke test passes only if it prints `SMOKE OK`. When `Config/` or the Xcode
+project changes, also check the signed entitlements the way CI's "Check entitlements"
+step does.
+
 - CI runs on **macOS 15, 26 and 27** (Xcode 16, 26, 27) and must pass on all three. Code
   that only Xcode 27 accepts breaks CI: in tests, don't capture `Atomic` or other
   non-copyable locals in `Task` / task-group closures (share a `Sendable` class instead).
-- The package must also build for x86_64 (`swift build --triple x86_64-apple-macosx15.0`),
-  because GitHub's CodeQL builds it that way; guard arm64-only APIs such as `Float16`
-  with `#if arch(arm64)`.
+- CI lints with Xcode 27's swift-format. If your local version disagrees with CI, CI is
+  right.
+- The package must build for x86_64 because GitHub's CodeQL builds it that way; guard
+  arm64-only APIs such as `Float16` with `#if arch(arm64)`.
 - Tests leave nothing behind: no files in `~/Library/Preferences` (use an absolute-path
   `UserDefaults` suite inside a temp folder), nothing in the Trash, temp folders removed.
 - Don't keep tests that can't fail (constants checked against themselves, sandbox checks
@@ -124,12 +159,18 @@ build/DerivedData/Build/Products/Debug/Twin\ Panes.app/Contents/MacOS/Twin\ Pane
 
 - **Commit only when the maintainer says "commit"; push only when they say "push"**
   ("commit and push" means both). "Push when the check passes" means wait for CI green.
-  This is an approval gate — it does not relax the 250-line limit or logical grouping.
-  Never pile multiple fixes or steps into one dirty working tree: implement and verify
-  one logical change (at most 250 changed lines), then pause for approval to commit
-  before starting the next.
-- Each commit is **at most 250 changed lines**, one logical change, and builds and passes
-  tests on its own. Split large work into a sequence of such commits.
+- **By default, stop after each logical change.** Implement and verify one commit's worth
+  of work, then wait for approval before committing or starting the next. Never pile
+  several fixes or steps into one dirty working tree. New code is reviewed before it's
+  committed, so this is always the rule for implementation work.
+- **Batches only when told.** The maintainer may say to commit and carry on, usually for
+  a list of bug fixes. Then commit each fix on its own once it's verified and move to the
+  next without pausing. Stop and ask if a fix turns out bigger or different than planned.
+- Each commit is **one logical change**, builds, and passes all checks on its own.
+  Aim for **at most 250 changed lines**, counting tests and docs but not generated
+  files (such as `project.pbxproj` or asset catalog JSON); going over is fine
+  only to keep one logical change together, and **350 is the hard limit**. Split
+  larger work into a sequence of commits.
 - Never commit failing or disabled tests.
 - Commit messages: a short subject, then a body saying what changed and why.
 
@@ -138,9 +179,9 @@ build/DerivedData/Build/Products/Debug/Twin\ Panes.app/Contents/MacOS/Twin\ Pane
 - **Read before changing behaviour:** check the relevant sections of [docs/PLAN.md](docs/PLAN.md)
   (decisions, architecture, milestones) and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
   (build, test, module layout) before designing or editing code.
-- **When to create docs:** create a milestone plan at `docs/plans/<milestone>.md` before
-  starting milestone work, and keep it current while the milestone is in progress. Do not
-  create side documents for reviews or decisions; fold them into `docs/PLAN.md`.
+- **When to create docs:** a milestone plan in `docs/plans/` and a review's fix list in
+  `docs/reviews/`, as described in "Plan before big work". Don't create other side
+  documents for decisions; fold them into `docs/PLAN.md`.
 - **When to update docs:**
   - [docs/PLAN.md](docs/PLAN.md) — update in the same piece of work whenever code changes
     structure, decisions, or behaviour: keep architecture tables accurate, record how
