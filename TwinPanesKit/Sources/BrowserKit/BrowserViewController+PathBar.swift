@@ -97,3 +97,15 @@ extension BrowserViewController: NSTextFieldDelegate {
         return true
     }
 }
+
+extension BrowserItem {
+    /// Navigates as if the path-bar component at `index` was clicked; returns `false` if
+    /// `index` is out of range. For the smoke test (synthetic mouse clicks don't drive
+    /// `NSPathCell`'s tracking loop reliably across macOS CI).
+    @discardableResult
+    public func clickPathBarComponent(at index: Int) -> Bool {
+        guard controller.pathURLs.indices.contains(index) else { return false }
+        controller.goToPathComponent(controller.pathURLs[index])
+        return true
+    }
+}

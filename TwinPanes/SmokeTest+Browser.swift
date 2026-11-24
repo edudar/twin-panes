@@ -47,6 +47,12 @@ extension SmokeTest {
         let count = 100_000
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("smoke-big-\(UUID().uuidString)", isDirectory: true)
+        let trashed = folder.deletingLastPathComponent()
+            .appendingPathComponent("trashed-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: folder)
+            try? FileManager.default.removeItem(at: trashed)
+        }
         let made = await Task.detached { Self.makeBigFolder(folder, files: count) }.value
         guard made else { return check(false, "create a 100k-file folder") }
         let before = browser.folder
@@ -83,6 +89,7 @@ extension SmokeTest {
             check(busy <= limit, "\(what) never keeps the main thread busy over \(limitText) ms")
         }
         let table = browser.preferredFirstResponder as? NSTableView
+        check(table != nil, "browser exposes its file list table")
 
         await gate("listing 100k files") {
             browser.go(to: folder)
@@ -144,8 +151,6 @@ extension SmokeTest {
             "outside creates, renames and deletes show up without a reload")
         // Deleting in Finder moves the folder to the Trash: one rename, not 100k unlinks
         // (those are a known stall, PLAN.md §9).
-        let trashed = folder.deletingLastPathComponent()
-            .appendingPathComponent("trashed-\(UUID().uuidString)", isDirectory: true)
         await gate("the shown 100k folder moved away") {
             // Off the main thread, as another app would: FileManager's move took 23-26 ms
             // of this thread's time on the dev Mac, counted against the tab.

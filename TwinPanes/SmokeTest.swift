@@ -94,6 +94,7 @@ struct SmokeTest {
         window.makeFirstResponder(browser.preferredFirstResponder)
         await hiddenFiles(check, browser: browser, window: window)
         lostRecentFile(check, in: folder)
+        openRecentMenu(check, in: folder)
         await packageContents(check, browser: browser, folder: folder, window: window)
         await bigFolder(check, browser: browser, window: window)
         var chain = FocusChain.scopes(in: window)
@@ -151,12 +152,17 @@ struct SmokeTest {
         }
 
         // The path field inside the browser: Tab must fall through to the key-view loop.
-        // The path bar (M4, D-h): its folders are shown; ⇧⌘G swaps in the editable field.
+        // The path bar (M4, D-h): its folders are shown; clicking a component navigates up
+        // and selects the child folder; ⇧⌘G swaps in the editable field.
         let bar = Self.view(in: browser.viewController.view, id: "browserPathBar") as? NSPathControl
         check(
             bar?.isHidden == false
                 && bar?.pathItems.last?.title == browser.folder.lastPathComponent,
             "the path bar shows the folder's path")
+        if let bar {
+            await clickPathBarParent(
+                check, bar: bar, browser: browser, table: table, folder: folder)
+        }
         if let path = Self.view(in: browser.viewController.view, id: "browserPath") {
             window.makeFirstResponder(browser.preferredFirstResponder)
             check(dispatch(KeyChord("g", [.command, .shift]), in: window), "⇧⌘G dispatched")
@@ -266,7 +272,8 @@ struct SmokeTest {
         return app.dispatcher.handle(event, in: window)
     }
 
-    /// ⌥⌘↓ enters a package, which otherwise lists as a file (M4, D-i).
+    /// ⌥⌘↓ enters a package, which otherwise lists as a file (M4, D-i); Return and F4
+    /// do not open it as a hex editor tab.
     private func packageContents(
         _ check: (Bool, String) -> Void, browser: BrowserItem, folder: URL, window: NSWindow
     ) async {
@@ -279,6 +286,17 @@ struct SmokeTest {
                 == true,
             "a package lists as a file")
         table?.selectRowIndexes([1], byExtendingSelection: false)
+        for (chord, label) in [(KeyChord.returnKey, "Return"), (.function(4), "F4")] {
+            check(dispatch(chord, in: window), "\(label) on a package dispatched")
+            if let sheet = window.attachedSheet {
+                window.endSheet(sheet)
+                await settle()
+            }
+            check(
+                browser.folder.lastPathComponent == "sub"
+                    && app.workspace.allItems.allSatisfy { !($0 is HexEditorItem) },
+                "\(label) does not open a package as a hex editor tab")
+        }
         let down = KeyChord(
             String(Character(UnicodeScalar(NSDownArrowFunctionKey)!)), [.command, .option])
         check(dispatch(down, in: window), "⌥⌘↓ dispatched")
@@ -286,6 +304,59 @@ struct SmokeTest {
         check(browser.folder.lastPathComponent == "Tool.app", "⌥⌘↓ shows the package's contents")
         browser.go(to: folder)
         await browser.listed()
+    }
+
+    /// Real `File › Open Recent` menu delegate populates items and disables Clear Menu
+    /// when empty (M4, D-g).
+    private func openRecentMenu(_ check: (Bool, String) -> Void, in folder: URL) {
+        guard
+            let menu = NSApp.mainMenu?.item(withTitle: "File")?.submenu?
+                .item(withTitle: "Open Recent")?.submenu
+        else { return check(false, "File › Open Recent submenu exists") }
+        check(menu.delegate === app.recentFiles, "Open Recent delegate is RecentFiles")
+        app.recentFiles.clear()
+        menu.delegate?.menuNeedsUpdate?(menu)
+        check(
+            menu.items.first?.title == "No Recent Files" && menu.items.first?.isEnabled == false,
+            "Open Recent shows disabled No Recent Files when empty")
+        check(
+            menu.items.last?.title == "Clear Menu" && menu.items.last?.isEnabled == false,
+            "Clear Menu is disabled when Open Recent is empty")
+        let file = folder.appendingPathComponent("recent-menu-\(UUID().uuidString).bin")
+        guard (try? Data([1]).write(to: file)) != nil else { return check(false, "write a recent") }
+        defer {
+            app.recentFiles.clear()
+            try? FileManager.default.removeItem(at: file)
+        }
+        app.recentFiles.note(file)
+        menu.delegate?.menuNeedsUpdate?(menu)
+        let entry = menu.items.first { $0.title == file.lastPathComponent }
+        check(
+            entry?.action == #selector(AppActions.openRecentFile(_:)),
+            "Open Recent populates an item for a noted file")
+        check(
+            menu.items.last?.title == "Clear Menu" && menu.items.last?.isEnabled == true,
+            "Clear Menu is enabled when Open Recent has items")
+    }
+
+    /// Clicking a path-bar component navigates up and selects the child folder (M4, D-h).
+    private func clickPathBarParent(
+        _ check: (Bool, String) -> Void, bar: NSPathControl, browser: BrowserItem,
+        table: NSTableView, folder: URL
+    ) async {
+        browser.go(to: folder.standardizedFileURL.appendingPathComponent("sub"))
+        await browser.listed()
+        let parentIndex = bar.pathItems.count - 2
+        check(
+            bar.target === browser.viewController && bar.action != nil && parentIndex >= 0
+                && bar.pathItems[parentIndex].title == folder.lastPathComponent,
+            "the path bar component is wired and matches the parent folder")
+        if browser.clickPathBarComponent(at: parentIndex) {
+            await browser.listed()
+        }
+        check(
+            browser.folder == folder.standardizedFileURL && table.selectedRow == 1,
+            "clicking a path-bar component goes up and selects the child folder")
     }
 
     /// A recent file that went away stays in Open Recent, offering to find it (M4, D-g).

@@ -263,6 +263,19 @@ final class IconCache {
         return cached?.image
     }
 
+    /// Read-only cache lookup for `entry`; never triggers `load` or custom-icon probing.
+    func cachedIcon(
+        for entry: DirectoryEntry, scale: CGFloat, appearance: NSAppearance.Name
+    ) -> NSImage? {
+        let path = entry.url.path
+        let usePath = entry.isApplication || customIcons[path] == true
+        let key = Key(
+            id: usePath ? path : entry.type.identifier, isPath: usePath, scale: scale,
+            appearance: appearance)
+        guard let cached = icons[key], cached.generation == generation else { return nil }
+        return cached.image
+    }
+
     private func probeCustomIcon(atPath path: String) {
         guard probingCustomIcons.insert(path).inserted else { return }
         let (wanted, box) = (generation, WeakIconCache(self))
@@ -588,20 +601,26 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
     }
 
-    /// True when every name cell on screen shows the icon for the table's current scale
-    /// and appearance (asking draws any that are missing). For tests and the smoke test.
+    /// True when at least one name cell is on screen and every one shows the cached icon
+    /// for the table's current scale and appearance, without triggering a load. For tests
+    /// and the smoke test.
     var shownIconsAreCurrent: Bool {
         let column = nameColumn
-        guard column >= 0 else { return true }
+        guard column >= 0 else { return false }
+        let scale = tableView.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let appearance = tableView.effectiveAppearance.name
+        var checked = 0
         var current = true
         tableView.enumerateAvailableRowViews { rowView, row in
             guard let cell = rowView.view(atColumn: column) as? FileCell,
                 let entry = entry(atRow: row)
             else { return }
-            let wanted = icon(for: entry)
+            checked += 1
+            let wanted = IconCache.shared.cachedIcon(
+                for: entry, scale: scale, appearance: appearance)
             if wanted == nil || cell.icon !== wanted { current = false }
         }
-        return current
+        return checked > 0 && current
     }
 
     /// A cell from the table's reuse queue, or a new one.
