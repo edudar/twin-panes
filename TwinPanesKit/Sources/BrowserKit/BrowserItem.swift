@@ -91,6 +91,9 @@ public final class BrowserItem: WorkspaceItem {
     var relistsStarted = 0
     /// Why the tab moved on its own, shown until the next navigation.
     var notice: String?
+    /// A restored tab's selection and notice, for its first listing.
+    var restoredSelection: String?
+    var restoredNotice: String?
     private var hasPending: Bool {
         !pendingBatch.isEmpty || pendingOrder != nil || pendingHidden != nil
             || !pendingRemovals.isEmpty || pendingReplacement != nil
@@ -226,11 +229,13 @@ public final class BrowserItem: WorkspaceItem {
         finishWaiting()
     }
 
-    /// The order the rows are in, or are being sorted into; it outlives navigation.
-    public private(set) var order = ListingOrder()
+    /// The order the rows are in, or are being sorted into; it outlives navigation. Set
+    /// directly only before the first listing (restoring); `sort(by:)` otherwise.
+    public internal(set) var order = ListingOrder()
 
-    /// Whether hidden files show in this tab (D-e); it outlives navigation.
-    public private(set) var showsHidden = false
+    /// Whether hidden files show in this tab (D-e); it outlives navigation. Set directly
+    /// only before the first listing (restoring); `showHidden(_:)` otherwise.
+    public internal(set) var showsHidden = false
 
     /// Shows or hides hidden files. The listing always holds them, so this only
     /// filters: nothing is listed again.

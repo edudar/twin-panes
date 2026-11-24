@@ -89,7 +89,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         super.viewDidLoad()
         guard let item else { return }
         if !item.hasListed {
-            item.go()
+            item.listFirstTime()
         } else {
             startShowing(selecting: nil)
             reloadKeepingSelection()
