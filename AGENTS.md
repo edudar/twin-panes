@@ -13,6 +13,24 @@ milestones). Read the relevant parts of PLAN.md before changing behaviour.
 When instructions conflict, the maintainer's instruction in the current task wins, then
 this file, then [docs/PLAN.md](docs/PLAN.md), then the patterns in existing code.
 
+## Task modes and scope
+
+- **Modes:**
+  - *Implement or fix:* follow the full workflow below (design, test-first, verify, stop
+    for approval).
+  - *Review:* read-only unless asked to edit. Check claims against the code and by
+    running tests rather than speculating.
+  - *Question or explain:* read-only; make no edits.
+  - *Docs-only:* edit documentation only; skip builds and tests.
+- **Scope control:** touch only what the task requires. Don't reformat untouched files or
+  refactor nearby code; note pre-existing issues in your summary instead. Ask before
+  adding external SwiftPM dependencies, changing entitlements, weakening the sandbox, or
+  changing behaviour not covered by [docs/PLAN.md](docs/PLAN.md).
+- **Ambiguity:** stop and ask when instructions conflict, scope is unclear, or a change
+  alters user-visible behaviour not settled in [docs/PLAN.md](docs/PLAN.md). For minor
+  implementation choices within the plan, pick the plain option and state the assumption
+  in your handoff.
+
 ## How to write code
 
 1. **Interface first, then tests, then implementation.** Define the types, protocols and
@@ -29,7 +47,8 @@ this file, then [docs/PLAN.md](docs/PLAN.md), then the patterns in existing code
      `docs/plans/M3a.md`): context, decisions, behaviour, the commit sequence and how
      it's verified.
    - A review's fix list is saved as `docs/reviews/<topic>.md`: the findings, their
-     severity, and the commit sequence that fixes them.
+     severity (P0–P3, defined in "Code review" below), and the commit sequence that
+     fixes them.
    - Keep the file true while the work is in progress (status line, changed steps).
      Once the work is done the file is frozen; PLAN.md's "As built" notes are the
      record. The one later edit allowed is adding a link to a review in `docs/reviews/`
@@ -109,6 +128,41 @@ delegate method), and APIs modelled on the standard library may follow its shape
 Before handing back a change, check its diff against this list and fix what it
 breaks, or say why you didn't.
 
+## Concurrency, UI and performance
+
+- **Concurrency (Swift 6 strict, PLAN.md §3):** all AppKit and view state is `@MainActor`.
+  Keep blocking I/O (file reads, coordination, saves, directory listing, icon rendering)
+  and large-collection work off the main actor on bounded background queues or I/O pools.
+  Pass immutable `Sendable` snapshots or values across actor boundaries. Shared caches
+  read during `draw(_:)` use synchronous lock-protected APIs (such as `Mutex`), not
+  actors, because drawing cannot `await`.
+- **UI conventions:** AppKit-native single main frame (D7). Route user actions through
+  the command registry and responder chain (D21). Support Light and Dark Mode with
+  semantic `NSColor`s and redraw when appearance changes. Never block the main actor in
+  drawing or layout. Accessibility (VoiceOver) and localization are out of scope for now
+  (D19), but keep view state separable so they can be added later.
+- **Performance:** measure before optimizing (code-design rule 1) and record before/after
+  numbers in the plan or commit message. Respect the 4 GB and 100k-row constraints
+  (PLAN.md §3): O(1) file open, bounded memory, and no work scaling with total file or
+  folder size on the main thread.
+
+## Code review
+
+Judge changes against "Code design", [docs/PLAN.md](docs/PLAN.md) constraints,
+concurrency and sandbox safety, and test coverage.
+
+- **Severity scale** (also used in `docs/reviews/<topic>.md` and fix plans):
+  - **P0 (Critical):** data loss, crash, security or sandbox breach, or data
+    race/corruption. Blocks commit/merge.
+  - **P1 (High):** broken behaviour, main-thread stall, leak, or missing error handling on
+    a real path. Blocks commit/merge.
+  - **P2 (Medium):** edge-case bug, missing test for non-trivial logic, or clear
+    design-rule violation in new code. Fix before closing the milestone.
+  - **P3 (Low):** clarity, naming, minor cleanup, or non-blocking polish.
+- **Findings format:** cite `file:line`, severity, what fails (or which rule is broken),
+  and a concrete fix. Verify suspected issues in the code or with a test instead of
+  guessing. Separate pre-existing issues from issues introduced by the diff.
+
 ## Verifying
 
 After every change to code, tests, build settings or the project file — and before
@@ -154,6 +208,14 @@ step does.
   `UserDefaults` suite inside a temp folder), nothing in the Trash, temp folders removed.
 - Don't keep tests that can't fail (constants checked against themselves, sandbox checks
   under the unsandboxed `swift test`); move such checks into the smoke test.
+- **Test frameworks (D22):** use Swift Testing (`import Testing`, `@Test`, `#expect`) for
+  logic tests; use XCTest (`import XCTest`) for `measure` performance tests and UI tests.
+- **No flaky timing tests:** avoid wall-clock sleeps and fixed wall-time thresholds in
+  tests. Use deterministic synchronization (signals, continuations, injected seams) or
+  calibrated/CPU-time gates for stall checks.
+- **Honest reporting:** never claim a check passed unless you ran it after your final edit
+  and saw it pass. If a check could not run or was skipped (for example, sandbox limits,
+  no GUI, or a docs-only change), state which check was skipped and why.
 
 ## Commits and pushing
 
@@ -172,7 +234,18 @@ step does.
   only to keep one logical change together, and **350 is the hard limit**. Split
   larger work into a sequence of commits.
 - Never commit failing or disabled tests.
-- Commit messages: a short subject, then a body saying what changed and why.
+- **Commit messages:** short imperative subject or `<Area>: <subject>` (for example
+  `Core:`, `BrowserKit:`, `Smoke:`, `Tests:`, `Docs:`, `Plans:`), plain text without
+  emoji, then a body saying what changed and why.
+- **Git safety:** work on `main` unless asked to use a branch. Never force-push, rewrite
+  or amend pushed history, or run destructive commands (`git reset --hard`,
+  `git checkout -- .`, `git clean -fd`) without explicit approval. Stage only the files
+  belonging to your change (`git add <paths>`); never use `git add -A` or `git commit -a`
+  so unrelated or parallel work in the tree is left untouched.
+- **Handoff summary:** when handing back a change or stopping for approval, briefly
+  report: (1) what changed and why, (2) verification results (exact checks run or
+  skipped and why), (3) assumptions made or deviations from these rules, and
+  (4) pre-existing issues noticed outside scope.
 
 ## Documentation
 
@@ -192,3 +265,6 @@ step does.
     CI, or module/source layout change.
 - **Public repository hygiene:** never include personal file names or other private details
   in docs or commits (describe test files by folder, not by name).
+- **Style:** keep prose concise and plain (no emoji), wrap Markdown lines at ~90–95
+  characters, and cite [docs/PLAN.md](docs/PLAN.md) decisions by ID or section (for
+  example `D38`, `§4.7`).
