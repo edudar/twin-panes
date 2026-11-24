@@ -99,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenu.build(updater: menuUpdater, recentFiles: recentFiles)
         if let child = SmokeChild(arguments: CommandLine.arguments) {
-            child.run()
+            child.run(app: self)
             return
         }
         if CommandLine.arguments.contains("--smoke-test") {

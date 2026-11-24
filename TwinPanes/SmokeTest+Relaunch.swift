@@ -44,3 +44,51 @@ extension SmokeTest {
         return (nil, "no report within 20 s")
     }
 }
+
+extension SmokeTest {
+    /// Step 13 of docs/plans/M5.md (D-f, 1): a window comes back after a relaunch with
+    /// its panels, tabs, folders, history, sort order, hidden files and editor view.
+    func restoreRelaunch(_ check: (Bool, String) -> Void) async {
+        let fm = FileManager.default
+        let folder = fm.temporaryDirectory
+            .appendingPathComponent("smoke-restore-\(UUID().uuidString)", isDirectory: true)
+            .resolvingSymlinksInPath()
+        defer { try? fm.removeItem(at: folder) }
+        do {
+            for path in ["a/inner", "b"] {
+                try fm.createDirectory(
+                    at: folder.appendingPathComponent(path), withIntermediateDirectories: true)
+            }
+            try Data([1]).write(to: folder.appendingPathComponent(".hidden"))
+            try Data((0..<4096).map { UInt8($0 % 256) })
+                .write(to: folder.appendingPathComponent("data.bin"))
+        } catch {
+            return check(false, "create the restore relaunch's folder: \(error)")
+        }
+        let (saved, saveOutcome) = await launchChild("restore-save", in: folder)
+        guard saved != nil else {
+            return check(false, "the first launch saves its window (\(saveOutcome))")
+        }
+        let (loaded, loadOutcome) = await launchChild("restore-load", in: folder)
+        guard let shown = loaded?.shown else {
+            return check(false, "the second launch restores the window (\(loadOutcome))")
+        }
+        print("  info restored window: \(shown)")
+        check(
+            shown.leftTabs == ["a"] && shown.rightTabs == ["b", "data.bin"]
+                && shown.activePanel == "rightPanel",
+            "a relaunch brings back both panels' tabs and the active panel")
+        check(
+            shown.leftFolder == folder.appendingPathComponent("a").path
+                && shown.leftSelection == "inner"
+                && shown.leftCanGoBack && shown.leftCanGoForward,
+            "and the browser's folder, selection and history")
+        check(
+            shown.leftSort == "size down" && shown.leftShowsHidden,
+            "and its sort order and hidden files")
+        check(
+            shown.editorFile == "data.bin" && shown.editorSelection == [100, 120]
+                && shown.editorBytesPerRow == "fixed(8)" && shown.editorIsDirty == false,
+            "and the editor, through its bookmark, with its view and no edits")
+    }
+}

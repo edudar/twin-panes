@@ -17,6 +17,9 @@ extension BrowserItem {
             folder: folder, selected: controller.selectedName ?? controller.namesToKeep.first)
     }
 
+    /// The name of the selected row, if one is selected.
+    public var selectedName: String? { controller.selectedName }
+
     public var canGoBack: Bool { !backStack.isEmpty }
     public var canGoForward: Bool { !forwardStack.isEmpty }
 
