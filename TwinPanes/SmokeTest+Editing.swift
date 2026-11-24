@@ -195,9 +195,11 @@ extension SmokeTest {
             hex.title == copy.lastPathComponent && !hex.isDirty
                 && (try? Data(contentsOf: copy))?[0x21] == 0x11,
             "Save As writes the new file and the tab follows it")
-        check(
-            app.recentFiles.entries.contains { $0.url.lastPathComponent == copy.lastPathComponent },
-            "the new file is a recent file")
+        let isRecent = app.recentFiles.entries.contains {
+            $0.url.lastPathComponent == copy.lastPathComponent
+        }
+        check(isRecent, "the new file is a recent file")
+        if !isRecent { Self.printWhyNotRecent(copy, in: app.recentFiles) }
 
         // Closing with unsaved edits: the real close sheet, and its Save button.
         type("22", in: window)
@@ -443,6 +445,29 @@ private final class SearchState: Sendable {
                 return false
             }
             if ready { continuation.resume() }
+        }
+    }
+}
+
+extension SmokeTest {
+    /// Why a saved file didn't become a recent file: its bookmark couldn't be made, it
+    /// was made but doesn't resolve, or it resolves to another path.
+    static func printWhyNotRecent(_ url: URL, in recents: RecentFiles) {
+        print("       looking for \(url.path)")
+        print(
+            "       recent: \(recents.entries.map(\.url.path)); lost: \(recents.lost.map(\.path))")
+        do {
+            let data = try url.bookmarkData(
+                options: [.withSecurityScope], includingResourceValuesForKeys: nil,
+                relativeTo: nil)
+            var stale = false
+            let resolved = try URL(
+                resolvingBookmarkData: data,
+                options: [.withSecurityScope, .withoutUI, .withoutMounting],
+                relativeTo: nil, bookmarkDataIsStale: &stale)
+            print("       its bookmark resolves to \(resolved.path) (stale: \(stale))")
+        } catch {
+            print("       its bookmark fails: \(error)")
         }
     }
 }
