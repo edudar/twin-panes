@@ -35,8 +35,11 @@ swift test --package-path TwinPanesKit
 The smoke test drives the built app. It opens two windows, browses a real
 folder, and opens a 4 GiB sparse file to check open time, frame time and memory.
 It also creates a 100,000-file folder and fails if listing, sorting, filtering,
-scrolling or live-updating it ever stalls the main thread for longer than its limit
-(each step prints its worst gap). The limit is 50 ms on the dev Mac, scaled to the
+scrolling or live-updating it ever keeps the main thread busy for longer than its
+limit between two 5 ms heartbeats. It counts the main thread's CPU time in each gap,
+not the gap itself: on a shared CI machine the thread can wait for a core for longer
+than any stall the app causes. Each step prints its longest gap and its busiest one,
+and what ran during a busiest gap over the limit. The limit is 50 ms on the dev Mac, scaled to the
 machine: the smoke test first times two fixed workloads, drawing and sorting names, and
 building a screenful of table rows. A Mac that runs either slower gets a
 proportionally longer limit, set by the slower of the two, up to 4 times (200 ms). It

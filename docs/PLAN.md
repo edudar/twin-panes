@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.23 (2026-11-23). Living document; requirements will keep growing.
+Status: draft v0.24 (2026-11-23). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -1102,10 +1102,16 @@ byte histogram.
     (7.5 ms), because on macOS 26 and 15 the failing gaps were a folder's first rows,
     and AppKit's per-row setup (a layout pass and the key-view loop for each new row)
     couldn't be made cheaper: lighter cells, reused cells and skipping the early
-    layout were measured and saved nothing overall. If CI still fails, its
-    printed factor and the slowest steps say whether the workload under-measures a
-    GPU-less runner or the step is truly slow (macOS 15's 362 ms listing gap had no
-    timed step in it).
+    layout were measured and saved nothing overall. With that, macOS 15 passed, but
+    macOS 27 and 26 still failed 2–4 steps at 78–149 ms, and their step reports
+    showed the main thread waiting rather than working (a cell's setup 11.5 ms on the
+    clock, 0.1 ms on the CPU; a 149 ms gap holding 2 ms of timed CPU work). The
+    runners' speed also changed between runs (the drawing workload 109 ms in one run,
+    74 in the next). So the gate now counts the main thread's CPU time in each gap
+    between heartbeats, not the gap itself: work the app does on the main thread, not
+    time the machine didn't give it. A gap far over the limit with little CPU time is
+    printed but doesn't fail; the cost is that a stall where the main thread blocks
+    (on a lock or the disk) isn't caught by this gate.
   - *Volumes in the sidebar* and the global hidden-files default: M5 and M10.
   - *External volumes by hand*: granting a whole drive and a renamed volume asking
     again aren't automated (they need real drives), like the M3c volume spike.
