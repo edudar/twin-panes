@@ -108,19 +108,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         // Files from Finder's Open With may already have opened a window.
         if windowControllers.isEmpty { openMainWindow() }
-        recoverCrashedSessions()
+        let unclaimed = launchRecovery?.takeUnclaimed { self.editorItem(showing: $0) != nil }
+        showRecovered(unclaimed ?? [])
+        launchRecovery = nil
         NSApp.activate()
     }
+
+    /// Crash recovery runs before AppKit restores windows, so a restored editor tab on a
+    /// recovered file gets its session, edits and all (docs/plans/M5.md, D-c). The smoke
+    /// test runs recovery itself, on its own folders.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard !Self.isIsolatedRun else { return }
+        launchRecovery = LaunchRecovery(crashedSessions(), registry: sessions)
+    }
+
+    /// Holds the sessions recovered at launch until restored tabs have claimed theirs.
+    private var launchRecovery: LaunchRecovery?
 
     /// Reopens, as dirty tabs, the sessions that crashed with unsaved edits, and deletes
     /// the folders of sessions that closed (docs/plans/M3c.md, D-f). A folder that can't
     /// be recovered stays for the next launch.
     @discardableResult
     func recoverCrashedSessions(in root: URL = SessionFolder.defaultRoot) -> [HexEditorItem] {
+        let found = crashedSessions(in: root)
+        for session in found { sessions.adopt(session) }
+        return showRecovered(found)
+    }
+
+    private func crashedSessions(in root: URL = SessionFolder.defaultRoot) -> [EditorSession] {
         SessionFolder.sweep(root).compactMap { folder in
+            // A folder that can't be read stays for the next launch, as the sweep says.
             guard let session = try? EditorSession(recovering: folder) else { return nil }
-            sessions.adopt(session)
             session.startWatching()
+            return session
+        }
+    }
+
+    @discardableResult
+    private func showRecovered(_ recovered: [EditorSession]) -> [HexEditorItem] {
+        recovered.map { session in
             let item = HexEditorItem(session: session)
             item.didSaveAs = { [weak self] url in self?.recentFiles.note(url) }
             show(item)
