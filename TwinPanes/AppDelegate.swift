@@ -17,15 +17,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             await self?.presentCloseSaveError(error, session: session)
         })
     lazy var spike = SandboxSpike(app: self)
-    let recentFiles: RecentFiles =
+    private static var isIsolatedRun: Bool {
         ["--smoke-test", "--bench"].contains(where: CommandLine.arguments.contains)
-        ? .isolated() : RecentFiles()
+    }
+
+    let recentFiles: RecentFiles = isIsolatedRun ? .isolated() : RecentFiles()
     /// One session per open file (docs/plans/M3b.md, D-a).
     let sessions = SessionRegistry(sessionsRoot: SessionFolder.defaultRoot)
 
     private(set) var windowControllers: [MainWindowController] = []
     private var editorCount = 0
-    let folderGrants = FolderGrants()
+    private let isolatedGrantsFolder: URL?
+    private let isolatedGrantsSuite: String?
+    let folderGrants: FolderGrants
+
+    override init() {
+        if Self.isIsolatedRun {
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("smoke-grants-\(UUID().uuidString)", isDirectory: true)
+                .resolvingSymlinksInPath()
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let suite = dir.appendingPathComponent("defaults").path
+            guard let defaults = UserDefaults(suiteName: suite) else {
+                preconditionFailure("Unable to create isolated UserDefaults suite at \(suite)")
+            }
+            isolatedGrantsFolder = dir
+            isolatedGrantsSuite = suite
+            folderGrants = FolderGrants(defaults: defaults)
+        } else {
+            isolatedGrantsFolder = nil
+            isolatedGrantsSuite = nil
+            folderGrants = FolderGrants()
+        }
+        super.init()
+    }
 
     // MARK: Lifecycle
 
@@ -63,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Finder "Open With", dropping files on the Dock icon, `open -a`.
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls { openFile(url) }
+        openURLs(urls, in: nil)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -83,6 +108,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// look like a crash at the next launch.
     func applicationWillTerminate(_ notification: Notification) {
         for session in sessions.sessions { session.close() }
+        if let isolatedGrantsSuite {
+            UserDefaults().removePersistentDomain(forName: isolatedGrantsSuite)
+        }
+        if let isolatedGrantsFolder {
+            try? FileManager.default.removeItem(at: isolatedGrantsFolder)
+        }
     }
 
     /// Quitting waits for saves that are running, then runs the same close workflow as
@@ -192,13 +223,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Handles items dropped onto `controller`: folders open in a browser tab (and save
     /// their grant); regular files open in a hex editor tab.
     func openDropped(_ urls: [URL], in controller: MainWindowController) {
+        openURLs(urls, in: controller)
+    }
+
+    private func openURLs(_ urls: [URL], in target: MainWindowController?) {
         for url in urls {
-            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+            let resolved = url.resolvingSymlinksInPath()
+            let values = try? resolved.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
             if values?.isDirectory == true, values?.isPackage != true {
-                try? folderGrants.add(url)
-                show(makeBrowser(at: url), in: controller)
+                try? folderGrants.add(resolved)
+                show(makeBrowser(at: resolved), in: target)
             } else {
-                openFile(url, in: controller)
+                openFile(resolved, in: target)
             }
         }
     }
@@ -251,6 +287,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard let data = (sender as? NSMenuItem)?.representedObject as? Data else { return }
         if let (url, scope) = recentFiles.open(data) {
             openFile(url, scope: scope)
+        } else if let path = URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: data)?.path {
+            locateRecentFile(at: URL(fileURLWithPath: path))
         } else {
             NSSound.beep()
         }
@@ -260,6 +298,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// it was; the file they pick replaces the old entry.
     @objc func locateRecentFile(_ sender: Any?) {
         guard let lost = (sender as? NSMenuItem)?.representedObject as? URL else { return }
+        locateRecentFile(at: lost)
+    }
+
+    private func locateRecentFile(at lost: URL) {
         var folder = lost.deletingLastPathComponent()
         while folder.path != "/", !FileManager.default.fileExists(atPath: folder.path) {
             folder = folder.deletingLastPathComponent()
@@ -269,10 +311,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             "“\(lost.lastPathComponent)” was moved or renamed. Find it to open it again."
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
+        panel.treatsFilePackagesAsDirectories = true
         panel.directoryURL = folder
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        recentFiles.forget(lost)
-        openFile(url)
+        guard openFile(url) != nil else { return }
+        if url.resolvingSymlinksInPath() != lost.resolvingSymlinksInPath() {
+            recentFiles.forget(lost)
+        }
     }
 
     @objc func clearRecentFiles(_ sender: Any?) {
