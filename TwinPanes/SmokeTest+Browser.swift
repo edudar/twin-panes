@@ -138,7 +138,10 @@ extension SmokeTest {
         let trashed = folder.deletingLastPathComponent()
             .appendingPathComponent("trashed-\(UUID().uuidString)", isDirectory: true)
         await gate("the shown 100k folder moved away") {
-            try? FileManager.default.moveItem(at: folder, to: trashed)
+            // Off the main thread, as another app would: FileManager's move took 23-26 ms
+            // of this thread's time on the dev Mac, counted against the tab.
+            await Task.detached { try? FileManager.default.moveItem(at: folder, to: trashed) }
+                .value
             await waitFor { browser.folder.path != folder.standardizedFileURL.path }
             await browser.listed()
         }

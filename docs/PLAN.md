@@ -1111,7 +1111,10 @@ byte histogram.
     between heartbeats, not the gap itself: work the app does on the main thread, not
     time the machine didn't give it. A gap far over the limit with little CPU time is
     printed but doesn't fail; the cost is that a stall where the main thread blocks
-    (on a lock or the disk) isn't caught by this gate.
+    (on a lock or the disk) isn't caught by this gate. The heaviest step left everywhere was
+    leaving a 100k folder that moved away, and 23–26 ms of it (dev Mac) was the
+    smoke test's own `FileManager.moveItem` on the main thread; it now moves the
+    folder off it, as another app would.
   - *Volumes in the sidebar* and the global hidden-files default: M5 and M10.
   - *External volumes by hand*: granting a whole drive and a renamed volume asking
     again aren't automated (they need real drives), like the M3c volume spike.
