@@ -2,11 +2,20 @@ import AppKit
 
 /// Per-panel tab bar in the style of Safari's: capsule tabs that share the bar's width,
 /// each with a close button on the left (shown on hover and on the selected tab), the
-/// item's icon and its title. Dragging tabs and overflow menus come in M5.
+/// item's icon and its title. Tabs are dragged within the bar and onto the other
+/// panel's (docs/plans/M5.md, D-b); overflow menus come later.
 @MainActor
 final class TabBarView: NSView {
     var onSelect: ((ItemID) -> Void)?
     var onClose: ((ItemID) -> Void)?
+    /// Whether a dragged tab may be dropped here.
+    var canDrop: ((ItemID) -> Bool)?
+    /// A tab was dropped at an index into the tabs as shown during the drag.
+    var onDrop: ((ItemID, Int) -> Void)?
+    /// Where the dragged tab would land, drawn as a line between tabs.
+    private var dropIndicatorX: CGFloat? {
+        didSet { needsDisplay = true }
+    }
 
     private let stack = NSStackView()
     static let height: CGFloat = 34
@@ -30,6 +39,7 @@ final class TabBarView: NSView {
             heightAnchor.constraint(equalToConstant: Self.height),
         ])
         setAccessibilityRole(.tabGroup)
+        registerForDraggedTypes([.workspaceTab])
     }
 
     @available(*, unavailable)
@@ -38,6 +48,55 @@ final class TabBarView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor.separatorColor.setFill()
         NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
+        if let dropIndicatorX {
+            NSColor.controlAccentColor.setFill()
+            NSRect(x: dropIndicatorX - 1, y: 5, width: 2, height: bounds.height - 10).fill()
+        }
+    }
+
+    // MARK: Dropping tabs
+
+    private var tabFrames: [NSRect] {
+        stack.arrangedSubviews.map { convert($0.frame, from: stack) }
+    }
+
+    private func draggedTab(_ info: NSDraggingInfo) -> ItemID? {
+        guard let item = info.draggingPasteboard.pasteboardItems?.first else { return nil }
+        return ItemID(draggedTab: item)
+    }
+
+    private func insertion(for info: NSDraggingInfo) -> Int {
+        let x = convert(info.draggingLocation, from: nil).x
+        return tabInsertionIndex(at: x, tabCentres: tabFrames.map(\.midX))
+    }
+
+    private func indicatorX(at insertion: Int) -> CGFloat {
+        let frames = tabFrames
+        if insertion < frames.count { return frames[insertion].minX - 2 }
+        return (frames.last?.maxX ?? 4) + 2
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingUpdated(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let id = draggedTab(sender), canDrop?(id) == true else {
+            dropIndicatorX = nil
+            return []
+        }
+        dropIndicatorX = indicatorX(at: insertion(for: sender))
+        return .move
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) { dropIndicatorX = nil }
+    override func draggingEnded(_ sender: NSDraggingInfo) { dropIndicatorX = nil }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        dropIndicatorX = nil
+        guard let id = draggedTab(sender), canDrop?(id) == true else { return false }
+        onDrop?(id, insertion(for: sender))
+        return true
     }
 
     /// `canClose` says which tabs get a close button.
@@ -60,9 +119,9 @@ final class TabBarView: NSView {
     }
 }
 
-/// One tab: a capsule that highlights when selected or hovered.
+/// One tab: a capsule that highlights when selected or hovered, and that can be dragged.
 @MainActor
-final class TabItemView: NSView {
+final class TabItemView: NSView, NSDraggingSource {
     let id: ItemID
     let isSelected: Bool
     let isActivePanel: Bool
@@ -179,7 +238,45 @@ final class TabItemView: NSView {
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
 
-    override func mouseDown(with event: NSEvent) { onSelect?(id) }
+    /// A click on a tab in a background window selects it, as in Finder and Safari.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// Selects on mouse-up, or starts a drag once the mouse moves. Selecting rebuilds the
+    /// tab bar's views, so it can't happen on mouse-down: this view must still be there
+    /// to start the drag.
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        let start = event.locationInWindow
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            if next.type == .leftMouseUp {
+                onSelect?(id)
+                return
+            }
+            let moved = hypot(next.locationInWindow.x - start.x, next.locationInWindow.y - start.y)
+            if moved > 3 {
+                startDragging(with: event)
+                return
+            }
+        }
+    }
+
+    private func startDragging(with event: NSEvent) {
+        let item = NSDraggingItem(pasteboardWriter: id.draggedTab)
+        let snapshot = bitmapImageRepForCachingDisplay(in: bounds).map { rep in
+            cacheDisplay(in: bounds, to: rep)
+            let image = NSImage(size: bounds.size)
+            image.addRepresentation(rep)
+            return image
+        }
+        item.setDraggingFrame(bounds, contents: snapshot)
+        beginDraggingSession(with: [item], event: event, source: self)
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        context == .withinApplication ? .move : []
+    }
 
     /// Middle-click closes, as in Safari.
     override func otherMouseDown(with event: NSEvent) {

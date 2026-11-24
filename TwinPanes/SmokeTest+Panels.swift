@@ -69,6 +69,21 @@ extension SmokeTest {
             layout.items(in: .rightPanel).count == 1 && replacement?.folder == left.folder,
             "closing a panel's last editor leaves a browser at the other panel's folder")
 
+        // A tab is selected on mouse-up, so that a drag can start from it (step 5).
+        let editor = app.makeEditorSession().makeView()
+        layout.insert(editor, in: .leftPanel)
+        window.layoutIfNeeded()
+        let leftTab = Self.view(in: content, id: SlotID.leftPanel.rawValue).flatMap {
+            Self.tab(titled: left.title, in: $0)
+        }
+        if let leftTab { click(leftTab, in: window) }
+        await settle()
+        check(
+            leftTab != nil && layout.selectedItem(in: .leftPanel) === left,
+            "clicking a tab selects it")
+        controller.frameController.closeItem(editor.id)
+        await settle()
+
         // Window › Move Tab to Other Panel moves the same item (D-b).
         guard let moveTab = app.registry.command(.moveTabToOtherPanel) else {
             return check(false, "Move Tab to Other Panel is a command")
@@ -90,7 +105,9 @@ extension SmokeTest {
     /// Clicks the middle of `view`'s visible part with real mouse events. The mouse-up is
     /// queued first: a table's mouse-down tracks the mouse until it sees one.
     func click(_ view: NSView, in window: NSWindow) {
-        let visible = view.visibleRect
+        // Views don't clip to their bounds since macOS 14, so the visible rect can reach
+        // past them.
+        let visible = view.visibleRect.intersection(view.bounds)
         let point = view.convert(NSPoint(x: visible.midX, y: visible.midY), to: nil)
         func event(_ type: NSEvent.EventType) -> NSEvent? {
             NSEvent.mouseEvent(
@@ -102,5 +119,13 @@ extension SmokeTest {
         guard let down = event(.leftMouseDown), let up = event(.leftMouseUp) else { return }
         NSApp.postEvent(up, atStart: false)
         window.sendEvent(down)
+    }
+
+    /// The tab titled `title`: tabs are radio buttons labelled with their item's title.
+    static func tab(titled title: String, in root: NSView) -> NSView? {
+        if root.accessibilityRole() == .radioButton && root.accessibilityLabel() == title {
+            return root
+        }
+        return root.subviews.lazy.compactMap { tab(titled: title, in: $0) }.first
     }
 }

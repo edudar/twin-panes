@@ -4,6 +4,7 @@ import AppKit
 public struct ItemID: Hashable, Sendable, CustomStringConvertible {
     public let rawValue: UUID
     public init() { rawValue = UUID() }
+    init(rawValue: UUID) { self.rawValue = rawValue }
     public var description: String { rawValue.uuidString }
 }
 

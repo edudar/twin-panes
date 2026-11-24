@@ -217,6 +217,25 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         return (item, other)
     }
 
+    // MARK: Dragging tabs
+
+    /// Whether a dragged tab can land on `slot`'s tab bar: it's from this window and the
+    /// layout lets it go there. Tabs from other windows wait for M11.
+    func canDropTab(_ id: ItemID, in slot: SlotID) -> Bool {
+        layout.item(id) != nil && layout.canMove(id, to: slot)
+    }
+
+    /// Moves a dropped tab into `slot` at `insertion`, an index into the slot's tabs as
+    /// the tab bar shows them during the drag, with the dragged tab still in its place.
+    func dropTab(_ id: ItemID, in slot: SlotID, at insertion: Int) {
+        guard canDropTab(id, in: slot) else { return }
+        // `move` takes the tab out before putting it back, so a tab moving right
+        // within its own bar lands one place earlier than the bar's index.
+        let current = layout.items(in: slot).firstIndex { $0.id == id }
+        let index = current.map { $0 < insertion ? insertion - 1 : insertion } ?? insertion
+        layout.move(id, to: slot, at: index)
+    }
+
     @objc public func selectNextTab(_ sender: Any?) { layout.selectAdjacentTab(1) }
     @objc public func selectPreviousTab(_ sender: Any?) { layout.selectAdjacentTab(-1) }
 
@@ -281,6 +300,14 @@ final class SlotViewController: NSViewController, CommandScopeProviding {
         root.setAccessibilityIdentifier(slot.rawValue)
         tabBar.onSelect = { [weak self] id in self?.frame?.layout.select(id) }
         tabBar.onClose = { [weak self] id in self?.frame?.closeItem(id) }
+        tabBar.canDrop = { [weak self] id in
+            guard let self, let frame else { return false }
+            return frame.canDropTab(id, in: slot)
+        }
+        tabBar.onDrop = { [weak self] id, insertion in
+            guard let self else { return }
+            frame?.dropTab(id, in: slot, at: insertion)
+        }
         view = root
     }
 
