@@ -9,14 +9,16 @@ public struct ItemID: Hashable, Sendable, CustomStringConvertible {
 }
 
 /// What kind of item this is. Used for command scopes ("item.<kind>") and icons.
-public struct ItemKind: RawRepresentable, Hashable, Sendable, ExpressibleByStringLiteral {
+public struct ItemKind: RawRepresentable, Hashable, Sendable, Codable,
+    ExpressibleByStringLiteral
+{
     public let rawValue: String
     public init(rawValue: String) { self.rawValue = rawValue }
     public init(stringLiteral value: String) { rawValue = value }
 }
 
 /// Where in the main frame an item lives (PLAN.md §4.8).
-public enum SlotID: String, Hashable, Sendable, CaseIterable {
+public enum SlotID: String, Hashable, Sendable, CaseIterable, Codable {
     case leftPanel
     case rightPanel
     case preview
@@ -69,6 +71,10 @@ public protocol WorkspaceItem: AnyObject {
     /// Set by the main frame while the item is hosted.
     var host: WorkspaceHost? { get set }
 
+    /// What to save so the item comes back after a relaunch (docs/plans/M5.md, D-c);
+    /// nil leaves it out.
+    var restorableState: ItemState? { get }
+
     /// Called by the item when its title or dirty state changes.
     var onChange: (() -> Void)? { get set }
 
@@ -95,6 +101,7 @@ public protocol WorkspaceItem: AnyObject {
 
 extension WorkspaceItem {
     public var sessionKey: AnyHashable? { nil }
+    public var restorableState: ItemState? { nil }
     public var isDirty: Bool { false }
     public var canSave: Bool { true }
     public var isSaving: Bool { false }

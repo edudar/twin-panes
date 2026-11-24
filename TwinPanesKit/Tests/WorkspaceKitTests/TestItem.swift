@@ -11,6 +11,7 @@ final class TestItem: WorkspaceItem {
     let session: TestSession?
     var ownDirty = false
     var canSave = true
+    var restorableState: ItemState?
     private(set) var closes = 0
     weak var host: WorkspaceHost?
     var onChange: (() -> Void)?
