@@ -57,12 +57,12 @@ import Testing
     @Test func theFastestOnTheCPUIgnoresWaiting() {
         let waiting = StallLimit.fastestOnCPU(of: 2) { Thread.sleep(forTimeInterval: 0.03) }
         #expect(waiting < .milliseconds(10))
+        // Work until the thread has used 20 ms of CPU, however long a busy machine
+        // takes to give it that.
         let working = StallLimit.fastestOnCPU(of: 2) {
-            let end = ContinuousClock.now + .milliseconds(20)
-            var spins = 0
-            while ContinuousClock.now < end { spins &+= 1 }
-            #expect(spins > 0)
+            let end = GapMeter.threadCPU() + .milliseconds(20)
+            while GapMeter.threadCPU() < end {}
         }
-        #expect(working > .milliseconds(10))
+        #expect(working >= .milliseconds(20))
     }
 }
