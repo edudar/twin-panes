@@ -50,7 +50,9 @@ import Testing
         defer { cleanUp() }
         let (outcome, reports) = run()
         #expect(outcome.failures.isEmpty && !outcome.wasCancelled)
-        #expect(outcome.created.map(\.path) == [copy.path])
+        #expect(outcome.created.map(\.copy.path) == [copy.path])
+        #expect(outcome.created.first?.source.path == tree.path)
+        #expect(outcome.finished.count == 6 && outcome.finished["tree/sub/b.bin"] != nil)
         #expect(try Data(contentsOf: copy.appendingPathComponent("sub/c.bin")).count == 7)
         #expect(
             try FileManager.default.destinationOfSymbolicLink(

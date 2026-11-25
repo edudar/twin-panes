@@ -74,13 +74,14 @@ import Testing
         defer { cleanUp() }
         let (outcome, _) = copy(["a.txt"], answers: [ConflictAnswer(.skip)])
         #expect(read("dest/a.txt") == "old" && outcome.created.isEmpty)
+        #expect(outcome.finished.isEmpty)
     }
 
     @Test func keepBothCopiesUnderTheNextName() {
         defer { cleanUp() }
         let (outcome, _) = copy(["a.txt"], answers: [ConflictAnswer(.keepBoth)])
         #expect(read("dest/a.txt") == "old" && read("dest/a 2.txt") == "new")
-        #expect(outcome.created.map(\.lastPathComponent) == ["a 2.txt"])
+        #expect(outcome.created.map(\.copy.lastPathComponent) == ["a 2.txt"])
     }
 
     @Test func mergeGoesIntoTheFolderAndAsksPerItem() {
@@ -93,7 +94,7 @@ import Testing
         #expect(read("dest/docs/z.txt") == "old z")
         // Undo trashes what the merge added (the replacing x.txt too, before putting the
         // old one back), not the folder that was there.
-        #expect(outcome.created.map(\.lastPathComponent) == ["x.txt", "y.txt"])
+        #expect(outcome.created.map(\.copy.lastPathComponent) == ["x.txt", "y.txt"])
         #expect(outcome.replaced.map(\.original.lastPathComponent) == ["x.txt"])
     }
 

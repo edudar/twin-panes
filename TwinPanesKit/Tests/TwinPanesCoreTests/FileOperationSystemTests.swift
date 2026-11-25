@@ -81,6 +81,18 @@ import Testing
         #expect(xattr("com.example.tag", of: url("dst")) == "blue")
     }
 
+    @Test func renameMovesAndNeverReplaces() throws {
+        defer { cleanUp() }
+        try Data("a".utf8).write(to: url("a"))
+        try Data("b".utf8).write(to: url("b"))
+        try system.rename(url("a"), to: url("c"))
+        #expect(try Data(contentsOf: url("c")) == Data("a".utf8))
+        let error = #expect(throws: FileSystemError.self) {
+            try system.rename(url("c"), to: url("b"))
+        }
+        #expect(error?.errno == EEXIST && (try? Data(contentsOf: url("b"))) == Data("b".utf8))
+    }
+
     @Test func removeTakesOneItem() throws {
         defer { cleanUp() }
         try Data().write(to: url("f"))

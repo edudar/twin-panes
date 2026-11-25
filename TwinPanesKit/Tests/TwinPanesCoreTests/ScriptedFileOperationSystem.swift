@@ -14,6 +14,7 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
         var chunks = 0
         var onChunk: (@Sendable (_ path: String, _ chunk: Int) -> Void)?
         var copied: [String] = []
+        var renameFailures: [String: Int32] = [:]
         var trashFolder: URL?
         var trashFailures: [String: Int32] = [:]
     }
@@ -34,6 +35,11 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
             $0.chunks = count
             $0.onChunk = onChunk
         }
+    }
+
+    /// `EXDEV` here stands for a move to another volume.
+    func failRename(endingWith suffix: String, errno: Int32) {
+        script.withLock { $0.renameFailures[suffix] = errno }
     }
 
     /// Where `trash` moves items, so tests never touch the real Trash.
@@ -92,6 +98,14 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
     }
 
     func remove(_ url: URL) throws(FileSystemError) { try real.remove(url) }
+
+    func rename(_ source: URL, to destination: URL) throws(FileSystemError) {
+        let failure = script.withLock { script in
+            script.renameFailures.first { source.path.hasSuffix($0.key) }?.value
+        }
+        if let failure { throw FileSystemError("move", source.path, errno: failure) }
+        try real.rename(source, to: destination)
+    }
 
     func trash(_ url: URL) throws(FileSystemError) -> URL {
         let (folder, failure) = script.withLock { script in

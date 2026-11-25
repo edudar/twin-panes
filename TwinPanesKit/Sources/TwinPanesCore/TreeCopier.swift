@@ -10,12 +10,21 @@ public struct OperationProgress: Sendable, Equatable {
     public var currentItem: String?
 }
 
-/// What a copy did: what it created at the top level of the destination (for undo),
-/// the items that failed, and whether it was cancelled.
+/// An item a copy made, and the source it was made from.
+public struct MadeItem: Sendable, Equatable {
+    public let source: URL
+    public let copy: URL
+}
+
+/// What a copy did: what it created (for undo), the items that failed, and whether it
+/// was cancelled.
 public struct CopyOutcome: Sendable {
     /// Items made where nothing of this copy's was: the top-level copies, and the new
     /// items inside folders it merged into.
-    public var created: [URL] = []
+    public var created: [MadeItem] = []
+    /// Every item the copy finished, made or a folder merged into, by its path below
+    /// the destination as walked, with where it is now: a move removes these sources.
+    public var finished: [String: URL] = [:]
     /// What Replace sent to the Trash.
     public var replaced: [TrashedItem] = []
     public var failures: [FileSystemError] = []
@@ -93,7 +102,7 @@ public struct TreeCopier: Sendable {
                 run.leaveOut(item)
                 return true
             case .merge:
-                run.merged.insert(item.relativePath)
+                run.outcome.finished[item.relativePath] = target
                 return true
             case .keepBoth:
                 let name = KeepBothName.next(for: target.lastPathComponent) {
@@ -172,8 +181,6 @@ private struct CopyRun {
     var madeFolders: [(source: URL, copy: URL)] = []
     /// Answers given with Apply to All, for folders (true) and everything else.
     var remembered: [Bool: ConflictAnswer] = [:]
-    /// Relative paths of folders merged into, whose contents land in the existing one.
-    var merged: Set<String> = []
     private var made: Set<String> = []
     private var leftOut: [String] = []
     /// Folders Keep Both renamed: original relative path to the new destination URL.
@@ -207,8 +214,11 @@ private struct CopyRun {
     /// Records a made item; it counts as created unless its folder was made by this copy.
     mutating func made(_ item: PlannedItem, at target: URL) {
         made.insert(item.relativePath)
+        outcome.finished[item.relativePath] = target
         if item.metadata.kind == .folder { madeFolders.append((item.source, target)) }
         let parent = (item.relativePath as NSString).deletingLastPathComponent
-        if !made.contains(parent) { outcome.created.append(target) }
+        if !made.contains(parent) {
+            outcome.created.append(MadeItem(source: item.source, copy: target))
+        }
     }
 }

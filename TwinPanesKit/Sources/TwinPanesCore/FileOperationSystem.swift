@@ -52,6 +52,9 @@ public protocol FileOperationSystem: Sendable {
     func copyMetadata(from source: URL, to destination: URL) throws(FileSystemError)
     /// Removes one file, symlink or empty folder.
     func remove(_ url: URL) throws(FileSystemError)
+    /// Moves or renames an item on one volume (`rename(2)`, atomic); never replaces:
+    /// `EEXIST` if `destination` is taken, `EXDEV` if it's on another volume.
+    func rename(_ source: URL, to destination: URL) throws(FileSystemError)
     /// Moves `url` to its volume's Trash and returns where it went.
     func trash(_ url: URL) throws(FileSystemError) -> URL
 }
@@ -145,6 +148,12 @@ public struct RealFileOperationSystem: FileOperationSystem {
     public func copyMetadata(from source: URL, to destination: URL) throws(FileSystemError) {
         guard copyfile(source.path, destination.path, nil, copyfile_flags_t(COPYFILE_METADATA)) == 0
         else { throw FileSystemError("copy metadata to", destination.path, errno: errno) }
+    }
+
+    public func rename(_ source: URL, to destination: URL) throws(FileSystemError) {
+        guard renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 else {
+            throw FileSystemError("move", source.path, errno: errno)
+        }
     }
 
     public func trash(_ url: URL) throws(FileSystemError) -> URL {
