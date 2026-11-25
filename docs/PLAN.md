@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.26 (2026-11-24). Living document; requirements will keep growing.
+Status: draft v0.27 (2026-11-24). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -58,6 +58,11 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D42 | **Access asks for as much as the user means** (M4) | The prompt asks for a whole external volume, the home folder, or a grant that stopped resolving (kept as lost, with its last path). Recent files that moved stay in the menu and offer to find them. A tab keeps its access token while it stays under one grant. |
 | D43 | **Path bar, packages** (M4) | A clickable `NSPathControl` (items built with the cached folder icon) that ⇧⌘G turns into the path field. Packages list as files, as in Finder; Show Package Contents (⌥⌘↓) enters one (§9 question 2). |
 | D44 | **Row drawing is cached; icon lookups never run on the main actor** (M4 performance pass) | Each icon is drawn once into a bitmap per type (or app path), screen scale and appearance, on the cache's own queue; until it's ready a cell has none. Each cell keeps its laid-out text line until its text, width or style changes, and takes its colour when drawn. The rows on screen are refreshed in place, and each row draws its cells into one layer. Kind is stored with each entry. See docs/plans/M4.md, "Performance pass". |
+| D45 | **Two panels, always** (M5) | Every window shows a browser in each panel, as halves at first. A panel's only browser tab can't be closed or moved out; any other last tab leaves a browser at the other panel's folder. The status line takes only the messages of the item in front. See docs/plans/M5.md, D-a. |
+| D46 | **The active panel follows focus** (M5) | Clicking or tabbing into a panel activates it. Tab and ⇧Tab switch panels while a file list has focus; tabs move by dragging or Window › Move Tab to Other Panel, as the same item. See docs/plans/M5.md, D-b. |
+| D47 | **Restoration: versioned state through AppKit** (M5) | Each window keeps a `WindowState` (tabs, selection, active panel, zoom, divider, sidebar) as one JSON value in its restorable state; items save versioned `ItemState`, and kinds or versions a build doesn't know are skipped. Crash recovery runs before restoration, so a restored editor tab claims its recovered session (`LaunchRecovery`). Smoke and bench runs never read or write saved windows. See docs/plans/M5.md, D-c. |
+| D48 | **The sidebar** (M5) | Favorites as paths in user defaults (access from folder grants, D42) and Locations from the mounted volumes, kept current by NSWorkspace's notifications; ejectable volumes get an eject button, which the sandbox allows. ⌃⌘S toggles it; edits show in every window. See docs/plans/M5.md, D-d. |
+| D49 | **Path completion** (M5) | Tab in the path field completes as a shell does (§4.7). Names are read and matched off the main actor and cached while the field is open; a second Tab opens AppKit's completion list. See docs/plans/M5.md, D-e. |
 
 ## 3. Constraints that drive the design
 
@@ -84,10 +89,10 @@ content; the `M0` rows exist now.
 |---|---|---|---|
 | app target | `TwinPanes/` | M0 | entry point, app delegate, main menu, command catalog and default bindings, placeholder items, smoke test, app icon. Later: preferences, and wiring the kits together (e.g. the hex-view factory for BrowserKit's preview pane) |
 | TwinPanesCore | `TwinPanesKit/Sources/TwinPanesCore` | M0: module only | the UI-free engine, no AppKit imports (components below) |
-| WorkspaceKit | `TwinPanesKit/Sources/WorkspaceKit` | M0 | the single main frame, independent of item types: `WorkspaceItem`, `MainFrameLayout` and its view controller, main window and controller, tab bar, close workflow, workspace registry, command registry and dispatcher, focus chain, menu bindings (§4.8, §4.11) |
+| WorkspaceKit | `TwinPanesKit/Sources/WorkspaceKit` | M0, M5 | the single main frame, independent of item types: `WorkspaceItem`, `MainFrameLayout` and its view controller, main window and controller, tab bar (with tab dragging, M5), `WindowState` and `ItemRestorer` (M5), the hosted sidebar (M5), close workflow, workspace registry, command registry and dispatcher, focus chain, menu bindings (§4.8, §4.11) |
 | HexViewKit | `TwinPanesKit/Sources/HexViewKit` | M1 | virtualized hex/text view, selection, inspector UI |
 | EditorKit | `TwinPanesKit/Sources/EditorKit` | M1 | the editor item: mode switcher, find bar; hosts the mode views over one `EditorSession` |
-| BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b, M4 | the browser tab: async listing, sorting, hidden files, history, live updates, path bar, folder access (M1b, M4); later (M5–M7) tabs per panel, operations queue, preview pane |
+| BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b, M4, M5 | the browser tab: async listing, sorting, hidden files, history, live updates, path bar, folder access (M1b, M4); the sidebar, path completion and the tab's saved state (M5); later (M6–M7) operations queue, preview pane |
 | TextEditKit | `TwinPanesKit/Sources/TextEditKit` | M9 | plain-text and Markdown modes, large-text viewer |
 | SandboxProbe | `TwinPanesKit/Sources/SandboxProbe` | M0, M3c | Foundation-only probes for the sandbox spike (§5); only the app's Debug menu uses it. Stays until the M3c volume checks (external drives) are done, then goes away with that menu |
 
@@ -133,13 +138,17 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `FolderWatcher` | M4 | FSEvents on one folder, coalesced into changed names, a re-list or folder-gone (D40) |
 | `FolderGrants`, `BookmarkStore`, `SecurityScope` | M1b, M4 | granted folders and recent files as app-scoped bookmarks (lost ones kept with their path, D42) and reference-counted sandbox scope tokens (§5) |
 | `GapMeter`, `StallLimit` | M4 | main-thread CPU-time heartbeat meter and machine-scaled stall limit for smoke checks |
+| `Favorites`, `MountedVolumes` | M5 | the sidebar's favorite folders (paths in user defaults) and the volumes Finder would show (D48) |
+| `PathCompletion`, `CompletionNames` | M5 | shell-style completion rules, and one folder's names read off the main actor for them (D49) |
+| `LaunchRecovery` | M5 | holds recovered sessions until restored tabs claim them (D47) |
 
-**BrowserKit components** (M1b, M4)
+**BrowserKit components** (M1b, M4, M5)
 
 | Component | Milestone | Role |
 |---|---|---|
-| `BrowserItem` (`+History`, `+Live`) | M1b, M4 | folder tab `WorkspaceItem`, back/forward history, async listing and live-update pipeline |
-| `BrowserViewController` (`+PathBar`) | M1b, M4 | file list controller, path bar / path field (⇧⌘G), access prompt |
+| `BrowserItem` (`+History`, `+Live`, `+Restoring`) | M1b, M4, M5 | folder tab `WorkspaceItem`, back/forward history, async listing and live-update pipeline, saved state (M5) |
+| `BrowserViewController` (`+PathBar`, `+Completion`) | M1b, M4, M5 | file list controller, path bar / path field (⇧⌘G) with Tab completion (M5), access prompt |
+| `SidebarViewController` (`+Editing`), `VolumeWatcher` | M5 | the sidebar's Favorites and Locations, editing favorites, live volumes and ejecting (D48) |
 | `FileListTable`, `IconCache` | M1b, M4 | striped `NSTableView`, cached icon bitmaps (dark/light, lazy custom icons) and text-layout cells |
 | `AccessRequest` | M4 | sandbox access prompt targeting (volume, home folder, or lost grant) |
 | `StepTiming`, `StepRecorder` | M4 | main-actor step timing for smoke-test stall diagnostics |
@@ -613,6 +622,18 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   `GapMeter`/`StallLimit` CPU-clock guards, `AccessRequest` volume/keyboard handling,
   parent-row/locale/geometry table updates, and `RecentFiles` menu snapshots were also
   hardened.
+- **As built (M5, docs/plans/M5.md):** D48 and D49. The sidebar is a source list with
+  SF Symbol icons, so drawing it reads nothing from disk; folders (not packages) are
+  dropped onto Favorites, favorites reorder by dragging and leave by the context menu,
+  and every window's sidebar shows an edit. One `VolumeWatcher` feeds all sidebars and
+  drops a read a newer one replaced; ejecting runs off the main actor. Completion is
+  the field editor's `insertTab:`, handled by the field's delegate, so the command
+  registry still leaves Tab alone there; AppKit's list replaces its own last word,
+  which also stops at spaces, so each offered match is cut to that range. Matching
+  100k names took 67 ms on the main thread until it moved off it (5–10 ms now). The
+  browser tab saves its folder, selection, history, sort and hidden files as paths; a
+  folder that's gone opens its nearest ancestor that's still there, and one the
+  sandbox only needs access for counts as there.
 
 ### 4.8 Single main frame: workspace model (D7)
 
@@ -689,6 +710,19 @@ view (F4) opens or focuses the real editor item.
 - AppKit restoration follows the system's "Close windows when quitting an app"
   setting and is skipped after the user chooses not to reopen windows. That's
   accepted: a fresh launch opens one window with a Browser tab per panel.
+- **As built (M5, docs/plans/M5.md):** D45–D47. `MainFrameLayout` takes a
+  `PanelFiller` from the app (WorkspaceKit doesn't know browsers) and keeps both
+  panels filled; each item gets its own host, which passes status messages on only
+  while the item is in front. `MainWindow` reports first-responder changes and the
+  frame activates the panel that holds the new one. Tabs drag on a private pasteboard
+  type and select on mouse-up, since selecting rebuilds the tab bar. A window saves
+  `WindowState` through its controller's `window(_:willEncodeRestorableState:)` and is
+  rebuilt by `MainWindowRestoration`; the app's `ItemRestorer` rebuilds browsers and
+  editors (by bookmark, through the session registry, the view put back after the tab
+  loads its view). Recovery scans in `applicationWillFinishLaunching` and
+  `LaunchRecovery` keeps the sessions alive, since the registry holds them weakly.
+  The sidebar is hosted at the leading edge; its toggle is `toggleSidebarShown:`,
+  because the panels' split views answer AppKit's `toggleSidebar:` first.
 - **Crash recovery is independent (§4.2).** It doesn't rely on restoration: on
   launch, after AppKit has restored (or not restored) windows, any session with an
   unclean journal is reopened as a tab, in its restored tab if one exists, otherwise
@@ -878,7 +912,8 @@ Built in M0 with hard-coded default bindings; user-editable bindings arrive in M
 `becomeKey`) in addition to `menuNeedsUpdate(_:)`, deduplicates events between
 `performKeyEquivalent` and `sendEvent`, and `CommandRegistry` preserves registration order
 so primary shortcuts (e.g. `⌘G` ahead of `F3` on Find Next) appear in menus.
-`browser.switchPanel` is left out of the View menu until dual panels land in M5.
+Dual panels came in M5 as `panel.switch` (Tab and ⇧Tab, bound in the file list's
+scope only) and `panel.moveTab` (Window › Move Tab to Other Panel, no default key).
 Dropping a file on a window opens a hex tab in that window; dropping a folder opens a
 browser tab there and saves its grant.
 
@@ -1035,8 +1070,10 @@ byte histogram.
     `macos-15`, `macos-26`, and `xcode-27` (GitHub's macOS 27 image, which comes with
     Xcode 27; there is no `macos-27` label). Each job uses its image's default Xcode
     and the macOS 15 deployment target. Build, `swift test`, and the signed app's
-    smoke tests run on all three: launch, bookmarks resolving after relaunch,
-    sandboxed file access, AppKit/TextKit behaviour. Lint runs only on the newest
+    smoke tests run on all three: launch, sandboxed file access, AppKit/TextKit
+    behaviour. The relaunch checks (window restoration, bookmarks resolving after a
+    relaunch, crash recovery) run on macOS 26 and 27 only (§9, "From M5").
+ Lint runs only on the newest
     image, so its rules match the current swift-format.
   - Background: GitHub retired hosted macOS 14 runners on 2026-11-02
     (actions/runner-images#13518), which is why the minimum moved to macOS 15. Watch
@@ -1082,8 +1119,9 @@ byte histogram.
   proposed baseline VoiceOver support for the hex viewport in M1.
 - **Block devices, privileged save** — not planned (D14).
 - **From the M0–M2 review (2026-11-22):**
-  - *Bookmarks resolving after a relaunch* isn't automated: it needs two app launches.
-    Checked by hand in the spike; automate with state restoration in M5.
+  - ~~*Bookmarks resolving after a relaunch*~~: automated in M5 for editor files (the
+    restore relaunch reopens one by its bookmark). A folder grant after a relaunch is
+    still checked by hand: the smoke test has no user-granted folder.
   - ~~*Asking for access again* when a saved bookmark no longer resolves~~: done in M4
     (D42). Lost grants are asked for again where they were; moved recent files stay
     in Open Recent and offer to find them.
@@ -1118,10 +1156,8 @@ byte histogram.
     first edit of an evicted file must download it before the clone, behind an
     injected flag since CI has no iCloud. Lands in M6, whose copy and move must
     handle dataless files too.
-  - *A crash smoke test* (left with M3c step 14): kill a child app mid-edit and check
-    the tab comes back on relaunch. The fault suite covers recovery in unit tests;
-    the real-app check needs two launches, so it lands in M5 with the relaunch
-    automation for state restoration.
+  - ~~*A crash smoke test*~~: done in M5 (step 14). A child app is killed with SIGKILL
+    mid-edit and the next launch shows the edit in its restored tab.
 - **From M4 (2026-11-23):**
   - *Many files deleted from outside a shown 100k folder* (100k unlinks, not a move
     to the Trash) still stalls the tab: each burst of FSEvents is read and merged
@@ -1158,7 +1194,8 @@ byte histogram.
     so their leftovers don't count. Switching appearance remains the least steady
     check (22–55 ms on the dev Mac): nearly all of it is AppKit redrawing the window,
     not timed steps.
-  - *Volumes in the sidebar* and the global hidden-files default: M5 and M10.
+  - ~~*Volumes in the sidebar*~~: done in M5 (D48). The global hidden-files default
+    stays with Preferences in M10.
   - *External volumes by hand*: granting a whole drive and a renamed volume asking
     again aren't automated (they need real drives), like the M3c volume spike.
 - **From M5 (2026-11-24):**
@@ -1178,3 +1215,11 @@ byte histogram.
     needed, run the two launches as steps of the CI workflow instead (D-f's fallback):
     the workflow's shell starts each child and kills the crash one. Revisit with M6's
     CI work or the first restore bug reported on 15.
+  - *By hand only*: dragging tabs and favorites (a synthesized drag session isn't
+    reliable; the drop logic is unit-tested and the smoke test calls the real drop
+    methods), and ejecting a real USB drive (a disk image was ejected in testing).
+  - *Live updates on the main thread*: the "folder changed" step costs up to ~30 ms
+    of main-thread CPU per event on a 100k folder, and bursts stack in one gap (79 ms
+    on a macOS 26 runner). Proposed as its own task; it was M4 code.
+  - *A smoke check that sometimes types late*: "Keep Mine keeps the edits" once found
+    its typed byte at offset 1 instead of 0. Not reproduced on demand; watch CI.

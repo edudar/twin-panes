@@ -19,6 +19,9 @@ Twin Panes is early and changing quickly. Right now it offers:
 - **Two-panel, tabbed workspace:** Side-by-side browser panels with a draggable
   split, keyboard focus switching, and Safari-style tabs in each panel that you
   can reorder or move between sides.
+- **Sidebar, restore and path completion:** A Finder-style sidebar of favorites
+  and mounted volumes (with eject), windows that come back after a relaunch with
+  their panels and tabs, and Tab completion in the path field, like a shell's.
 - **Responsive folder browsing:** Handles folders with 100,000+ files without
   stalling the UI, streaming rows as they load, tracking external changes live,
   and supporting sorting, history, type-to-select, and package inspection.
@@ -38,9 +41,8 @@ Twin Panes is early and changing quickly. Right now it offers:
 
 In rough order:
 
-1. **Daily-driver file manager:** Session restore on relaunch, a Favorites and
-   Locations sidebar, path completion, a Quick Look preview pane, an F-key bar,
-   and copy, move, rename, and trash with progress and conflict handling.
+1. **Daily-driver file manager:** An F-key bar, copy, move, rename and trash
+   with progress and conflict handling, and a Quick Look preview pane.
 2. **Full-featured editor:** Insert and delete bytes in hex, plus plain-text
    and Markdown editing modes with find and replace.
 3. **Power-user workspace:** Multiple windows, a built-in terminal, remote
