@@ -20,6 +20,9 @@ extension BrowserItem {
     /// The name of the selected row, if one is selected.
     public var selectedName: String? { controller.selectedName }
 
+    /// The selected entries in row order, without "..": what F5–F8 act on.
+    public var selectedEntries: [DirectoryEntry] { controller.selectedEntries }
+
     public var canGoBack: Bool { !backStack.isEmpty }
     public var canGoForward: Bool { !forwardStack.isEmpty }
 

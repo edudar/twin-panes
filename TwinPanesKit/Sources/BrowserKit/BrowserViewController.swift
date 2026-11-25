@@ -125,6 +125,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// What's selected, recorded as it changes: by the time the table reloads, the
     /// item's rows may already be new, so its old row no longer names the entry.
     private(set) var selectedName: String?
+    /// Every selected entry, found again by name after the rows change
+    /// (docs/plans/M6.md, D-a).
+    private(set) var selection = ListingSelection.none
     private var selectedParentRow = false
 
     /// A new folder: empties the list (it fills as batches arrive), selects the first
@@ -142,10 +145,13 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         tableView.scrollRowToVisible(0)
     }
 
-    /// Shows the item's current rows, keeping the selected entry selected by name;
-    /// after a re-sort, also in view. Batches don't scroll.
+    /// Shows the item's current rows, keeping the selected entries selected by name;
+    /// after a re-sort, the lead one also in view. Batches don't scroll. `selectedRows`
+    /// are the selection's rows in the item's listing, when the pipeline found them off
+    /// the main actor.
     func reloadKeepingSelection(
-        scrolling: Bool = false, asked: Set<String> = [], found: [String: Int] = [:]
+        scrolling: Bool = false, asked: Set<String> = [], found: [String: Int] = [:],
+        selectedRows: IndexSet? = nil
     ) {
         guard isViewLoaded, let item else { return }
         // The rows of the names asked about were found off the main actor; only a name
@@ -156,7 +162,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         }
         showSortIndicator(item.order)
         updateAccessPrompt()
-        let selected = selectedName
+        let lead = selectedName
+        let selected = selection
         let onParent = selectedParentRow
         refreshRows()
         if let wanted = wantedSelection, let row = row(named: wanted) {
@@ -164,7 +171,12 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             restoreSelection(row, parentRow: false)
             tableView.scrollRowToVisible(row)
         } else {
-            restoreSelection(selected.flatMap(row(named:)), parentRow: onParent)
+            var rows = tableRows(
+                selectedRows ?? selectionRows(selected, in: item.listing))
+            // The lead row last, so it stays the one `selectedRow` reports.
+            let leadRow = lead.flatMap(row(named:))
+            if let leadRow { rows.remove(leadRow) }
+            restoreSelection(rows, lead: leadRow, parentRow: onParent)
             if scrolling, tableView.selectedRow >= 0 {
                 tableView.scrollRowToVisible(tableView.selectedRow)
             }
@@ -202,6 +214,24 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// The names whose rows a reload needs: the selected entry and the one to select.
     var namesToKeep: Set<String> { Set([selectedName, wantedSelection].compactMap { $0 }) }
 
+    /// The selection's rows in `listing`, worked out here only while that's cheap; a big
+    /// selection is found off the main actor by the item's pipeline, and without that
+    /// only the lead row is kept.
+    private func selectionRows(
+        _ selection: ListingSelection, in listing: FolderListing
+    )
+        -> IndexSet
+    {
+        selection.count <= FolderListing.mainActorLimit ? selection.rows(in: listing) : []
+    }
+
+    /// Listing rows as table rows, past the ".." row.
+    private func tableRows(_ listingRows: IndexSet) -> IndexSet {
+        var rows = listingRows
+        if showsParentRow { rows.shift(startingAt: 0, by: 1) }
+        return rows
+    }
+
     /// A small live update (D-f): removes, inserts and reloads just the rows that
     /// changed, so the scroll position, the selection and the other rows' views stay.
     /// The changes were worked out with the listing; false if there's no view to update.
@@ -230,6 +260,10 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         tableView.reloadData(
             forRowIndexes: changed, columnIndexes: IndexSet(0..<tableView.numberOfColumns))
         restripe()
+        // NSTableView moved the selected rows with the update; record where they went.
+        isRestoringSelection = true
+        selectionChanged()
+        isRestoringSelection = false
         if tableView.selectedRow < 0, selected >= 0, tableView.numberOfRows > 0 {
             if let priorName,
                 let movedRow = asked.contains(priorName)
@@ -250,10 +284,17 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     }
 
     func restoreSelection(_ row: Int?, parentRow: Bool) {
+        restoreSelection([], lead: row, parentRow: parentRow)
+    }
+
+    /// Selects `rows` and then `lead`, or the first row when there's nothing to select
+    /// and the ".." row was selected or nothing is.
+    func restoreSelection(_ rows: IndexSet, lead: Int?, parentRow: Bool) {
         isRestoringSelection = true
         defer { isRestoringSelection = false }
-        if let row {
-            tableView.selectRowIndexes([row], byExtendingSelection: false)
+        if !rows.isEmpty || lead != nil {
+            tableView.selectRowIndexes(rows, byExtendingSelection: false)
+            if let lead { tableView.selectRowIndexes([lead], byExtendingSelection: true) }
         } else if tableView.numberOfRows > 0, parentRow || tableView.selectedRow < 0 {
             tableView.selectRowIndexes([0], byExtendingSelection: false)
         }
@@ -263,6 +304,16 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// from no longer wins it back.
     func selectionChanged() {
         selectedName = selectedEntry?.name
+        var rows = tableView.selectedRowIndexes
+        if showsParentRow {
+            rows.remove(0)
+            rows.shift(startingAt: 1, by: -1)
+        }
+        let old = selection
+        selection = item.map { ListingSelection(rows: rows, of: $0.listing) } ?? .none
+        // The old selection may hold the last copy of a replaced 100k listing, which
+        // takes tens of milliseconds to free: let it go off the main actor.
+        DispatchQueue.global(qos: .utility).async { _ = old }
         selectedParentRow = isParentRowSelected
         if !isRestoringSelection {
             wantedSelection = nil
@@ -285,6 +336,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     var isParentRowSelected: Bool { showsParentRow && tableView.selectedRow == 0 }
 
     var selectedEntry: DirectoryEntry? { entry(atRow: tableView.selectedRow) }
+
+    var selectedEntries: [DirectoryEntry] { selection.entries }
 
     // MARK: Commands
 

@@ -455,7 +455,7 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         // had 100k rows (docs/plans/M4.md, step 13).
         tableView.usesAlternatingRowBackgroundColors = false
         tableView.backgroundColor = NSColor.alternatingContentBackgroundColors[0]
-        tableView.allowsMultipleSelection = false
+        tableView.allowsMultipleSelection = true
         tableView.style = .fullWidth
         tableView.target = self
         tableView.doubleAction = #selector(browserOpen(_:))
@@ -679,9 +679,23 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         entry(atRow: row)?.name
     }
 
+    /// ".." goes up a folder; it's never one of several rows F5–F8 act on.
+    func tableView(
+        _ tableView: NSTableView,
+        selectionIndexesForProposedSelection proposed: IndexSet
+    ) -> IndexSet {
+        guard showsParentRow, proposed.count > 1, proposed.contains(0) else { return proposed }
+        var rows = proposed
+        rows.remove(0)
+        return rows
+    }
+
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard let item else { return }
         selectionChanged()
+        if tableView.numberOfSelectedRows > 1 {
+            return showSelectionSummary(of: item)
+        }
         if isParentRowSelected {
             let parent = item.folder.deletingLastPathComponent().path
             item.host?.showStatus("Parent folder: \(parent)")
@@ -690,5 +704,28 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         guard let entry = selectedEntry else { return item.updateStatus() }
         let size = entry.size.map { " · \($0.formatted()) bytes" } ?? ""
         item.host?.showStatus("\(entry.url.path)\(size)")
+    }
+
+    /// Shows "3 of 120 selected, 1,234 bytes"; folders' sizes aren't counted (D-a). A
+    /// big selection is added up off the main actor.
+    private func showSelectionSummary(of item: BrowserItem) {
+        let selection = selection
+        let total = item.entries.count
+        let path = item.folder.path
+        let summary: @Sendable () -> String = {
+            let bytes = selection.rows.reduce(UInt64(0)) {
+                $0 + (selection.listing.rows[$1].size ?? 0)
+            }
+            return "\(path) · \(selection.count.formatted()) of "
+                + "\(total.formatted()) selected, \(bytes.formatted()) bytes"
+        }
+        guard selection.count > FolderListing.mainActorLimit else {
+            return item.host?.showStatus(summary()) ?? ()
+        }
+        Task { [weak self, weak item] in
+            let text = await Task.detached(priority: .userInitiated) { summary() }.value
+            guard let self, let item, self.selection.rows == selection.rows else { return }
+            item.host?.showStatus(text)
+        }
     }
 }

@@ -313,6 +313,7 @@ public final class BrowserItem: WorkspaceItem {
         pendingReplacement = nil
         let base = listing
         let keep = controller.namesToKeep
+        let selection = controller.selection
         // Everything that walks the rows happens here, off the main actor when big.
         let work: @Sendable () -> Applied = {
             var result =
@@ -329,7 +330,8 @@ public final class BrowserItem: WorkspaceItem {
             return Applied(
                 listing: result,
                 changes: live ? result.rowChanges(from: base, touching: removals, limit: 100) : nil,
-                asked: keep, found: result.rows(named: keep))
+                asked: keep, found: result.rows(named: keep),
+                selectedRows: selection.rows(in: result))
         }
         let size = base.entries.count + batch.count + (replacement?.count ?? 0)
         if size <= FolderListing.mainActorLimit {
@@ -369,6 +371,8 @@ public final class BrowserItem: WorkspaceItem {
         /// The names the selection needs back, and the rows found for them.
         let asked: Set<String>
         let found: [String: Int]
+        /// Where the selected entries are in `listing`.
+        let selectedRows: IndexSet
     }
 
     private func show(_ applied: Applied, resorted: Bool) {
@@ -381,7 +385,8 @@ public final class BrowserItem: WorkspaceItem {
             } ?? false)
         {
             controller.reloadKeepingSelection(
-                scrolling: resorted, asked: applied.asked, found: applied.found)
+                scrolling: resorted, asked: applied.asked, found: applied.found,
+                selectedRows: applied.selectedRows)
         }
         if hasPending {
             applyPending()
