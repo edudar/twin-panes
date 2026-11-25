@@ -1,5 +1,6 @@
 import AppKit
 import BrowserKit
+import EditorKit
 import WorkspaceKit
 
 extension SmokeTest {
@@ -23,6 +24,43 @@ extension SmokeTest {
             await settle(milliseconds: 25)
         }
         return nil
+    }
+
+    /// A file's path in the path field (§4.7): ⌘↩ opens it in a hex editor tab and Return
+    /// in its default app (recorded here, so the smoke test launches no other app), each
+    /// from the file's folder.
+    func openFromPathField(
+        _ check: (Bool, String) -> Void, in controller: MainWindowController,
+        browser: BrowserItem, window: NSWindow, folder: URL
+    ) async {
+        let file = folder.standardizedFileURL.appendingPathComponent("data.bin")
+        browser.go(to: folder.appendingPathComponent("sub"))
+        await browser.listed()
+        typeInPathField(file.path, browser: browser, window: window)
+        check(dispatch(KeyChord("\r", .command), in: window), "⌘↩ dispatched in path field")
+        await browser.listed()
+        let editors = app.workspace.allItems.compactMap { $0 as? HexEditorItem }
+        check(
+            editors.contains { $0.url.lastPathComponent == "data.bin" }
+                && browser.folder.path == folder.standardizedFileURL.path,
+            "⌘↩ opens a typed file in a hex editor tab, from its folder")
+        for editor in editors {
+            editor.willClose()
+            controller.layout.remove(editor.id)
+        }
+        controller.layout.select(browser.id)
+
+        var inDefaultApp: [URL] = []
+        let launch = browser.openInDefaultApp
+        browser.openInDefaultApp = { inDefaultApp.append($0) }
+        defer { browser.openInDefaultApp = launch }
+        typeInPathField(file.path, browser: browser, window: window)
+        press("\r", in: window)
+        await browser.listed()
+        check(
+            inDefaultApp.map(\.path) == [file.path]
+                && window.firstResponder === browser.preferredFirstResponder,
+            "Return opens a typed file in its default app and leaves the field")
     }
 
     /// Sends `text` as key presses to `window` itself, as AppKit hands a key window its

@@ -543,6 +543,12 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   - **Keys:** while the field has focus, Tab completes instead of moving focus,
     bound through the field's own command scope (§4.11). Escape closes the list,
     then the field.
+  - **Opening a file** (requested 2026-11-25): Return on a file's path opens it in
+    its default app, as Finder would; ⌘↩ (Open in Hex Editor, bound only in the path
+    field's scope) opens it in a hex editor tab. Either way the browser first goes to
+    the file's folder with the file selected, and the field closes; a folder that
+    still needs access shows its prompt and opens nothing. ⌘↩ on anything but a file
+    beeps. The file list keeps Return opening the hex editor for now.
 - **Selection:** standard macOS multi-select (⇧/⌘-click, ⇧-arrows) is the target of
   F5–F8. No Norton Commander muscle memory beyond the F-keys is required day one;
   NC-style marking (Insert/Space, +/−/`*`) and drive switching are later candidates.
@@ -663,6 +669,12 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   Escape closes the list without telling the delegate, so it checks the list (a child
   window of the field's window) is still there before narrowing it. The smoke test
   picks from the real list with Down and Return, and narrows it by typing.
+- **As built (opening a file from the path field):** the field is a `PathField` whose
+  scope, `item.browser.pathField`, binds ⌘↩ to `browser.openInEditor`. Return still
+  goes through the field's action, which checks for a file under the folder's grant.
+  `BrowserItem.openInDefaultApp` hands the file to `NSWorkspace` and puts a failure in
+  the status line; the smoke test swaps it for a recorder, so the hand-off to another
+  app is checked by hand only.
 
 ### 4.8 Single main frame: workspace model (D7)
 

@@ -11,6 +11,9 @@ extension ItemKind {
 @objc public protocol BrowserActions {
     /// Enter, double-click, ⌘↓: into a folder, or open a file in the editor.
     @objc optional func browserOpen(_ sender: Any?)
+    /// ⌘↩ in the path field: open the typed file in the hex editor (Return opens it in
+    /// its default app).
+    @objc optional func browserOpenInEditor(_ sender: Any?)
     /// F3 and F4: open the file under the cursor in the editor (quick view is M7).
     @objc optional func browserView(_ sender: Any?)
     @objc optional func browserEdit(_ sender: Any?)
@@ -43,6 +46,15 @@ public final class BrowserItem: WorkspaceItem {
     /// Opens a file in an editor tab; supplied by the app so BrowserKit doesn't
     /// import EditorKit (§4). The scope covers the file's folder, if one was needed.
     public let openFile: (URL, SecurityScope?) -> Void
+    /// Opens a file in the app Finder would open it with, saying in the status line when
+    /// it can't; the smoke test stands in for it so it launches no other app.
+    public lazy var openInDefaultApp: (URL) -> Void = { [weak self] url in
+        NSWorkspace.shared.open(url, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+            guard let error else { return }
+            let message = "Can’t open “\(url.lastPathComponent)”: \(error.localizedDescription)"
+            Task { @MainActor in self?.host?.showStatus(message) }
+        }
+    }
 
     public private(set) var folder: URL
     /// The folder's entries, sorted and filtered (D-c).
@@ -415,6 +427,22 @@ public final class BrowserItem: WorkspaceItem {
         } else {
             openFile(entry.url, grants.scope(covering: entry.url))
         }
+    }
+
+    /// Whether `url` is a file rather than a folder (packages are folders here, as the
+    /// path field goes into them); false when it can't be read.
+    func isFile(_ url: URL) -> Bool {
+        withExtendedLifetime(grants.scope(covering: url)) {
+            var isFolder: ObjCBool = false
+            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder)
+                && !isFolder.boolValue
+        }
+    }
+
+    /// Goes to `file`'s folder with the file selected; false when the folder can't be
+    /// shown (the status line says why).
+    func reveal(_ file: URL) -> Bool {
+        go(to: file.deletingLastPathComponent(), selecting: file.lastPathComponent)
     }
 
     public func goToParent() {

@@ -8,7 +8,7 @@ import WorkspaceKit
 final class BrowserViewController: NSViewController, CommandScopeProviding, NSMenuItemValidation {
     weak var item: BrowserItem?
     let tableView = FileListTableView()
-    let pathField = NSTextField()
+    let pathField = PathField()
     /// The clickable path above the list (D-h); the field replaces it while editing.
     let pathControl = NSPathControl()
     /// The folder each of the bar's items stands for.
@@ -295,6 +295,15 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         }
     }
 
+    /// ⌘↩ in the path field: the typed file in the hex editor, from its folder; a path
+    /// that isn't a file beeps.
+    @objc func browserOpenInEditor(_ sender: Any?) {
+        guard let item, isEditingPath, let target = typedURL(), item.isFile(target) else {
+            return NSSound.beep()
+        }
+        openTypedFile(target) { item.openFile($0, item.grants.scope(covering: $0)) }
+    }
+
     /// F3/F4 act on files and folders, not on "..".
     @objc func browserView(_ sender: Any?) {
         if selectedEntry != nil { browserOpen(sender) } else { NSSound.beep() }
@@ -320,26 +329,49 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         editPath()
     }
 
+    /// Return in the path field: a folder's path goes there; a file's opens in its
+    /// default app, from its folder (§4.7).
     @objc func pathEntered(_ sender: NSTextField) {
         guard let item else { return }
-        var text = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
+        guard let target = typedURL() else {
             sender.stringValue = item.folder.path
             return
         }
-        if text == "~" || text.hasPrefix("~/") {
-            text = DirectoryReader.realHomeDirectory.path + text.dropFirst()
-        }
-        let target =
-            text.hasPrefix("/")
-            ? URL(fileURLWithPath: text, isDirectory: true)
-            : URL(fileURLWithPath: text, isDirectory: true, relativeTo: item.folder)
-                .standardizedFileURL
-        if item.go(to: target) {
+        if item.isFile(target) {
+            openTypedFile(target, with: item.openInDefaultApp)
+        } else if item.go(to: target) {
             view.window?.makeFirstResponder(tableView)
         } else {
             sender.stringValue = item.folder.path
         }
+    }
+
+    /// The path field's text as a URL: `~` is the real home folder, and a relative path
+    /// starts from the current folder. Nil when the field is empty.
+    private func typedURL() -> URL? {
+        guard let item else { return nil }
+        var text = pathField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if text == "~" || text.hasPrefix("~/") {
+            text = DirectoryReader.realHomeDirectory.path + text.dropFirst()
+        }
+        return text.hasPrefix("/")
+            ? URL(fileURLWithPath: text, isDirectory: true)
+            : URL(fileURLWithPath: text, isDirectory: true, relativeTo: item.folder)
+                .standardizedFileURL
+    }
+
+    /// Shows `file` selected in its folder, leaving the path field, then opens it with
+    /// `open` unless the folder first needs access.
+    private func openTypedFile(_ file: URL, with open: (URL) -> Void) {
+        guard let item else { return }
+        let file = URL(fileURLWithPath: file.path, isDirectory: false)
+        guard item.reveal(file) else {
+            pathField.stringValue = item.folder.path
+            return
+        }
+        view.window?.makeFirstResponder(tableView)
+        if !item.needsAccess { open(file) }
     }
 
     private func updateAccessPrompt() {

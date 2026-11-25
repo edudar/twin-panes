@@ -48,6 +48,7 @@ extension CommandID {
     static let browserView: CommandID = "browser.view"
     static let browserEdit: CommandID = "browser.edit"
     static let browserOpen: CommandID = "browser.open"
+    static let browserOpenInEditor: CommandID = "browser.openInEditor"
     static let browserParent: CommandID = "browser.parent"
     static let browserGoToFolder: CommandID = "browser.goToFolder"
     static let browserToggleHidden: CommandID = "browser.toggleHidden"
@@ -115,6 +116,9 @@ enum DefaultCommands {
         add(.browserView, "View", #selector(BrowserActions.browserView(_:)))
         add(.browserEdit, "Edit", #selector(BrowserActions.browserEdit(_:)))
         add(.browserOpen, "Open", #selector(BrowserActions.browserOpen(_:)))
+        add(
+            .browserOpenInEditor, "Open in Hex Editor",
+            #selector(BrowserActions.browserOpenInEditor(_:)))
         add(.browserParent, "Enclosing Folder", #selector(BrowserActions.browserParent(_:)))
         add(.browserGoToFolder, "Go to Folder…", #selector(BrowserActions.browserGoToFolder(_:)))
         add(.browserBack, "Back", #selector(BrowserActions.browserBack(_:)))
@@ -149,6 +153,7 @@ enum DefaultCommands {
 
         let browser = BindingScope.item(.browser)
         let fileList = BindingScope.item(.browser, part: "fileList")
+        let pathField = BindingScope.item(.browser, part: "pathField")
         let editor = BindingScope.item(.editor)
         let findBar = BindingScope.item(.editor, part: "findBar")
 
@@ -172,6 +177,7 @@ enum DefaultCommands {
         registry.bind(.function(3), to: .browserView, in: browser)
         registry.bind(.function(4), to: .browserEdit, in: browser)
         registry.bind(.returnKey, to: .browserOpen, in: fileList)
+        registry.bind(KeyChord("\r", .command), to: .browserOpenInEditor, in: pathField)
         registry.bind(
             KeyChord(Self.arrow(NSDownArrowFunctionKey), .command), to: .browserOpen, in: browser)
         registry.bind(
