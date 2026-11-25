@@ -16,7 +16,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// The names path completion offers, kept while the path field is open (D-e).
     var completionNames: CompletionNames?
     /// The completion waiting for a folder's names; for tests.
-    var pendingCompletion: Task<Void, Never>?
+    nonisolated(unsafe) var pendingCompletion: Task<Void, Never>?
     /// The last completion applied, whose matches AppKit's list offers.
     var lastCompletion: PathCompletion?
     /// Opens AppKit's completion list; tests stand in for it.
@@ -33,6 +33,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     }
 
     deinit {
+        pendingCompletion?.cancel()
         if let iconObserver { NotificationCenter.default.removeObserver(iconObserver) }
     }
 

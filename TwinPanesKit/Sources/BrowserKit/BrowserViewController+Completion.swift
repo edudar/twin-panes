@@ -9,6 +9,8 @@ extension BrowserViewController {
     /// completes nothing more opens AppKit's list of the matches. Returns true: Tab never
     /// moves focus out of the field.
     func completePath(in textView: NSTextView) -> Bool {
+        pendingCompletion?.cancel()
+        pendingCompletion = nil
         let text = textView.string
         guard let names = completionNames,
             let query = PathCompletion.query(for: text, home: DirectoryReader.realHomeDirectory)
@@ -17,11 +19,21 @@ extension BrowserViewController {
             return true
         }
         pendingCompletion = Task { [weak self, weak textView] in
-            guard let found = await names.names(in: query.folder) else { return }
+            guard let found = await names.names(in: query.folder) else {
+                if !Task.isCancelled { self?.pendingCompletion = nil }
+                return
+            }
+            if Task.isCancelled { return }
             // Matching 100k names takes tens of milliseconds: off the main actor too.
             let completion = await Task.detached { PathCompletion(query: query, names: found) }
                 .value
-            guard let self, let textView, textView.string == text else { return }
+            guard !Task.isCancelled, let self, self.isEditingPath, let textView,
+                self.pathField.currentEditor() === textView, textView.string == text
+            else {
+                if !Task.isCancelled { self?.pendingCompletion = nil }
+                return
+            }
+            self.pendingCompletion = nil
             apply(completion, to: textView, typed: text)
         }
         return true
@@ -33,6 +45,7 @@ extension BrowserViewController {
             let whole = NSRange(location: 0, length: (typed as NSString).length)
             textView.insertText(completion.completedText, replacementRange: whole)
         } else if completion.matches.count > 1 {
+            textView.selectedRange = NSRange(location: (typed as NSString).length, length: 0)
             showCompletionList(textView)
         } else {
             NSSound.beep()
@@ -46,20 +59,31 @@ extension BrowserViewController {
         forPartialWordRange charRange: NSRange, indexOfSelectedItem index: UnsafeMutablePointer<Int>
     ) -> [String] {
         index.pointee = -1
-        let text = textView.string as NSString
-        let componentStart = NSMaxRange(text.range(of: "/", options: .backwards))
         // The list opens only when a completion left the text as it is, so the last one
         // applied holds the matches, already worked out off the main actor.
-        guard let completion = lastCompletion, completion.completedText == textView.string
-        else { return [] }
-        return completion.matches.map { match in
-            let name = (match.name + (match.isFolder ? "/" : "")) as NSString
+        guard let completion = lastCompletion, completion.completedText == textView.string else {
+            return []
+        }
+        let text = textView.string as NSString
+        let slash = text.range(of: "/", options: .backwards)
+        guard slash.location != NSNotFound else { return [] }
+        let componentStart = NSMaxRange(slash)
+        return completion.matches.prefix(500).map { match in
+            let fullName = match.name + (match.isFolder ? "/" : "")
             if charRange.location <= componentStart {
                 let between = NSRange(
                     location: charRange.location, length: componentStart - charRange.location)
-                return text.substring(with: between) + (name as String)
+                return text.substring(with: between) + fullName
             }
-            return name.substring(from: min(charRange.location - componentStart, name.length))
+            let typedPrefix = text.substring(
+                with: NSRange(
+                    location: componentStart, length: charRange.location - componentStart))
+            if let prefixRange = fullName.range(
+                of: typedPrefix, options: [.anchored, .caseInsensitive])
+            {
+                return String(fullName[prefixRange.upperBound...])
+            }
+            return String(fullName.dropFirst(typedPrefix.count))
         }
     }
 }
