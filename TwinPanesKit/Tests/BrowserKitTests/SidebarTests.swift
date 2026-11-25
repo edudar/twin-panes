@@ -165,4 +165,24 @@ import Testing
         sidebar.removeFavorite(atRow: try row("Favorites"))
         #expect(titles.contains("USB") && favorites.folders.count == 5)
     }
+
+    // MARK: Ejecting (step 18)
+
+    func ejectButton(onRow title: String) throws -> EjectButton? {
+        let cell = outline.view(atColumn: 0, row: try row(title), makeIfNecessary: true)
+        return cell?.subviews.lazy.compactMap { $0 as? EjectButton }.first
+    }
+
+    @Test func anEjectableVolumesButtonReportsTheVolume() throws {
+        defer { cleanUp() }
+        var ejected: [String] = []
+        sidebar.onEject = { ejected.append($0.name) }
+        try #require(try ejectButton(onRow: "USB")).performClick(nil)
+        #expect(ejected == ["USB"])
+    }
+
+    @Test func aVolumeThatCantBeEjectedHasNoButton() throws {
+        defer { cleanUp() }
+        #expect(try ejectButton(onRow: "Macintosh HD") == nil)
+    }
 }

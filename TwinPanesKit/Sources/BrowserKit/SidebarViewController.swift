@@ -7,12 +7,18 @@ final class SidebarNode: NSObject {
     /// Nil for a section heading.
     let folder: URL?
     let symbol: String?
+    /// Set for a volume that can be ejected: its row gets an eject button.
+    let volume: Volume?
     var children: [SidebarNode]
 
-    init(title: String, folder: URL? = nil, symbol: String? = nil, children: [SidebarNode] = []) {
+    init(
+        title: String, folder: URL? = nil, symbol: String? = nil, volume: Volume? = nil,
+        children: [SidebarNode] = []
+    ) {
         self.title = title
         self.folder = folder
         self.symbol = symbol
+        self.volume = volume
         self.children = children
     }
 }
@@ -24,6 +30,8 @@ final class SidebarNode: NSObject {
 public final class SidebarViewController: NSViewController, NSMenuItemValidation {
     /// Called with the folder of a row the user chose.
     public var onOpen: ((URL) -> Void)?
+    /// Called with a volume whose eject button was clicked.
+    public var onEject: ((Volume) -> Void)?
 
     let favorites: Favorites
     let outlineView = NSOutlineView()
@@ -67,7 +75,8 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
         locationsSection.children = volumes.map { volume in
             SidebarNode(
                 title: volume.name, folder: volume.url,
-                symbol: volume.url.path == "/" ? "internaldrive" : "externaldrive")
+                symbol: volume.url.path == "/" ? "internaldrive" : "externaldrive",
+                volume: volume.isEjectable ? volume : nil)
         }
         reload()
     }
@@ -178,13 +187,26 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
             ])
             leading = label.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6)
         }
+        var trailing = cell.trailingAnchor
+        if let volume = node.volume {
+            let eject = EjectButton(
+                volume: volume, target: self, action: #selector(ejectClicked(_:)))
+            cell.addSubview(eject)
+            NSLayoutConstraint.activate([
+                eject.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                eject.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
+            trailing = eject.leadingAnchor
+        }
         NSLayoutConstraint.activate([
             leading,
-            label.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailing, constant: -4),
             label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell
     }
+
+    @objc func ejectClicked(_ sender: EjectButton) { onEject?(sender.volume) }
 
     public func outlineViewSelectionDidChange(_ notification: Notification) {
         guard !isHighlighting,
@@ -192,4 +214,25 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
         else { return }
         onOpen?(folder)
     }
+}
+
+/// The eject button on an ejectable volume's row.
+final class EjectButton: NSButton {
+    let volume: Volume
+
+    init(volume: Volume, target: AnyObject, action: Selector) {
+        self.volume = volume
+        super.init(frame: .zero)
+        image = NSImage(
+            systemSymbolName: "eject.fill", accessibilityDescription: "Eject \(volume.name)")
+        isBordered = false
+        refusesFirstResponder = true
+        self.target = target
+        self.action = action
+        toolTip = "Eject “\(volume.name)”"
+        translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 }

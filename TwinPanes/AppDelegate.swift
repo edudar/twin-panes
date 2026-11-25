@@ -282,10 +282,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         controller.frameController.onUpdate = { [weak sidebar, weak controller] in
             sidebar?.highlight((controller?.layout.focusedPanelItem as? BrowserItem)?.folder)
         }
+        sidebar.onEject = { [weak self, weak controller] volume in
+            guard let self, let controller else { return }
+            self.eject(volume, reportingIn: controller)
+        }
         controller.frameController.sidebar = sidebar
-        Task { [weak sidebar] in
-            let volumes = await Task.detached { MountedVolumes.current() }.value
-            sidebar?.show(volumes: volumes)
+        sidebar.show(volumes: volumes)
+        volumeWatcher.start()
+    }
+
+    /// The volumes the sidebars show, kept current for all windows.
+    private var volumes: [Volume] = []
+    private lazy var volumeWatcher = VolumeWatcher { [weak self] volumes in
+        guard let self else { return }
+        self.volumes = volumes
+        for controller in windowControllers {
+            (controller.frameController.sidebar as? SidebarViewController)?.show(volumes: volumes)
+        }
+    }
+
+    /// Unmounts and ejects off the main actor: it can take seconds. The watcher hears of
+    /// the unmount; a refusal is shown in the window's status line.
+    private func eject(_ volume: Volume, reportingIn controller: MainWindowController) {
+        Task { [weak controller] in
+            let failure: String? = await Task.detached {
+                do {
+                    try NSWorkspace.shared.unmountAndEjectDevice(at: volume.url)
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            }.value
+            if let failure {
+                controller?.frameController.showStatus("Can’t eject “\(volume.name)”: \(failure)")
+            }
         }
     }
 
