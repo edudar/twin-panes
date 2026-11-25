@@ -67,4 +67,16 @@ import Testing
         #expect(
             !isEnabled(#selector(MainFrameViewController.moveTabToOtherPanel(_:)), in: controller))
     }
+
+    @Test func tabSwitchingIsDisabledWhileZoomed() {
+        let controller = controller()
+        layout.insert(TestItem("second"))
+        #expect(isEnabled(#selector(MainFrameViewController.selectNextTab(_:)), in: controller))
+        #expect(
+            isEnabled(#selector(MainFrameViewController.selectPreviousTab(_:)), in: controller))
+        layout.toggleZoom()
+        #expect(!isEnabled(#selector(MainFrameViewController.selectNextTab(_:)), in: controller))
+        #expect(
+            !isEnabled(#selector(MainFrameViewController.selectPreviousTab(_:)), in: controller))
+    }
 }

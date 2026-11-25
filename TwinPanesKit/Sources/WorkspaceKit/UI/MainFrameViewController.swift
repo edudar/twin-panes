@@ -17,9 +17,9 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     private let split = NSSplitView()
     /// The split controller hosting the sidebar and the panel area so AppKit gives the
     /// sidebar full-height system material and toolbar tracking.
-    private let splitViewController = NSSplitViewController()
-    private let sidebarHostController = NSViewController()
-    private let contentController = NSViewController()
+    private let splitViewController = SidebarSplitViewController()
+    private let sidebarHostController = ContainerViewController()
+    private let contentController = ContainerViewController()
     private lazy var sidebarItem: NSSplitViewItem = {
         let item = NSSplitViewItem(sidebarWithViewController: sidebarHostController)
         item.canCollapse = true
@@ -37,6 +37,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     private static let defaultSidebarWidth: CGFloat = 180
     /// The width to show the sidebar at: restored, or its last width before hiding.
     private var sidebarWidth = MainFrameViewController.defaultSidebarWidth
+    private var wantsSidebarShown = true
     private let statusLabel = NSTextField(labelWithString: "")
     private var token: ObservationToken?
     private var lastFocusedItemID: ItemID?
@@ -69,11 +70,11 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         for slot in [SlotID.leftPanel, .rightPanel] {
             let controller = SlotViewController(slot: slot, frame: self)
             slotControllers[slot] = controller
-            addChild(controller)
+            contentController.addChild(controller)
             split.addArrangedSubview(controller.view)
         }
 
-        addChild(zoomHost)
+        contentController.addChild(zoomHost)
         zoomHost.view.translatesAutoresizingMaskIntoConstraints = false
         zoomHost.view.isHidden = true
 
@@ -83,7 +84,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.setAccessibilityIdentifier("statusLine")
 
-        let contentView = NSView()
+        let contentView = contentController.view
         contentView.addSubview(split)
         contentView.addSubview(zoomHost.view)
         NSLayoutConstraint.activate([
@@ -96,10 +97,12 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
             zoomHost.view.topAnchor.constraint(equalTo: split.topAnchor),
             zoomHost.view.bottomAnchor.constraint(equalTo: split.bottomAnchor),
         ])
-        contentController.view = contentView
-        sidebarHostController.view = NSView()
 
         splitViewController.splitView.dividerStyle = .thin
+        splitViewController.onResize = { [weak self] in self?.sidebarDidResize() }
+        splitViewController.onToggleSidebar = { [weak self] sender in
+            self?.toggleSidebarShown(sender)
+        }
         splitViewController.addSplitViewItem(sidebarItem)
         splitViewController.addSplitViewItem(contentItem)
         addChild(splitViewController)
@@ -163,6 +166,11 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         guard current?.id != lastFocusedItemID || focusLost else { return }
         lastFocusedItemID = current?.id
         guard let current, let window else { return }
+        if let responderView = window.firstResponder as? NSView,
+            responderView.isDescendant(of: current.viewController.view)
+        {
+            return
+        }
         let target = current.preferredFirstResponder
         window.makeFirstResponder(target ?? current.viewController.view)
     }
@@ -195,7 +203,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
 
     // MARK: Restoration (docs/plans/M5.md, D-c)
 
-    /// The window's tabs and divider, to save.
+    /// The window's tabs, panel divider, and sidebar state, to save.
     public var windowState: WindowState {
         var state = layout.savedState
         state.dividerFraction = placedDividerFraction ?? restoredDividerFraction
@@ -221,17 +229,33 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         if hasPlacedDivider { view.window?.invalidateRestorableState() }
     }
 
-    /// Puts back saved tabs and the divider. Call before the window first appears: the
-    /// divider is placed then, instead of the even split.
+    private func sidebarDidResize() {
+        guard hasPlacedDivider else { return }
+        if !sidebarItem.isCollapsed {
+            let width = sidebarHostController.view.frame.width
+            if width >= 120 { sidebarWidth = min(width, 400) }
+        }
+        view.window?.invalidateRestorableState()
+    }
+
+    /// Puts back saved tabs, panel divider, and sidebar state. Call before the window
+    /// first appears: the panel divider is placed then, instead of the even split.
     public func restore(_ state: WindowState, using restorer: ItemRestorer) {
         layout.restore(state, using: restorer)
         // Saved state is data from disk: keep the fraction a fraction.
-        restoredDividerFraction = state.dividerFraction.map { min(max($0, 0), 1) }
+        restoredDividerFraction = state.dividerFraction.flatMap {
+            $0.isFinite ? min(max($0, 0), 1) : nil
+        }
         // Saved state is data from disk: a width the window can show.
-        if let width = state.sidebarWidth { sidebarWidth = min(max(CGFloat(width), 120), 400) }
-        if let shown = state.sidebarShown, sidebar != nil {
-            sidebarItem.isCollapsed = !shown
-            placeSidebar()
+        if let width = state.sidebarWidth, width.isFinite {
+            sidebarWidth = min(max(CGFloat(width), 120), 400)
+        }
+        if let shown = state.sidebarShown {
+            wantsSidebarShown = shown
+            if sidebar != nil {
+                sidebarItem.isCollapsed = !shown
+                placeSidebar()
+            }
         }
     }
 
@@ -249,10 +273,18 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
             }
             _ = view
             sidebarHostController.addChild(sidebar)
-            sidebar.view.frame = sidebarHostController.view.bounds
-            sidebar.view.autoresizingMask = [.width, .height]
+            sidebar.view.translatesAutoresizingMaskIntoConstraints = false
             sidebarHostController.view.addSubview(sidebar.view)
-            sidebarItem.isCollapsed = false
+            NSLayoutConstraint.activate([
+                sidebar.view.leadingAnchor.constraint(
+                    equalTo: sidebarHostController.view.leadingAnchor),
+                sidebar.view.trailingAnchor.constraint(
+                    equalTo: sidebarHostController.view.trailingAnchor),
+                sidebar.view.topAnchor.constraint(equalTo: sidebarHostController.view.topAnchor),
+                sidebar.view.bottomAnchor.constraint(
+                    equalTo: sidebarHostController.view.bottomAnchor),
+            ])
+            sidebarItem.isCollapsed = !wantsSidebarShown
             placeSidebar()
         }
     }
@@ -270,13 +302,22 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     /// changed. The app keeps the sidebar's highlight on the active panel's folder.
     public var onUpdate: (() -> Void)?
 
-    /// View › Show/Hide Sidebar (⌃⌘S). Not AppKit's `toggleSidebar:`: the panels'
-    /// NSSplitViews answer that one, and they come first in the responder chain.
+    /// View › Show/Hide Sidebar (⌃⌘S). Forwarded here from the sidebar split controller.
     @objc public func toggleSidebarShown(_ sender: Any?) {
         guard sidebar != nil else { return }
-        if isSidebarShown { sidebarWidth = sidebarHostController.view.frame.width }
-        sidebarItem.isCollapsed.toggle()
+        if isSidebarShown, hasPlacedDivider {
+            let width = sidebarHostController.view.frame.width
+            if width >= 120 { sidebarWidth = min(width, 400) }
+        }
+        wantsSidebarShown = !isSidebarShown
+        sidebarItem.isCollapsed = !wantsSidebarShown
         placeSidebar()
+        if !wantsSidebarShown, let responder = view.window?.firstResponder as? NSView,
+            responder.isDescendant(of: sidebarHostController.view)
+        {
+            lastFocusedItemID = nil
+            focusCurrentItemIfChanged()
+        }
         view.window?.invalidateRestorableState()
     }
 
@@ -392,14 +433,16 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         case #selector(exitZoom(_:)):
             return layout.zoomedItem != nil
         case #selector(selectNextTab(_:)), #selector(selectPreviousTab(_:)):
-            return layout.items(in: layout.activePanel).count > 1
+            return layout.zoomedItem == nil && layout.items(in: layout.activePanel).count > 1
         default:
             return true
         }
     }
 
     public func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
-        if item.action == #selector(toggleSidebarShown(_:)) {
+        if item.itemIdentifier == .toggleSidebar
+            || item.action == #selector(toggleSidebarShown(_:))
+        {
             item.toolTip = isSidebarShown ? "Hide Sidebar" : "Show Sidebar"
             return sidebar != nil
         }
@@ -483,4 +526,24 @@ private final class FrontItemHost: WorkspaceHost {
         guard let frame, frame.isInFront(itemID) else { return }
         frame.showStatus(message)
     }
+}
+
+@MainActor
+private final class SidebarSplitViewController: NSSplitViewController {
+    var onResize: (() -> Void)?
+    var onToggleSidebar: ((Any?) -> Void)?
+
+    override func splitViewDidResizeSubviews(_ notification: Notification) {
+        super.splitViewDidResizeSubviews(notification)
+        onResize?()
+    }
+
+    @objc override func toggleSidebar(_ sender: Any?) {
+        onToggleSidebar?(sender)
+    }
+}
+
+@MainActor
+private final class ContainerViewController: NSViewController {
+    override func loadView() { view = NSView() }
 }

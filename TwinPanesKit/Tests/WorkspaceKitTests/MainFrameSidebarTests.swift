@@ -50,36 +50,52 @@ import Testing
     }
 
     @Test func aHiddenSidebarIsSavedAndRestoredHidden() {
-        let frame = controller().frameController
+        let windowController = controller()
+        let frame = windowController.frameController
         frame.sidebar = content
         frame.toggleSidebarShown(nil)
         let state = frame.windowState
-        #expect(state.sidebarShown == false)
-        let restored = MainWindowController(
+        #expect(state.sidebarShown == false && state.sidebarWidth == 180)
+        let restoredController = MainWindowController(
             layout: MainFrameLayout(filler: .testBrowsers), workspace: WorkspaceRegistry(),
             dispatcher: CommandDispatcher(registry: CommandRegistry()),
-            closeCoordinator: CloseCoordinator(openItems: { [] }) { _ in .discard }
-        ).frameController
+            closeCoordinator: CloseCoordinator(openItems: { [] }) { _ in .discard })
+        let restored = restoredController.frameController
         let other = NSViewController()
         other.view = NSView()
         restored.sidebar = other
         restored.restore(state, using: ItemRestorer())
         #expect(!restored.isSidebarShown)
+        _ = (windowController, restoredController)
+    }
+
+    @Test func restoreBeforeSidebarAssignmentRespectsHiddenState() {
+        let windowController = controller()
+        let frame = windowController.frameController
+        var state = frame.windowState
+        state.sidebarShown = false
+        frame.restore(state, using: ItemRestorer())
+        frame.sidebar = content
+        #expect(!frame.isSidebarShown)
+        _ = windowController
     }
 
     @Test func layoutChangesAreReported() {
-        let frame = controller().frameController
+        let windowController = controller()
+        let frame = windowController.frameController
         var updates = 0
         frame.onUpdate = { updates += 1 }
         layout.insert(TestItem("a"))
         #expect(updates >= 1)
+        _ = windowController
     }
 
-    @Test func toolbarToggleReflectsSidebarAvailabilityAndTogglesSidebar() {
+    @Test func toolbarToggleReflectsSidebarAvailabilityAndTogglesSidebar() throws {
         let windowController = controller()
         let frame = windowController.frameController
-        let item = NSToolbarItem(itemIdentifier: .toggleSidebar)
-        item.action = #selector(MainFrameViewController.toggleSidebarShown(_:))
+        let item = try #require(
+            windowController.window?.toolbar?.items.first { $0.itemIdentifier == .toggleSidebar })
+        #expect(item.isBordered)
         #expect(!frame.validateToolbarItem(item))
 
         frame.sidebar = content
@@ -90,5 +106,6 @@ import Testing
         #expect(!frame.isSidebarShown)
         frame.toggleSidebarShown(item)
         #expect(frame.isSidebarShown)
+        _ = windowController
     }
 }

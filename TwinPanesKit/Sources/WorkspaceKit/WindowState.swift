@@ -58,6 +58,11 @@ extension WindowState {
         struct Header: Decodable { let version: Int }
         let decoder = JSONDecoder()
         let version = try decoder.decode(Header.self, from: data).version
+        guard version >= 1 else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: [], debugDescription: "Invalid WindowState version \(version)"))
+        }
         guard version <= Self.currentVersion else {
             throw WindowStateError.newerVersion(version)
         }
@@ -108,7 +113,8 @@ public struct ItemRestorer {
     /// The rebuilt item, or nil when the kind is unknown, the version is newer than its
     /// factory reads, or the factory can't use the state.
     public func item(from state: ItemState) -> (any WorkspaceItem)? {
-        guard let factory = factories[state.kind], state.version <= factory.newestVersion
+        guard let factory = factories[state.kind],
+            state.version >= 1, state.version <= factory.newestVersion
         else { return nil }
         return factory.make(state)
     }
@@ -118,29 +124,28 @@ extension MainFrameLayout {
     /// The tabs to save. Items without `restorableState` are left out, and the
     /// selection and zoom are kept only when they name a saved tab.
     public var savedState: WindowState {
-        WindowState(
-            left: savedState(of: .leftPanel), right: savedState(of: .rightPanel),
-            activePanel: activePanel, zoomed: savedZoom)
-    }
-
-    private var savedZoom: TabPosition? {
-        guard let zoomedItemID else { return nil }
-        for panel in [SlotID.leftPanel, .rightPanel] {
-            if let index = savedItemIDs(in: panel).firstIndex(of: zoomedItemID) {
-                return TabPosition(panel: panel, index: index)
-            }
+        let leftEntries = savedEntries(in: .leftPanel)
+        let rightEntries = savedEntries(in: .rightPanel)
+        let zoomed = zoomedItemID.flatMap { id in
+            [(SlotID.leftPanel, leftEntries), (.rightPanel, rightEntries)].lazy
+                .compactMap { panel, entries in
+                    entries.firstIndex { $0.0 == id }.map { TabPosition(panel: panel, index: $0) }
+                }.first
         }
-        return nil
+        return WindowState(
+            left: panelState(for: .leftPanel, entries: leftEntries),
+            right: panelState(for: .rightPanel, entries: rightEntries),
+            activePanel: activePanel, zoomed: zoomed)
     }
 
-    private func savedItemIDs(in panel: SlotID) -> [ItemID] {
-        items(in: panel).filter { $0.restorableState != nil }.map(\.id)
+    private func savedEntries(in panel: SlotID) -> [(ItemID, ItemState)] {
+        items(in: panel).compactMap { item in item.restorableState.map { (item.id, $0) } }
     }
 
-    private func savedState(of panel: SlotID) -> PanelState {
+    private func panelState(for panel: SlotID, entries: [(ItemID, ItemState)]) -> PanelState {
         PanelState(
-            items: items(in: panel).compactMap(\.restorableState),
-            selectedIndex: selection[panel].flatMap { savedItemIDs(in: panel).firstIndex(of: $0) })
+            items: entries.map(\.1),
+            selectedIndex: selection[panel].flatMap { id in entries.firstIndex { $0.0 == id } })
     }
 
     /// Adds the tabs `state` describes. Tabs the restorer can't rebuild are skipped; a

@@ -60,4 +60,13 @@ import Testing
         #expect(tabs(of: .rightPanel, in: window).map(\.isActivePanel) == [true])
         #expect(tabs(of: .leftPanel, in: window).map(\.isActivePanel) == [false])
     }
+
+    @Test func focusInInactivePanelSubviewActivatesWithoutStealingFocus() {
+        let window = window()
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 100, height: 22))
+        right.viewController.view.addSubview(field)
+        window.makeFirstResponder(field)
+        #expect(layout.activePanel == .rightPanel)
+        #expect((window.firstResponder as? NSView)?.isDescendant(of: field) == true)
+    }
 }

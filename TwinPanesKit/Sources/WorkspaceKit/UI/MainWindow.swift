@@ -184,6 +184,7 @@ private final class MainToolbar: NSToolbar, NSToolbarDelegate {
         item.toolTip = "Show or hide the sidebar"
         item.image = NSImage(
             systemSymbolName: "sidebar.leading", accessibilityDescription: "Toggle Sidebar")
+        item.isBordered = true
         item.target = nil
         item.action = #selector(MainFrameViewController.toggleSidebarShown(_:))
         return item

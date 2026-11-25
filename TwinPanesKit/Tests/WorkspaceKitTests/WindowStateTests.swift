@@ -1,7 +1,28 @@
+import AppKit
 import Foundation
 import Testing
 
 @testable import WorkspaceKit
+
+@MainActor
+private final class CountingItem: WorkspaceItem {
+    let id = ItemID()
+    let kind: ItemKind = "test"
+    let title = "counting"
+    let preferredSlot: SlotID = .leftPanel
+    weak var host: WorkspaceHost?
+    var onChange: (() -> Void)?
+    lazy var viewController: NSViewController = {
+        let vc = NSViewController()
+        vc.view = NSView()
+        return vc
+    }()
+    private(set) var reads = 0
+    var restorableState: ItemState? {
+        reads += 1
+        return ItemState(kind: kind, version: 1, payload: Data("counting".utf8))
+    }
+}
 
 /// Saving a window's tabs and putting them back (docs/plans/M5.md, D-c).
 @MainActor
@@ -97,5 +118,24 @@ import Testing
 
     @Test func dataThatIsntWindowStateIsRefused() {
         #expect(throws: DecodingError.self) { try WindowState(decoding: Data("{}".utf8)) }
+    }
+
+    @Test func restorableStateIsReadOncePerItem() {
+        let item = CountingItem()
+        saved.insert(item)
+        saved.select(item.id)
+        saved.toggleZoom(item.id)
+        _ = saved.savedState
+        #expect(item.reads == 1)
+    }
+
+    @Test(arguments: [0, -1])
+    func nonPositiveVersionsAreRefused(version: Int) throws {
+        var state = saved.savedState
+        state.version = version
+        let data = try state.encoded()
+        #expect(throws: DecodingError.self) { try WindowState(decoding: data) }
+        #expect(
+            restorer.item(from: ItemState(kind: "test", version: version, payload: Data())) == nil)
     }
 }

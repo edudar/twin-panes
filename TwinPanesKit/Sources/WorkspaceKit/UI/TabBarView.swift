@@ -14,7 +14,9 @@ final class TabBarView: NSView {
     var onDrop: ((ItemID, Int) -> Void)?
     /// Where the dragged tab would land, drawn as a line between tabs.
     private var dropIndicatorX: CGFloat? {
-        didSet { needsDisplay = true }
+        didSet {
+            if dropIndicatorX != oldValue { needsDisplay = true }
+        }
     }
 
     private let stack = NSStackView()

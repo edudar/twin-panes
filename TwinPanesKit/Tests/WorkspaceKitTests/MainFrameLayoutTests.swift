@@ -203,4 +203,12 @@ import Testing
         #expect(SlotID.preview.otherPanel == nil)
         #expect(SlotID.drawer.otherPanel == nil)
     }
+
+    @Test func unknownItemCannotBeRemovedOrMoved() {
+        let layout = MainFrameLayout(filler: .testBrowsers)
+        layout.fillEmptyPanels()
+        let unknown = ItemID()
+        #expect(!layout.canRemove(unknown))
+        #expect(!layout.canMove(unknown, to: .rightPanel))
+    }
 }

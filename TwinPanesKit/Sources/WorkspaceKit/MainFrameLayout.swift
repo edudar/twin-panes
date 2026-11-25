@@ -50,7 +50,8 @@ public final class MainFrameLayout {
     /// of the filler's kind, since the filler would only put the same kind back
     /// (docs/plans/M5.md, D-a).
     public func canRemove(_ id: ItemID) -> Bool {
-        guard let slot = slot(of: id), slot.isPanel else { return true }
+        guard let slot = slot(of: id) else { return false }
+        guard slot.isPanel else { return true }
         let list = items(in: slot)
         return list.count > 1 || list.first?.kind != filler.kind
     }
