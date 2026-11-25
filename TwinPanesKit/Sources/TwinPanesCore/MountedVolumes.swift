@@ -5,6 +5,12 @@ public struct Volume: Equatable, Sendable {
     public let url: URL
     public let name: String
     public let isEjectable: Bool
+
+    public init(url: URL, name: String, isEjectable: Bool) {
+        self.url = url
+        self.name = name
+        self.isEjectable = isEjectable
+    }
 }
 
 /// The volumes the sidebar's Locations section shows: what Finder shows, the boot
