@@ -10,6 +10,9 @@ public struct EditorState: Codable, Equatable, Sendable {
     var selectionStart: UInt64
     var selectionEnd: UInt64
     var topRow: UInt64
+    /// Byte offset of `topRow` when saved, so `.autoFit` can keep the same bytes in view
+    /// after the window width changes. Optional for v1 compatibility.
+    var topOffset: UInt64?
     /// 8, 16 or 32; 0 fits the view's width.
     var bytesPerRow: Int
     var grouping: Int
@@ -23,7 +26,11 @@ extension HexEditorItem {
 
     /// Nil when no bookmark can be made for the file: the tab is then left out.
     public var restorableState: ItemState? {
-        guard let bookmark = try? url.bookmarkData(options: .withSecurityScope) else {
+        let bookmark =
+            (try? url.bookmarkData(options: .withSecurityScope))
+            ?? (try? url.bookmarkData(
+                options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess]))
+        guard let bookmark else {
             return nil
         }
         let options = hexView.options
@@ -34,11 +41,14 @@ extension HexEditorItem {
         } else {
             bytesPerRow = 0
         }
+        let layoutBytesPerRow = hexView.layout.bytesPerRow
+        let topOffset: UInt64? =
+            layoutBytesPerRow > 0 ? hexView.topRow * UInt64(layoutBytesPerRow) : nil
         let state = EditorState(
             fileBookmark: bookmark, selectionStart: selection.lowerBound,
-            selectionEnd: selection.upperBound, topRow: hexView.topRow, bytesPerRow: bytesPerRow,
-            grouping: options.grouping, offsetBase: options.offsetBase.rawValue,
-            textEncoding: options.textEncoding.rawValue)
+            selectionEnd: selection.upperBound, topRow: hexView.topRow, topOffset: topOffset,
+            bytesPerRow: bytesPerRow, grouping: options.grouping,
+            offsetBase: options.offsetBase.rawValue, textEncoding: options.textEncoding.rawValue)
         // Encoding numbers, strings and data doesn't fail; if it did, the tab would only
         // be left out of the saved window.
         guard let payload = try? JSONEncoder().encode(state) else { return nil }
@@ -47,8 +57,11 @@ extension HexEditorItem {
 
     /// The editor state saved in `state`, or nil when it isn't an editor's.
     public static func editorState(from state: ItemState) -> EditorState? {
+        guard state.kind == .editor, (1...Self.stateVersion).contains(state.version) else {
+            return nil
+        }
         // Nil is the restorer's "can't use this state": the tab is skipped.
-        try? JSONDecoder().decode(EditorState.self, from: state.payload)
+        return try? JSONDecoder().decode(EditorState.self, from: state.payload)
     }
 
     /// Puts back the saved view options, selection and scroll position, clamped to the
@@ -58,11 +71,19 @@ extension HexEditorItem {
         // has no data source and takes the file as empty, clamping the selection to 0.
         _ = controller.view
         hexView.options = Self.options(from: state)
-        guard length > 0 else { return }
+        guard length > 0 else {
+            controller.pendingScroll = nil
+            return
+        }
         let start = min(state.selectionStart, length - 1)
         let end = min(max(state.selectionEnd, start + 1), length)
         hexView.select(start..<end)
-        hexView.scroll(toTopRow: state.topRow)
+        let targetRow =
+            state.topOffset.map { $0 / UInt64(max(hexView.layout.bytesPerRow, 1)) }
+            ?? state.topRow
+        hexView.scroll(toTopRow: targetRow)
+        controller.pendingScroll = HexEditorViewController.PendingScroll(
+            topOffset: state.topOffset, topRow: state.topRow)
     }
 
     private static func options(from state: EditorState) -> HexViewOptions {

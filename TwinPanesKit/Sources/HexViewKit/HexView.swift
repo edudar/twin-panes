@@ -48,6 +48,8 @@ public protocol HexViewDelegate: AnyObject {
     func hexView(_ view: HexView, cannotEncode character: Character)
     /// The active column switched between hex and text (e.g. via Tab).
     func hexViewDidChangeColumn(_ view: HexView)
+    /// The scroll position changed.
+    func hexViewDidScroll(_ view: HexView)
 }
 
 extension HexViewDelegate {
@@ -59,6 +61,7 @@ extension HexViewDelegate {
     ) -> Bool { false }
     public func hexView(_ view: HexView, cannotEncode character: Character) {}
     public func hexViewDidChangeColumn(_ view: HexView) {}
+    public func hexViewDidScroll(_ view: HexView) {}
 }
 
 /// Virtualized hex/text view (PLAN.md §4.4). The view is window-sized and draws only
@@ -275,6 +278,8 @@ public final class HexView: NSView {
     func didScroll() {
         updateScroller()
         needsDisplay = true
+        window?.invalidateRestorableState()
+        delegate?.hexViewDidScroll(self)
     }
 
     /// The first row at least partly on screen.

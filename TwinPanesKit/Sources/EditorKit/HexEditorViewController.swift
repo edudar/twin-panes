@@ -55,6 +55,14 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     var allMatches: (pattern: SearchPattern, result: Searcher.AllMatches)?
     /// True between `hexView(_:overwrite:...)` and its matching `hexViewSelectionDidChange`.
     var applyingTypingEdit = false
+    /// Re-applied in `viewDidLayout()` once the view is in a window with real bounds, so
+    /// `.autoFit` and near-EOF scroll targets survive the initial 600x400 frame.
+    var pendingScroll: PendingScroll?
+
+    struct PendingScroll: Equatable {
+        let topOffset: UInt64?
+        let topRow: UInt64
+    }
     /// Asks whether to revert the file named by the argument; a sheet unless a test
     /// replaces it.
     var confirmRevert: @MainActor (HexEditorViewController, String) async -> Bool =
@@ -130,6 +138,21 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         }
     }
 
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard let pending = pendingScroll,
+            view.window != nil,
+            hexView.bounds.width > 0,
+            hexView.bounds.height > 0
+        else { return }
+        pendingScroll = nil
+        guard let item, item.length > 0 else { return }
+        let targetRow =
+            pending.topOffset.map { $0 / UInt64(max(hexView.layout.bytesPerRow, 1)) }
+            ?? pending.topRow
+        hexView.scroll(toTopRow: targetRow)
+    }
+
     override func viewDidAppear() {
         super.viewDidAppear()
         item?.updateStatus()
@@ -146,6 +169,11 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         }
         item?.updateStatus()
         updateInspector()
+        view.window?.invalidateRestorableState()
+    }
+
+    func hexViewDidScroll(_ view: HexView) {
+        pendingScroll = nil
     }
 
     func hexViewDidChangeColumn(_ view: HexView) {
