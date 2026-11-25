@@ -136,6 +136,9 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         let bar = functionKeyBar ?? NSView()
         bar.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(bar)
+        accessoryHolder.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(accessoryHolder)
+        // Empty, it takes no height; a strip's content sets it, hugging its rows.
         let barHeight = bar.heightAnchor.constraint(equalToConstant: 0)
         functionKeyBarHeight = barHeight
         showFunctionKeyBar()
@@ -143,7 +146,12 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
             splitViewController.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             splitViewController.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             splitViewController.view.topAnchor.constraint(equalTo: root.topAnchor),
-            splitViewController.view.bottomAnchor.constraint(equalTo: bar.topAnchor, constant: -2),
+            splitViewController.view.bottomAnchor.constraint(equalTo: accessoryHolder.topAnchor),
+            accessoryHolder.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            accessoryHolder.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            accessoryHolder.bottomAnchor.constraint(equalTo: bar.topAnchor, constant: -2),
+            emptyAccessoryHeight,
+
             bar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 4),
             bar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -4),
             bar.bottomAnchor.constraint(equalTo: statusLabel.topAnchor, constant: -2),
@@ -298,6 +306,33 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     }
 
     // MARK: The sidebar (docs/plans/M5.md, D-d)
+
+    private let accessoryHolder = NSView()
+    private lazy var emptyAccessoryHeight = accessoryHolder.heightAnchor.constraint(
+        equalToConstant: 0)
+
+    /// A view controller shown under the panels, above the function-key bar, as tall as
+    /// it needs: the file operations' progress strip (docs/plans/M6.md, D-e). The app
+    /// supplies it, so WorkspaceKit doesn't know what it shows.
+    public var bottomAccessory: NSViewController? {
+        didSet {
+            oldValue?.view.removeFromSuperview()
+            oldValue?.removeFromParent()
+            _ = view
+            emptyAccessoryHeight.isActive = bottomAccessory == nil
+            guard let bottomAccessory else { return }
+            addChild(bottomAccessory)
+            let content = bottomAccessory.view
+            content.translatesAutoresizingMaskIntoConstraints = false
+            accessoryHolder.addSubview(content)
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: accessoryHolder.leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: accessoryHolder.trailingAnchor),
+                content.topAnchor.constraint(equalTo: accessoryHolder.topAnchor),
+                content.bottomAnchor.constraint(equalTo: accessoryHolder.bottomAnchor),
+            ])
+        }
+    }
 
     /// A view controller shown at the leading edge, beside the panels; the app supplies
     /// it, so WorkspaceKit doesn't know what a sidebar holds.
