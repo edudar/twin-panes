@@ -32,6 +32,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     let folderGrants: FolderGrants
     /// The sidebar's favorites, kept with the grants: isolated in smoke and bench runs.
     let favorites: Favorites
+    /// Small view choices kept for every window, such as hiding the function keys:
+    /// isolated in smoke and bench runs.
+    let preferences: UserDefaults
 
     override init() {
         let child = SmokeChild(arguments: CommandLine.arguments)
@@ -54,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             isolatedGrantsSuite = suite
             folderGrants = FolderGrants(defaults: defaults)
             favorites = Favorites(defaults: defaults, home: DirectoryReader.realHomeDirectory)
+            preferences = defaults
 
             let recentsDir = baseFolder.appendingPathComponent("recents", isDirectory: true)
             try? FileManager.default.createDirectory(
@@ -77,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             isolatedGrantsSuite = nil
             folderGrants = FolderGrants()
             favorites = Favorites(defaults: .standard, home: DirectoryReader.realHomeDirectory)
+            preferences = .standard
             recentFiles = RecentFiles()
             sessions = SessionRegistry(sessionsRoot: SessionFolder.defaultRoot)
         }
@@ -329,6 +334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self.eject(volume, reportingIn: controller)
         }
         controller.frameController.sidebar = sidebar
+        controller.frameController.isFunctionKeyBarShown = isFunctionKeyBarShown
         sidebar.show(volumes: volumes)
         volumeWatcher.start()
     }
@@ -574,8 +580,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func showSpikeReport(_ sender: Any?) { spike.showReport() }
     @objc func exportSpikeReport(_ sender: Any?) { spike.exportReport() }
 
+    // MARK: Function keys
+
+    private static let functionKeyBarHiddenKey = "FunctionKeyBarHidden"
+
+    private var isFunctionKeyBarShown: Bool {
+        !preferences.bool(forKey: Self.functionKeyBarHiddenKey)
+    }
+
+    /// View › Hide/Show Function Keys, for every window (docs/plans/M6.md, D-b).
+    @objc func toggleFunctionKeys(_ sender: Any?) {
+        preferences.set(isFunctionKeyBarShown, forKey: Self.functionKeyBarHiddenKey)
+        for controller in windowControllers {
+            controller.frameController.isFunctionKeyBarShown = isFunctionKeyBarShown
+        }
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
+        case #selector(toggleFunctionKeys(_:)):
+            menuItem.title = isFunctionKeyBarShown ? "Hide Function Keys" : "Show Function Keys"
+            return true
         case #selector(newEditorView(_:)):
             return activeController?.layout.focusedPanelItem is PlaceholderEditorItem
         default:

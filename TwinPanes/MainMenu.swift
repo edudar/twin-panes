@@ -80,7 +80,7 @@ enum MainMenu {
         _ = submenu(
             "View",
             [
-                command(.toggleSidebar), .separator(),
+                command(.toggleSidebar), command(.toggleFunctionKeys), .separator(),
                 command(.toggleZoom), command(.exitZoom), .separator(),
                 command(.nextTab), command(.previousTab), command(.switchPanel), .separator(),
                 command(.browserOpen), command(.browserShowPackageContents),

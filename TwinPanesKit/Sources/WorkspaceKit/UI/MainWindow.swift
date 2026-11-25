@@ -90,7 +90,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
         self.workspace = workspace
         self.closeCoordinator = closeCoordinator
         frameController = MainFrameViewController(
-            layout: layout, closeCoordinator: closeCoordinator)
+            layout: layout, closeCoordinator: closeCoordinator, dispatcher: dispatcher)
         let window = MainWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],

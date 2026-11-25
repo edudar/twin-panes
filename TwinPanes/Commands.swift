@@ -11,6 +11,7 @@ import WorkspaceKit
     @objc optional func openRecentFile(_ sender: Any?)
     @objc optional func clearRecentFiles(_ sender: Any?)
     @objc optional func locateRecentFile(_ sender: Any?)
+    @objc optional func toggleFunctionKeys(_ sender: Any?)
     @objc optional func newBrowserTab(_ sender: Any?)
     @objc optional func newEditorTab(_ sender: Any?)
     @objc optional func newEditorView(_ sender: Any?)
@@ -43,6 +44,7 @@ extension CommandID {
     static let nextTab: CommandID = "workspace.nextTab"
     static let previousTab: CommandID = "workspace.previousTab"
     static let toggleSidebar: CommandID = "view.toggleSidebar"
+    static let toggleFunctionKeys: CommandID = "view.toggleFunctionKeys"
     static let switchPanel: CommandID = "panel.switch"
     static let moveTabToOtherPanel: CommandID = "panel.moveTab"
     static let browserView: CommandID = "browser.view"
@@ -109,6 +111,9 @@ enum DefaultCommands {
         add(
             .toggleSidebar, "Show Sidebar",
             #selector(MainFrameViewController.toggleSidebarShown(_:)))
+        add(
+            .toggleFunctionKeys, "Hide Function Keys",
+            #selector(AppActions.toggleFunctionKeys(_:)))
         add(.switchPanel, "Switch Panel", #selector(MainFrameViewController.switchPanel(_:)))
         add(
             .moveTabToOtherPanel, "Move Tab to Other Panel",
@@ -158,6 +163,7 @@ enum DefaultCommands {
         let findBar = BindingScope.item(.editor, part: "findBar")
 
         registry.bind(KeyChord("q", .command), to: .quit)
+        registry.bind(.function(10), to: .quit)  // as in Norton Commander (§4.7)
         registry.bind(KeyChord("n", .command), to: .newWindow)
         registry.bind(KeyChord("o", .command), to: .openFile)
         // ⌘L is Finder's "Make Alias"; the conflict is deferred to M10 (§9).

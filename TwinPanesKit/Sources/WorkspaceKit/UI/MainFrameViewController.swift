@@ -47,10 +47,32 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     /// Each item's own host; items hold theirs weakly.
     private var itemHosts: [ItemID: FrontItemHost] = [:]
 
-    public init(layout: MainFrameLayout, closeCoordinator: CloseCoordinator) {
+    /// With a `dispatcher`, the frame shows the function-key bar (docs/plans/M6.md, D-b).
+    public init(
+        layout: MainFrameLayout, closeCoordinator: CloseCoordinator,
+        dispatcher: CommandDispatcher? = nil
+    ) {
         self.layout = layout
         self.closeCoordinator = closeCoordinator
+        functionKeyBar = dispatcher.map(FunctionKeyBar.init(dispatcher:))
         super.init(nibName: nil, bundle: nil)
+    }
+
+    public let functionKeyBar: FunctionKeyBar?
+
+    /// Whether the function-key bar shows; the app keeps the choice for every window.
+    public var isFunctionKeyBarShown = true {
+        didSet { showFunctionKeyBar() }
+    }
+    private var functionKeyBarHeight: NSLayoutConstraint?
+    private static let functionKeyBarShownHeight: CGFloat = 22
+
+    private func showFunctionKeyBar() {
+        guard let functionKeyBar else { return }
+        functionKeyBar.isHidden = !isFunctionKeyBarShown
+        functionKeyBarHeight?.constant =
+            isFunctionKeyBarShown ? Self.functionKeyBarShownHeight : 0
+        if isFunctionKeyBarShown { functionKeyBar.update(for: viewIfLoaded?.window) }
     }
 
     @available(*, unavailable)
@@ -109,12 +131,23 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         splitViewController.view.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(splitViewController.view)
         root.addSubview(statusLabel)
+        // The function-key bar sits between the panels and the status line; hidden, it
+        // takes no height.
+        let bar = functionKeyBar ?? NSView()
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(bar)
+        let barHeight = bar.heightAnchor.constraint(equalToConstant: 0)
+        functionKeyBarHeight = barHeight
+        showFunctionKeyBar()
         NSLayoutConstraint.activate([
             splitViewController.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             splitViewController.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             splitViewController.view.topAnchor.constraint(equalTo: root.topAnchor),
-            splitViewController.view.bottomAnchor.constraint(
-                equalTo: statusLabel.topAnchor, constant: -4),
+            splitViewController.view.bottomAnchor.constraint(equalTo: bar.topAnchor, constant: -2),
+            bar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 4),
+            bar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -4),
+            bar.bottomAnchor.constraint(equalTo: statusLabel.topAnchor, constant: -2),
+            barHeight,
             statusLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
             statusLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
             statusLabel.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -4),
