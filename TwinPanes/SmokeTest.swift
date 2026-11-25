@@ -21,6 +21,9 @@ struct SmokeTest {
     let childTracker = ChildTracker()
 
     func run() {
+        // Flush every check immediately when stdout is piped (CI's `tee`), so a hang still
+        // shows the last step that ran.
+        setbuf(stdout, nil)
         // A guard against hangs, not a performance gate: the full run takes about 10 s on
         // the dev Mac and over 30 s on a hosted macOS 27 runner, before M4's 100k-file
         // folder (created and deleted in the run).
@@ -43,6 +46,14 @@ struct SmokeTest {
                 print("::error title=Smoke test::timed out after 240 s")
             }
             exit(1)
+        }
+        // Backup off the main queue in case the main thread itself blocks or spins past 240 s.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 250) {
+            fputs("SMOKE FAIL: main thread blocked past 240 s timeout\n", stderr)
+            if ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true" {
+                fputs("::error title=Smoke test::main thread blocked past 240 s timeout\n", stderr)
+            }
+            _exit(1)
         }
         Task { @MainActor in
             var failures: [String] = []
@@ -193,7 +204,12 @@ struct SmokeTest {
             chain = FocusChain.scopes(in: window)
             check(resolve(.tab, chain) == nil, "Tab in path field is not intercepted")
             check(resolve(.function(3), chain) == .browserView, "F3 in path field → browser.view")
+            check(
+                resolve(KeyChord("\r", .command), chain) == .browserOpenInEditor,
+                "⌘↩ in path field → browser.openInEditor")
             await pathCompletion(check, browser: browser, window: window, folder: folder)
+            await openFromPathField(
+                check, in: first, browser: browser, window: window, folder: folder)
         } else {
             check(false, "browser has a path field")
         }
