@@ -39,6 +39,14 @@ extension SmokeTest {
         else {
             return check(false, "the sidebar lists Applications")
         }
+        // Finder's glyph comes as bitmaps from the system; a symbol has none.
+        let appsIcon =
+            (outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView)?
+            .imageView?.image
+        check(
+            appsIcon?.isTemplate == true
+                && appsIcon?.representations.contains { $0 is NSBitmapImageRep } == true,
+            "Applications shows Finder's glyph")
         outline.selectRowIndexes([row], byExtendingSelection: false)
         await browser.listed()
         check(

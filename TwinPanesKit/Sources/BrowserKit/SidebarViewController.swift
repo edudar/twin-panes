@@ -158,6 +158,26 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
         return "folder"
     }
 
+    private static func icon(forSymbol symbol: String) -> NSImage {
+        if symbol == "a.circle", let applicationsGlyph { return applicationsGlyph }
+        return NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(iconConfiguration) ?? NSImage()
+    }
+
+    /// Finder's Applications glyph, which no public symbol matches: the template icon the
+    /// system ships for sidebars, readable in the sandbox. `a.circle` stands in if a
+    /// macOS release drops the file. Read once, a few KB, on first use.
+    private static let applicationsGlyph: NSImage? = {
+        let file = URL(
+            fileURLWithPath:
+                "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/SidebarApplicationsFolder.icns"
+        )
+        guard let image = NSImage(contentsOf: file) else { return nil }
+        image.isTemplate = true
+        image.size = NSSize(width: 18, height: 18)
+        return image
+    }()
+
     /// The icon size Finder's sidebar uses for its rows.
     private static let iconConfiguration = NSImage.SymbolConfiguration(
         pointSize: 15, weight: .regular)
@@ -213,9 +233,7 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
         cell.textField = label
         var leading = label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2)
         if let symbol = node.symbol {
-            let image = NSImageView(
-                image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-                    .withSymbolConfiguration(Self.iconConfiguration) ?? NSImage())
+            let image = NSImageView(image: Self.icon(forSymbol: symbol))
             image.translatesAutoresizingMaskIntoConstraints = false
             cell.addSubview(image)
             cell.imageView = image
