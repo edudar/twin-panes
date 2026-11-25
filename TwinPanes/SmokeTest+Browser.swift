@@ -96,6 +96,18 @@ extension SmokeTest {
             await browser.listed()
         }
         check(browser.entries.count == count + 50, "all 100k files and 50 folders are listed")
+        // Completion reads the 100k names off the main thread (docs/plans/M5.md, step 23).
+        // The typing comes first: the test types the whole path in one main-thread turn,
+        // which a person never does. Only Tab is measured.
+        typeInPathField(folder.standardizedFileURL.path + "/fo", browser: browser, window: window)
+        var completed: String?
+        await gate("completing a name among 100k") {
+            completed = await pressTabInPathField(browser: browser, window: window)
+        }
+        check(
+            completed == folder.standardizedFileURL.path + "/folder-",
+            "Tab completes among 100k names: \(completed ?? "nothing")")
+        press("\u{1b}", in: window)
         for column in ["size", "modified", "kind", "name"] {
             for ascending in [false, true] {
                 await gate("sorting 100k by \(column), \(ascending ? "up" : "down")") {

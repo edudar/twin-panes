@@ -180,6 +180,7 @@ struct SmokeTest {
             chain = FocusChain.scopes(in: window)
             check(resolve(.tab, chain) == nil, "Tab in path field is not intercepted")
             check(resolve(.function(3), chain) == .browserView, "F3 in path field → browser.view")
+            await pathCompletion(check, browser: browser, window: window, folder: folder)
         } else {
             check(false, "browser has a path field")
         }
