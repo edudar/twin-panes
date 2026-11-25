@@ -16,6 +16,40 @@ import Testing
         #expect(OperationRequest.putBack([MovedItem(from: here, to: here)]).waitsItsTurn)
     }
 
+    @Test func renameAndNewFolderRunAtOnceAndReportRefusals() {
+        #expect(!OperationRequest.rename(here, to: "y").waitsItsTurn)
+        #expect(!OperationRequest.makeFolder(named: "y", in: here).waitsItsTurn)
+        let refused = OperationResult.renamed(.failure(.taken(here)))
+        #expect(refused.refusal == .taken(here) && refused.failures.isEmpty)
+        let error = FileSystemError("make folder", "/tmp/x", errno: EACCES)
+        let failed = OperationResult.madeFolder(.failure(.failed(error)))
+        #expect(failed.failures == [error] && !failed.wasCancelled)
+    }
+
+    /// The queue runs a rename and a new folder like any other request.
+    @Test func renameAndNewFolderGoThroughTheQueue() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("QueuedOperationTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = FileOperationQueue(fileSystem: RealFileOperationSystem())
+        let made = await queue.add(
+            .makeFolder(named: "new", in: root), scopes: [], ask: { _, _ in ConflictAnswer(.stop) }
+        ).finished()
+        guard case .madeFolder(.success(let folder)) = made else {
+            Issue.record("made a folder: \(made)")
+            return
+        }
+        let renamed = await queue.add(
+            .rename(folder, to: "newer"), scopes: [], ask: { _, _ in ConflictAnswer(.stop) }
+        ).finished()
+        guard case .renamed(.success(let moved)) = renamed else {
+            Issue.record("renamed it: \(renamed)")
+            return
+        }
+        #expect(moved.to.lastPathComponent == "newer")
+    }
+
     @Test func aResultReportsItsFailuresAndCancel() {
         var outcome = TrashOutcome()
         outcome.failures = [FileSystemError("move to the Trash", "/x", errno: ENOTSUP)]

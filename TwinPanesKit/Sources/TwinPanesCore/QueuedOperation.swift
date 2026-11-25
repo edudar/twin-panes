@@ -8,13 +8,15 @@ public enum OperationRequest: Sendable, Equatable {
     case delete([URL])
     /// Undo moving items back where they were (docs/plans/M6.md, D-g).
     case putBack([MovedItem])
+    case rename(URL, to: String)
+    case makeFolder(named: String, in: URL)
 
     /// Copies and moves wait their turn; trash and delete are quick and run at once
     /// (docs/plans/M6.md, D-e).
     var waitsItsTurn: Bool {
         switch self {
         case .copy, .move, .putBack: true
-        case .trash, .delete: false
+        case .trash, .delete, .rename, .makeFolder: false
         }
     }
 }
@@ -25,6 +27,8 @@ public enum OperationResult: Sendable {
     case moved(MoveOutcome)
     case trashed(TrashOutcome)
     case removed(RemoveOutcome)
+    case renamed(Result<MovedItem, NameRefusal>)
+    case madeFolder(Result<URL, NameRefusal>)
 
     public var failures: [FileSystemError] {
         switch self {
@@ -32,6 +36,17 @@ public enum OperationResult: Sendable {
         case .moved(let outcome): outcome.failures
         case .trashed(let outcome): outcome.failures
         case .removed(let outcome): outcome.failures
+        case .renamed(.failure(.failed(let error))), .madeFolder(.failure(.failed(let error))):
+            [error]
+        case .renamed, .madeFolder: []
+        }
+    }
+
+    /// Why a rename or new folder's name was refused before anything was touched.
+    public var refusal: NameRefusal? {
+        switch self {
+        case .renamed(.failure(let refusal)), .madeFolder(.failure(let refusal)): refusal
+        default: nil
         }
     }
 
@@ -41,6 +56,7 @@ public enum OperationResult: Sendable {
         case .moved(let outcome): outcome.wasCancelled
         case .trashed(let outcome): outcome.wasCancelled
         case .removed(let outcome): outcome.wasCancelled
+        case .renamed, .madeFolder: false
         }
     }
 }

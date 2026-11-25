@@ -85,7 +85,8 @@ public final class FileOperationQueue {
         }
     }
 
-    private nonisolated static func run(
+    /// Runs `request` to the end on this thread; the queue's operations and tests use it.
+    nonisolated static func run(
         _ request: OperationRequest, fileSystem: any FileOperationSystem,
         control: OperationControl, resolve: (Conflict) -> ConflictAnswer,
         progress: (OperationProgress) -> Void
@@ -110,6 +111,16 @@ public final class FileOperationQueue {
             return .removed(
                 TreeRemover(fileSystem: fileSystem).remove(
                     items, control: control, progress: progress))
+        case .rename(let item, let name):
+            return .renamed(
+                Result { () throws(NameRefusal) in
+                    try ItemNamer(fileSystem: fileSystem).rename(item, to: name)
+                })
+        case .makeFolder(let name, let folder):
+            return .madeFolder(
+                Result { () throws(NameRefusal) in
+                    try ItemNamer(fileSystem: fileSystem).makeFolder(named: name, in: folder)
+                })
         case .putBack(let items):
             return .moved(
                 PutBack(fileSystem: fileSystem).putBack(
