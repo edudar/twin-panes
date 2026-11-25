@@ -22,6 +22,10 @@ Twin Panes is early and changing quickly. Right now it offers:
 - **Sidebar, restore and path completion:** A Finder-style sidebar of favorites
   and mounted volumes (with eject), windows that come back after a relaunch with
   their panels and tabs, and Tab completion in the path field, like a shell's.
+- **File operations, Norton Commander style:** Copy and move to the other panel
+  (F5, F6), rename (F2), new folder (F7), trash (F8) and delete (⇧F8) with a
+  function-key bar, progress you can pause or cancel, conflict handling (replace,
+  skip, keep both, merge) and undo, also across volumes and for iCloud files.
 - **Responsive folder browsing:** Handles folders with 100,000+ files without
   stalling the UI, streaming rows as they load, tracking external changes live,
   and supporting sorting, history, type-to-select, and package inspection.
@@ -41,8 +45,8 @@ Twin Panes is early and changing quickly. Right now it offers:
 
 In rough order:
 
-1. **Daily-driver file manager:** An F-key bar, copy, move, rename and trash
-   with progress and conflict handling, and a Quick Look preview pane.
+1. **Daily-driver file manager:** A Quick Look preview pane and quick view, and
+   dragging files between panels and Finder.
 2. **Full-featured editor:** Insert and delete bytes in hex, plus plain-text
    and Markdown editing modes with find and replace.
 3. **Power-user workspace:** Multiple windows, a built-in terminal, remote

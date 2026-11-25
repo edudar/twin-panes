@@ -92,11 +92,11 @@ point one way only, enforced by `Package.swift`:
 
 | Module | Purpose | Depends on |
 |---|---|---|
-| `TwinPanesCore` | Byte source and page cache, search, the edit model (piece tree, add buffer, undo), editor sessions and saving, crash recovery at launch, directory listing, folder grants, security scopes, favorites and mounted volumes, path completion, stall/gap timing. Foundation only. | none |
-| `WorkspaceKit` | The main window, both panels, tabs and tab dragging, window state for restoration, the hosted sidebar, command registry and close workflow. | TwinPanesCore |
+| `TwinPanesCore` | Byte source and page cache, search, the edit model (piece tree, add buffer, undo), editor sessions and saving, crash recovery at launch, directory listing, folder grants, security scopes, favorites and mounted volumes, path completion, file operations (copy, move, trash, delete, rename, conflicts, the queue and undo history), stall/gap timing. Foundation only. | none |
+| `WorkspaceKit` | The main window, both panels, tabs and tab dragging, window state for restoration, the hosted sidebar and bottom strip, the function-key bar, command registry and close workflow. | TwinPanesCore |
 | `HexViewKit` | The virtualized hex view, layout, selection and copy. | WorkspaceKit, TwinPanesCore |
 | `TextEditKit` | Text and Markdown modes (later milestones). | WorkspaceKit, TwinPanesCore |
-| `BrowserKit` | The folder browser tab and file list, path completion, and the sidebar. | WorkspaceKit, TwinPanesCore |
+| `BrowserKit` | The folder browser tab and file list, path completion, the sidebar, and the file operations' commands, sheets and progress strip. | WorkspaceKit, TwinPanesCore |
 | `EditorKit` | The editor tab that hosts the hex and text modes. | HexViewKit, TextEditKit, WorkspaceKit, TwinPanesCore |
 | `SandboxProbe` | The sandbox capability spike (M0). | none |
 

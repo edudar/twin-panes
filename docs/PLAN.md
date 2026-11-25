@@ -63,6 +63,12 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D47 | **Restoration: versioned state through AppKit** (M5) | Each window keeps a `WindowState` (tabs, selection, active panel, zoom, divider, sidebar) as one JSON value in its restorable state; items save versioned `ItemState`, and kinds or versions a build doesn't know are skipped. Crash recovery runs before restoration, so a restored editor tab claims its recovered session (`LaunchRecovery`). Smoke and bench runs never read or write saved windows. See docs/plans/M5.md, D-c. |
 | D48 | **The sidebar** (M5) | Favorites as paths in user defaults (access from folder grants, D42) and Locations: Home, the mounted volumes (kept current by NSWorkspace's notifications) and the Trash, greyed out unless the app can list `~/.Trash` (Full Disk Access), checked again whenever the app becomes active; ejectable volumes get an eject button, which the sandbox allows. ⌃⌘S toggles it; edits show in every window. See docs/plans/M5.md, D-d. |
 | D49 | **Path completion** (M5) | Tab in the path field completes as a shell does (§4.7). Names are read and matched off the main actor and cached while the field is open; a second Tab lists the matches in AppKit's suggestions menu (`NSTextSuggestionsDelegate`), not `NSTextView.complete(_:)`, whose list can't take the field's font or line up with its text. See docs/plans/M5.md, D-e, and §4.7. |
+| D50 | **Several rows selected** (M6) | The file list selects as macOS does (⇧, ⌘, ⌘A); ".." never joins other rows. The selection is `ListingSelection`, rows of the listing they were made in, found again by name off the main actor when the rows change (D39). See docs/plans/M6.md, D-a. |
+| D51 | **The function-key bar** (M6) | F1–F10 under the panels, labelled from the command registry for what has focus and validated like the menu; View › Hide Function Keys for every window. See docs/plans/M6.md, D-b. |
+| D52 | **File operations through a seam** (M6) | Copy (`copyfile` with clones, metadata, no symlink following), move (a rename on one volume; elsewhere a copy, then each source removed once its copy is whole), trash, permanent delete, rename and new folder, all through `FileOperationSystem` so tests fail any step. Name conflicts ask Replace (the old item to the Trash), Skip, Keep Both, Merge for folders, with Apply to All per kind. See docs/plans/M6.md, D-c, D-d. |
+| D53 | **One app-wide queue, progress in the window** (M6) | Copies and moves run one at a time, trash, delete, rename and new folder at once; each holds its folders' grants until it ends. Progress reaches the main actor at most every 100 ms and shows in a strip under the panels of the window that started it. See docs/plans/M6.md, D-e. |
+| D54 | **Undo and redo of file operations** (M6) | One app-wide history, as Finder's: each finished operation's undo is worked out from its result (copies trashed, items put back to their exact place), redo runs the request again, and a permanent delete is a barrier. Not kept across launches. See docs/plans/M6.md, D-g. |
+| D55 | **iCloud files that aren't downloaded** (M6) | A copy downloads them first (cancellable); rename, a move on one volume and trash never do. The editor's first edit of one starts the download and is refused until it's here, so the session never clones a file with no bytes. See docs/plans/M6.md, D-h. |
 
 ## 3. Constraints that drive the design
 
@@ -141,8 +147,14 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `Favorites`, `MountedVolumes` | M5 | the sidebar's favorite folders (paths in user defaults) and the volumes Finder would show (D48) |
 | `PathCompletion`, `CompletionNames` | M5 | shell-style completion rules, and one folder's names read off the main actor for them (D49) |
 | `LaunchRecovery` | M5 | holds recovered sessions until restored tabs claim them (D47) |
+| `ListingSelection` | M6 | selected rows of the listing they were made in, found again by name in a newer one (D50) |
+| `FileOperationSystem`, `OperationPlanner` | M6 | the file operations' seam (reads and writes), and checking and walking sources (D52) |
+| `TreeCopier`, `TreeMover`, `TreeRemover`, `Trasher`, `ItemNamer`, `PutBack` | M6 | copy with conflicts, move, permanent delete, trash, rename and new folder, and putting items back for undo (D52, D54) |
+| `OperationControl`, `FileOperationQueue`, `QueuedOperation` | M6 | pause and cancel, the app-wide queue, and an operation's request, state and result (D53) |
+| `FileOperationHistory`, `FileChange` | M6 | undo and redo of file operations (D54) |
+| `CloudDownloads` | M6 | whether a file's bytes are only in iCloud, and asking for them (D55) |
 
-**BrowserKit components** (M1b, M4, M5)
+**BrowserKit components** (M1b, M4, M5, M6)
 
 | Component | Milestone | Role |
 |---|---|---|
@@ -152,6 +164,9 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `FileListTable`, `IconCache` | M1b, M4 | striped `NSTableView`, cached icon bitmaps (dark/light, lazy custom icons) and text-layout cells |
 | `AccessRequest` | M4 | sandbox access prompt targeting (volume, home folder, or lost grant) |
 | `StepTiming`, `StepRecorder` | M4 | main-actor step timing for smoke-test stall diagnostics |
+| `BrowserItem+FileCommands` | M6 | F2–⇧F8 and Undo/Redo sent to the app's handler (D52, D54) |
+| `OperationsStripViewController`, `OperationTexts` | M6 | the progress strip and what its rows say (D53) |
+| `TextSheet`, `DeleteConfirmation`, `ConflictSheet` | M6 | the sheets that confirm file operations and settle conflicts (D52)
 
 - **Project layout (D20):**
 
@@ -676,6 +691,17 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   `BrowserItem.openInDefaultApp` hands the file to `NSWorkspace` and puts a failure in
   the status line; the smoke test swaps it for a recorder, so the hand-off to another
   app is checked by hand only.
+- **As built (M6, docs/plans/M6.md):** D50–D55. The app's `FileOperationCommands`
+  handles every browser's file commands: F5 and F6 ask where to with the other panel's
+  folder and ask again with the reason when it can't work, F2 and F7 ask for a name and
+  select the result, F8 trashes at once and ⇧F8 confirms with ⌘D. Engines run on their
+  own dispatch queues and block while paused or waiting for a conflict's answer, which
+  is asked on the main actor in the window the operation came from. Building it found a
+  no-op move recorded as a move (undo then made a copy), a copy cancelled before it
+  began reporting success, and a progress row that stretched to take the panels' room.
+  The smoke test drives F5 to ⇧F8 and undo with real keys and sheets, copies 10,000
+  files with both panels watching (busiest gaps 8–29 ms) and deletes a shown 100k
+  folder (22–28 ms), under the stall gate.
 
 ### 4.8 Single main frame: workspace model (D7)
 
@@ -966,6 +992,9 @@ Dual panels came in M5 as `panel.switch` (Tab and ⇧Tab, bound in the file list
 scope only) and `panel.moveTab` (Window › Move Tab to Other Panel, no default key).
 Dropping a file on a window opens a hex tab in that window; dropping a folder opens a
 browser tab there and saves its grant.
+M6 added the file commands in the browser's scope, each with an F-key and a ⌘ shortcut
+(F2 ⌘R, F5 ⇧⌘C, F6 ⇧⌘M, F7 ⇧⌘N, F8 ⌘⌫, ⇧F8 ⌥⌘⌫) and a File menu item, F10 for Quit,
+and the function-key bar, whose labels are those commands' titles (D51).
 
 ### 4.12 App icon (D24)
 
@@ -1202,10 +1231,8 @@ byte histogram.
   - *Flushing on app deactivation*: the 1 s debounce and the flush at save and close
     cover it; an explicit flush when the app goes to the background isn't wired.
   - *Strategy B writes aren't coordinated* with `NSFileCoordinator` yet.
-  - *iCloud dataless files* (M3c step 13, left when M3c closed on 2026-11-23): the
-    first edit of an evicted file must download it before the clone, behind an
-    injected flag since CI has no iCloud. Lands in M6, whose copy and move must
-    handle dataless files too.
+  - ~~*iCloud dataless files*~~: done in M6 (D55), for operations and the first edit.
+    A real evicted file is checked by hand: CI has no iCloud.
   - ~~*A crash smoke test*~~: done in M5 (step 14). A child app is killed with SIGKILL
     mid-edit and the next launch shows the edit in its restored tab.
 - **From M4 (2026-11-23):**
@@ -1214,7 +1241,8 @@ byte histogram.
     while the table shrinks, up to seconds in the Debug build, and while it lasted
     the smoke test's editor undo checks once failed with the tab watching that
     folder. The smoke test moves the folder away instead (as Finder's Delete does).
-    Revisit with M6's operations, which delete large trees themselves.
+    M6 measured its own ⇧F8 of a shown 100k folder: 22–28 ms busiest on the dev Mac,
+    no stall, so the app's deletes don't need a fix; another app's still might.
   - *The stall gate on slower machines*: after the performance pass (D44), CI still
     crossed 50 ms in three steps (listing 102–362 ms, scrolling 57–120 ms, switching
     to dark 73–114 ms). The limit is now scaled to the machine rather than set per
@@ -1254,9 +1282,11 @@ byte histogram.
     sidebar material and unified toolbar, switching the whole window to Dark Aqua hit
     126.8–160.1 ms CPU on GPU-less CI runners (0.1–0.2 ms in `cell draw`, the rest
     AppKit window chrome) against 122–160 ms limits at 75–115 ms base. The base limit is
-    130 ms on the dev Mac, still scaled per machine. Tighten it back in M6, once CI's
-    history shows the readings under it, or sooner if the noisiest checks are made
-    steadier.
+    130 ms on the dev Mac, still scaled per machine.
+    M6 (step 21) found no room to tighten it: CI's last five runs before M6 read
+    busiest gaps of 0.8–1.1× the scaled limit (macOS 27: 160.1 against 143 ms, 144.9
+    against 152; macOS 26: 126.8 against 140), so it stays until the noisiest checks
+    (appearance switches, the first rows of a listing) are made steadier.
   - *Relaunch checks on macOS 15*: the smoke test's restore and crash relaunches start
     the app's own executable as a sandboxed child, which macOS 15 kills at launch with
     SIGTRAP (macOS 26 and later allow it). They run on 26 and later only, so restoring
@@ -1284,3 +1314,17 @@ byte histogram.
     sidebar-click-on-editor checks (deferred around concurrent sidebar work), plus
     pre-existing backlog items (`CommandDispatcher` when `firstResponder === window`, and
     avoiding `HexGlyphTable` rebuilds when font is unchanged in `HexView.relayout`).
+- **From M6 (2026-11-25):**
+  - *Renaming on the way and completion in F5/F6's field*: the field takes a folder;
+    the engine copies under the source's name, and completion is wired to the path
+    field only (docs/plans/M6.md, D-f).
+  - *A held first edit while an iCloud file downloads*: the edit is refused and asked
+    again instead (D55).
+  - *F5/F6 to a folder without a grant* says so and asks again rather than showing the
+    access prompt.
+  - *Putting back across volumes under another name* (undo of a Keep Both moved to
+    another volume) fails with `EXDEV` rather than move and rename in two steps.
+  - *Undo history across launches*, as in Finder, isn't kept.
+  - *Smoke-test flakes on a loaded machine*: "listing 100k files" crossed its limit now
+    and then, before M6 too, and the path-completion check hung twice after its second
+    Tab. Both passed on reruns.
