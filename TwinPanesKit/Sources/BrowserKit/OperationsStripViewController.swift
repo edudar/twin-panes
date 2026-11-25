@@ -134,6 +134,9 @@ private final class OperationRow: NSStackView {
         super.init(frame: .zero)
         orientation = .horizontal
         spacing = 8
+        // As tall as its contents: with a weaker hug a row stretched to take the panels'
+        // room (458 pt in the app, beside a sidebar).
+        setHuggingPriority(.required, for: .vertical)
         title.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
         detail.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         detail.textColor = .secondaryLabelColor
@@ -157,6 +160,7 @@ private final class OperationRow: NSStackView {
         texts.orientation = .vertical
         texts.alignment = .leading
         texts.spacing = 0
+        texts.setHuggingPriority(.required, for: .vertical)
         setViews([texts, bar, pause, cancel, showFailures], in: .leading)
     }
 
