@@ -39,6 +39,9 @@ public struct WindowState: Codable, Equatable, Sendable {
     public var zoomed: TabPosition?
     /// The left panel's share of the split, 0...1; nil starts the panels as halves.
     public var dividerFraction: Double?
+    /// Whether the sidebar was shown, and how wide it was; nil for the defaults.
+    public var sidebarShown: Bool?
+    public var sidebarWidth: Double?
 
     public func encoded() throws -> Data {
         let encoder = JSONEncoder()

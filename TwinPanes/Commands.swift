@@ -42,6 +42,7 @@ extension CommandID {
     static let exitZoom: CommandID = "workspace.exitZoom"
     static let nextTab: CommandID = "workspace.nextTab"
     static let previousTab: CommandID = "workspace.previousTab"
+    static let toggleSidebar: CommandID = "view.toggleSidebar"
     static let switchPanel: CommandID = "panel.switch"
     static let moveTabToOtherPanel: CommandID = "panel.moveTab"
     static let browserView: CommandID = "browser.view"
@@ -104,6 +105,9 @@ enum DefaultCommands {
         add(
             .previousTab, "Show Previous Tab",
             #selector(MainFrameViewController.selectPreviousTab(_:)))
+        add(
+            .toggleSidebar, "Show Sidebar",
+            #selector(MainFrameViewController.toggleSidebarShown(_:)))
         add(.switchPanel, "Switch Panel", #selector(MainFrameViewController.switchPanel(_:)))
         add(
             .moveTabToOtherPanel, "Move Tab to Other Panel",
@@ -162,6 +166,7 @@ enum DefaultCommands {
         registry.bind(KeyChord("\t", .control), to: .nextTab)
         registry.bind(KeyChord("\t", [.control, .shift]), to: .previousTab)
         // Only in the file list, so the path field and the editor keep Tab (§4.11).
+        registry.bind(KeyChord("s", [.control, .command]), to: .toggleSidebar)  // as in Finder
         registry.bind(.tab, to: .switchPanel, in: fileList)
         registry.bind(KeyChord("\t", .shift), to: .switchPanel, in: fileList)
         registry.bind(.function(3), to: .browserView, in: browser)

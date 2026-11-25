@@ -32,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private let isolatedGrantsFolder: URL?
     private let isolatedGrantsSuite: String?
     let folderGrants: FolderGrants
+    /// The sidebar's favorites, kept with the grants: isolated in smoke and bench runs.
+    let favorites: Favorites
 
     override init() {
         if Self.isIsolatedRun {
@@ -46,10 +48,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             isolatedGrantsFolder = dir
             isolatedGrantsSuite = suite
             folderGrants = FolderGrants(defaults: defaults)
+            favorites = Favorites(defaults: defaults, home: DirectoryReader.realHomeDirectory)
         } else {
             isolatedGrantsFolder = nil
             isolatedGrantsSuite = nil
             folderGrants = FolderGrants()
+            favorites = Favorites(defaults: .standard, home: DirectoryReader.realHomeDirectory)
         }
         super.init()
         if Self.isIsolatedRun { Self.ignoreSavedWindows() }
@@ -251,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             window.restorationClass = MainWindowRestoration.self
             window.identifier = MainWindowRestoration.identifier
         }
+        addSidebar(to: controller)
         if let saved {
             controller.frameController.restore(saved, using: itemRestorer)
         } else {
@@ -264,6 +269,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         controller.showWindow(nil)
         return controller
+    }
+
+    /// The sidebar (docs/plans/M5.md, D-d): a chosen folder opens in the active panel,
+    /// and the row for the folder that panel shows is highlighted.
+    private func addSidebar(to controller: MainWindowController) {
+        let sidebar = SidebarViewController(favorites: favorites)
+        sidebar.onOpen = { [weak self, weak controller] folder in
+            guard let self, let controller else { return }
+            self.open(folder, inActivePanelOf: controller)
+        }
+        controller.frameController.onUpdate = { [weak sidebar, weak controller] in
+            sidebar?.highlight((controller?.layout.focusedPanelItem as? BrowserItem)?.folder)
+        }
+        controller.frameController.sidebar = sidebar
+        Task { [weak sidebar] in
+            let volumes = await Task.detached { MountedVolumes.current() }.value
+            sidebar?.show(volumes: volumes)
+        }
+    }
+
+    /// Shows `folder` in the active panel's browser, or in a new browser tab there when
+    /// that panel shows something else.
+    func open(_ folder: URL, inActivePanelOf controller: MainWindowController) {
+        let layout = controller.layout
+        if let browser = layout.focusedPanelItem as? BrowserItem {
+            browser.go(to: folder)
+        } else {
+            layout.insert(makeBrowser(at: folder), in: layout.activePanel)
+        }
     }
 
     /// A browser tab at `folder`, or the active browser's folder, or the real home.
