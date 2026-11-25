@@ -15,6 +15,7 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
         var onChunk: (@Sendable (_ path: String, _ chunk: Int) -> Void)?
         var copied: [String] = []
         var renameFailures: [String: Int32] = [:]
+        var truncated: [String] = []
         var trashFolder: URL?
         var trashFailures: [String: Int32] = [:]
     }
@@ -35,6 +36,11 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
             $0.chunks = count
             $0.onChunk = onChunk
         }
+    }
+
+    /// Copies of these sources come out one byte short, as a copy cut off unnoticed.
+    func truncateCopies(endingWith suffix: String) {
+        script.withLock { $0.truncated.append(suffix) }
     }
 
     /// `EXDEV` here stands for a move to another volume.
@@ -83,6 +89,10 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
         }
         if chunks > 0 { try? FileManager.default.removeItem(at: destination) }
         try real.copyFile(source, to: destination, progress: progress)
+        let truncates = script.withLock { $0.truncated.contains { source.path.hasSuffix($0) } }
+        if truncates, let size = try? real.metadata(of: destination).size, size > 0 {
+            truncate(destination.path, off_t(size - 1))
+        }
     }
 
     func makeFolder(at url: URL) throws(FileSystemError) {
