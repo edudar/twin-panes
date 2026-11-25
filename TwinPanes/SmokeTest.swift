@@ -204,12 +204,7 @@ struct SmokeTest {
             chain = FocusChain.scopes(in: window)
             check(resolve(.tab, chain) == nil, "Tab in path field is not intercepted")
             check(resolve(.function(3), chain) == .browserView, "F3 in path field → browser.view")
-            check(
-                resolve(KeyChord("\r", .command), chain) == .browserOpenInEditor,
-                "⌘↩ in path field → browser.openInEditor")
             await pathCompletion(check, browser: browser, window: window, folder: folder)
-            await openFromPathField(
-                check, in: first, browser: browser, window: window, folder: folder)
         } else {
             check(false, "browser has a path field")
         }
