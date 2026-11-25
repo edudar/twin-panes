@@ -49,10 +49,11 @@ public final class BrowserItem: WorkspaceItem {
     /// Opens a file in the app Finder would open it with, saying in the status line when
     /// it can't; the smoke test stands in for it so it launches no other app.
     public lazy var openInDefaultApp: (URL) -> Void = { [weak self] url in
-        NSWorkspace.shared.open(url, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+        NSWorkspace.shared.open(url, configuration: NSWorkspace.OpenConfiguration()) {
+            [weak self] _, error in
             guard let error else { return }
             let message = "Can’t open “\(url.lastPathComponent)”: \(error.localizedDescription)"
-            Task { @MainActor in self?.host?.showStatus(message) }
+            Task { @MainActor [weak self] in self?.host?.showStatus(message) }
         }
     }
 
