@@ -76,7 +76,7 @@ extension SmokeTest {
         check(
             field?.stringValue == destination.standardizedFileURL.path,
             "F5's sheet offers the other panel's folder: \(field?.stringValue ?? "no sheet")")
-        pressReturn(inSheetOf: window)
+        confirm("Copy", inSheetOf: window)
         guard await sheetClosed(on: window) else {
             return check(false, "Return confirms F5's sheet")
         }
@@ -90,7 +90,7 @@ extension SmokeTest {
         // F5 again: the conflict sheet; Keep Both for all.
         select(["a.txt", "docs"])
         _ = dispatch(.function(5), in: window)
-        pressReturn(inSheetOf: window)
+        confirm("Copy", inSheetOf: window)
         // Apply to All covers one kind: the file and the folder each ask once.
         var asked = 0
         while asked < 2, await sheetTitled("already exists", on: window) {
@@ -108,7 +108,7 @@ extension SmokeTest {
         // F6 with Replace: the moved file takes the old one's place, which goes to the Trash.
         select(["a.txt"])
         _ = dispatch(.function(6), in: window)
-        pressReturn(inSheetOf: window)
+        confirm("Move", inSheetOf: window)
         if await sheetTitled("already exists", on: window) {
             clickButton("Replace", inSheetOf: window)
         }
@@ -131,14 +131,14 @@ extension SmokeTest {
         Self.select(["docs"], in: left, window: window)
         _ = dispatch(.function(2), in: window)
         sheetField(of: window)?.stringValue = "renamed"
-        pressReturn(inSheetOf: window)
+        confirm("Rename", inSheetOf: window)
         await operationsFinished(count: base + 4)
         check(
             fm.fileExists(atPath: source.appendingPathComponent("renamed/x.txt").path),
             "F2 renames")
         _ = dispatch(.function(7), in: window)
         sheetField(of: window)?.stringValue = "made"
-        pressReturn(inSheetOf: window)
+        confirm("Create", inSheetOf: window)
         await operationsFinished(count: base + 5)
         for _ in 0..<100 where left.selectedName != "made" { await settle(milliseconds: 20) }
         check(
@@ -252,12 +252,10 @@ extension SmokeTest {
         Self.buttons(in: content).first { $0.title == title }?.state = .on
     }
 
-    /// Return in a sheet: the button bound to Return takes it, which in an alert is its
-    /// first button.
-    private func pressReturn(inSheetOf window: NSWindow) {
-        guard let content = window.attachedSheet?.contentView else { return }
-        let buttons = Self.buttons(in: content)
-        (buttons.first { $0.keyEquivalent == "\r" } ?? buttons.first)?.performClick(nil)
+    /// Return in a sheet: clicks its confirming button, the one bound to Return. Found by
+    /// its title, since an alert binds Return to its first button only as it lays out.
+    private func confirm(_ title: String, inSheetOf window: NSWindow) {
+        clickButton(title, inSheetOf: window)
     }
 
     /// A key in a sheet as AppKit routes key equivalents there: to the button bound to it.

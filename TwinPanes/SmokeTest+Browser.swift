@@ -38,12 +38,6 @@ extension SmokeTest {
     /// 75 ms on the dev Mac between two heartbeats, scaled to this machine
     /// (`stallLimit()`). Gaps it spent waiting for a core are printed, not counted.
     func bigFolder(_ check: (Bool, String) -> Void, browser: BrowserItem, window: NSWindow) async {
-        // The table-rows workload's window, made once: making one waits on the window server.
-        let referenceWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled],
-            backing: .buffered, defer: false)
-        referenceWindow.isReleasedWhenClosed = false
-        defer { referenceWindow.close() }
         let count = 100_000
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("smoke-big-\(UUID().uuidString)", isDirectory: true)
@@ -57,36 +51,9 @@ extension SmokeTest {
         guard made else { return check(false, "create a 100k-file folder") }
         let before = browser.folder
         defer { browser.go(to: before) }  // where the rest of the smoke test expects it
-        let heart = Heartbeat()
-        let recorder = StepRecorder()
-        StepTiming.recorder = recorder
-        defer { StepTiming.recorder = nil }
+        let stalls = StallGate(smoke: self)
         func gate(_ what: String, _ body: () async -> Void) async {
-            // Measured again for each check: a shared runner's speed changes as it runs.
-            // Its leftovers (the table's layers, autoreleased objects) are cleared before
-            // the check starts, so they don't count against it.
-            let stall = autoreleasepool { Self.stallLimit(rowsIn: referenceWindow) }
-            await settle(milliseconds: 100)
-            let limit = Self.milliseconds(stall.limit)
-            let limitText = String(format: "%.0f", limit)
-            recorder.reset()
-            heart.start()
-            await body()
-            let meter = heart.stop()
-            let (wall, busy) = (
-                Self.milliseconds(meter.worstWall), Self.milliseconds(meter.worstBusy)
-            )
-            print(
-                String(
-                    format: "  info %@: worst main-thread gap %.1f ms; busiest %.1f ms on the CPU",
-                    what, wall, busy))
-            if busy > limit {
-                printSteps(recorder, from: meter.worstBusyEnd, lasting: meter.worstBusyWall)
-            } else if wall > limit {
-                // Not the app's work: on a shared machine, the main thread waited for a core.
-                print("       the main thread waited; its busiest gap was under the limit")
-            }
-            check(busy <= limit, "\(what) never keeps the main thread busy over \(limitText) ms")
+            await stalls.check(what, check, body)
         }
         let table = browser.preferredFirstResponder as? NSTableView
         check(table != nil, "browser exposes its file list table")
@@ -137,7 +104,7 @@ extension SmokeTest {
         // Rows draw their cells into one layer each (docs/plans/M4.md, performance pass,
         // step 7): the cells must still be drawn, not skipped.
         let drawn =
-            recorder.steps(from: .now - .seconds(600), to: .now)
+            stalls.recorder.steps(from: .now - .seconds(600), to: .now)
             .first { $0.name == "cell draw" }?.count ?? 0
         check(drawn >= 100, "scrolling draws the rows' cells (\(drawn) drawn)")
         // Icons are drawn per appearance (performance pass, step 3): switching gives the
