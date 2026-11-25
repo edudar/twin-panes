@@ -93,6 +93,16 @@ import Testing
         #expect(outcome.failures.map(\.path) == ["/somewhere"])
     }
 
+    @Test func aCopyCancelledBeforeItBeginsSaysSo() {
+        defer { cleanUp() }
+        let control = OperationControl()
+        control.cancel()
+        let outcome = TreeCopier(fileSystem: system).copy(
+            [], into: destination, control: control, resolve: { _ in ConflictAnswer(.stop) }
+        ) { _ in }
+        #expect(outcome.wasCancelled)
+    }
+
     @Test func cancellingStopsWithinAFileAndRemovesItsPartialCopy() {
         defer { cleanUp() }
         let control = OperationControl()

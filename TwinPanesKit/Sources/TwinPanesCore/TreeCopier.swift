@@ -53,6 +53,12 @@ public struct TreeCopier: Sendable {
         resolve: (Conflict) -> ConflictAnswer, progress: (OperationProgress) -> Void
     ) -> CopyOutcome {
         var run = CopyRun(destination: destination)
+        // Cancelled before it began (while it waited its turn, say): the walks came back
+        // empty, and nothing below would notice.
+        guard control.checkpoint() else {
+            run.outcome.wasCancelled = true
+            return run.outcome
+        }
         run.progress.bytesTotal = walks.reduce(0) { $0 + $1.totalBytes }
         run.progress.itemsTotal = walks.reduce(0) { $0 + $1.items.count }
         copying: for walk in walks {
