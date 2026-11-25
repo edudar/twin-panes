@@ -45,7 +45,7 @@ swift build --package-path TwinPanesKit --triple x86_64-apple-macosx15.0
 
 The smoke test drives the built app. It opens two windows, browses a real
 folder, and opens a 4 GiB sparse file to check open time, frame time and memory.
-It clicks, tabs and drags through both panels, uses the sidebar and Tab completion in
+It clicks, tabs and moves tabs between both panels, uses the sidebar and Tab completion in
 the path field with real key events, and starts the app again as a sandboxed child
 process to check that a window comes back after a relaunch and that edits come back
 after a crash (`--smoke-child`; on macOS 26 and later, since macOS 15 can't start a

@@ -87,11 +87,11 @@ content; the `M0` rows exist now.
 
 | Module | Folder | Milestone | Contents |
 |---|---|---|---|
-| app target | `TwinPanes/` | M0 | entry point, app delegate, main menu, command catalog and default bindings, placeholder items, smoke test, app icon. Later: preferences, and wiring the kits together (e.g. the hex-view factory for BrowserKit's preview pane) |
+| app target | `TwinPanes/` | M0 | entry point, app delegate, main menu, command catalog and default bindings, recent files, window restoration, placeholder items, smoke test (`SmokeChild`), app icon. Later: preferences, and wiring the kits together (e.g. the hex-view factory for BrowserKit's preview pane) |
 | TwinPanesCore | `TwinPanesKit/Sources/TwinPanesCore` | M0: module only | the UI-free engine, no AppKit imports (components below) |
 | WorkspaceKit | `TwinPanesKit/Sources/WorkspaceKit` | M0, M5 | the single main frame, independent of item types: `WorkspaceItem`, `MainFrameLayout` and its view controller, main window and controller, tab bar (with tab dragging, M5), `WindowState` and `ItemRestorer` (M5), the hosted sidebar (M5), close workflow, workspace registry, command registry and dispatcher, focus chain, menu bindings (§4.8, §4.11) |
 | HexViewKit | `TwinPanesKit/Sources/HexViewKit` | M1 | virtualized hex/text view, selection, inspector UI |
-| EditorKit | `TwinPanesKit/Sources/EditorKit` | M1 | the editor item: mode switcher, find bar; hosts the mode views over one `EditorSession` |
+| EditorKit | `TwinPanesKit/Sources/EditorKit` | M1, M5 | the editor item: mode switcher, find bar, editor state restoration (M5); hosts the mode views over one `EditorSession` |
 | BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b, M4, M5 | the browser tab: async listing, sorting, hidden files, history, live updates, path bar, folder access (M1b, M4); the sidebar, path completion and the tab's saved state (M5); later (M6–M7) operations queue, preview pane |
 | TextEditKit | `TwinPanesKit/Sources/TextEditKit` | M9 | plain-text and Markdown modes, large-text viewer |
 | SandboxProbe | `TwinPanesKit/Sources/SandboxProbe` | M0, M3c | Foundation-only probes for the sandbox spike (§5); only the app's Debug menu uses it. Stays until the M3c volume checks (external drives) are done, then goes away with that menu |
@@ -634,6 +634,15 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   browser tab saves its folder, selection, history, sort and hidden files as paths; a
   folder that's gone opens its nearest ancestor that's still there, and one the
   sandbox only needs access for counts as there.
+- **As built (M5 review fixes):** `PathCompletion` folds case consistently across matching
+  and iterative prefix computation; `CompletionNames` lists directly with cheap resource
+  keys on a bounded `OperationQueue` and coalesces concurrent reads per folder. The
+  completion popup caps offered items at 500, cancels stale async tasks across re-entry
+  and dismissal, and keeps the caret safe around slashes and spaces. Favorites and sidebar
+  highlights compare canonical paths via `BookmarkStore.pathsEqual`; `VolumeWatcher` runs
+  coalesced reads on a serial queue and removes observers in `deinit`; `MountedVolumes`
+  never marks the boot volume ejectable; and `IconCache.forget` slices paths in UTF-16
+  code units across NFC/NFD and combining marks.
 
 ### 4.8 Single main frame: workspace model (D7)
 
@@ -704,7 +713,7 @@ view (F4) opens or focuses the real editor item.
   `WorkspaceItem` contributes its own state through the protocol's restoration
   hook. Changes call `invalidateRestorableState()` so AppKit re-encodes them.
 - Encoded item state carries a small version number so an item can ignore state
-  written by an older build rather than misreading it.
+  written by a newer build rather than misreading it.
 - Merging windows and moving tabs between windows (M11) only change which window
   encodes an item; nothing else is stored separately.
 - AppKit restoration follows the system's "Close windows when quitting an app"
@@ -723,6 +732,14 @@ view (F4) opens or focuses the real editor item.
   `LaunchRecovery` keeps the sessions alive, since the registry holds them weakly.
   The sidebar is hosted at the leading edge; its toggle is `toggleSidebarShown:`,
   because the panels' split views answer AppKit's `toggleSidebar:` first.
+- **As built (M5 review fixes):** Focusing nested controls (Find bar, path field) in the
+  inactive panel activates the panel without stealing first responder; collapsing the
+  sidebar wraps AppKit's `NSSplitViewController` subclass (`SidebarSplitViewController`) so
+  drag-resizes and `toggleSidebar:` keep width/restoration state in sync alongside the
+  bordered `.toggleSidebar` toolbar item; `HexEditorItem` stores width-independent
+  `topOffset` and defers scroll restoration to `viewDidLayout`; and `MainWindowRestoration`
+  deduplicates restored sessions while deferring window presentation until AppKit applies
+  the saved frame.
 - **Crash recovery is independent (§4.2).** It doesn't rely on restoration: on
   launch, after AppKit has restored (or not restored) windows, any session with an
   unclean journal is reopened as a tab, in its restored tab if one exists, otherwise
@@ -950,7 +967,8 @@ opacity and glass), and check the icon at 16 and 32 px in Finder list view.
 - **Sandbox on in every build from the start**, entitlement
   `com.apple.security.files.user-selected.read-write`. Developing sandboxed avoids
   building features that later can't ship on the App Store.
-- **Recent files / favorites:** stored as security-scoped bookmarks.
+- **Recent files:** stored as security-scoped bookmarks (**favorites** stay plain paths in
+  `UserDefaults` and get access from saved folder grants per D48).
 - **Bookmarks:** app-scoped security-scoped bookmarks need the
   `com.apple.security.files.bookmarks.app-scope` entitlement; add it in M0.
   - On resolve, a bookmark that reports itself **stale but still resolves** is
@@ -1073,8 +1091,7 @@ byte histogram.
     smoke tests run on all three: launch, sandboxed file access, AppKit/TextKit
     behaviour. The relaunch checks (window restoration, bookmarks resolving after a
     relaunch, crash recovery) run on macOS 26 and 27 only (§9, "From M5").
- Lint runs only on the newest
-    image, so its rules match the current swift-format.
+    Lint runs only on the newest image, so its rules match the current swift-format.
   - Background: GitHub retired hosted macOS 14 runners on 2026-11-02
     (actions/runner-images#13518), which is why the minimum moved to macOS 15. Watch
     for the macOS 15 image's retirement notice; when it comes, raise the minimum
@@ -1129,8 +1146,8 @@ byte histogram.
     planned with the M3c recovery clone, which must wait for the download anyway, and
     moved to M6 when M3c closed (see "From M3c").
 - **From the M3a review (2026-11-22):**
-  - *Lazy `AddBuffer` creation*: open the backing file on first edit instead of at tab
-    open; lands in M3c when `AddBuffer` moves into the session folder (created on the
+  - ~~*Lazy `AddBuffer` creation*~~: open the backing file on first edit instead of at tab
+    open; landed in M3c when `AddBuffer` moved into the session folder (created on the
     first edit, docs/plans/M3c.md).
   - ~~*`UndoStack`, multi-view observation, and `EditBuffer` actor isolation*~~: done in
     M3b. The undo stack lives on `EditorSession`, which notifies observers and is
@@ -1228,3 +1245,10 @@ byte histogram.
     navigation to its parent, not the update.
   - *A smoke check that sometimes types late*: "Keep Mine keeps the edits" once found
     its typed byte at offset 1 instead of 0. Not reproduced on demand; watch CI.
+  - *Second internal APFS volumes in Locations*: `MountedVolumes` hides non-boot internal
+    volumes per M5 D-d, whereas Finder shows user-created internal volumes alongside the
+    boot volume. Revisit if Finder sidebar parity is desired.
+  - *M5 review deferred items*: `SmokeTest+Sidebar` temp-folder watcher teardown and
+    sidebar-click-on-editor checks (deferred around concurrent sidebar work), plus
+    pre-existing backlog items (`CommandDispatcher` when `firstResponder === window`, and
+    avoiding `HexGlyphTable` rebuilds when font is unchanged in `HexView.relayout`).
