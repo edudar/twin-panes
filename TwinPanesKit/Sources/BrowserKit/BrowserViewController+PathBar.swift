@@ -84,6 +84,7 @@ extension BrowserViewController: NSTextFieldDelegate {
 
     func showPathBar() {
         completionNames = nil
+        pathSuggestions.endListing()
         pendingCompletion?.cancel()
         pendingCompletion = nil
         pathField.isHidden = true

@@ -660,15 +660,16 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   its font and row height from the field's control size, so the field is `.small`; it
   starts at the field's text, so each item is the whole path (`PathCompletion.matchTexts`)
   and its text lines up with the typed path. AppKit asks for suggestions on every text
-  change and gets none until the list opens; to open it, `PathSuggestions` puts the same text back,
-  which makes AppKit ask again at once, and answers that request. Holding a request open
-  instead leaves AppKit waiting, with the field's progress indicator armed, and a
-  request answered is spent, so Tab after Escape could not reopen the list. While the
-  list shows, each change's request is answered once the new text's matches are read
-  and matched off the main actor, and a newer request cancels an older one's matching.
-  Escape closes the list without telling the delegate, so it checks the list (a child
-  window of the field's window) is still there before narrowing it. The smoke test
-  picks from the real list with Down and Return, and narrows it by typing.
+  change and gets none until the list opens; to open it, `PathSuggestions` puts the
+  same text back, which makes AppKit ask again at once, and answers that request.
+  Holding a request open instead leaves AppKit waiting, with the field's progress
+  indicator armed, and a request answered is spent, so Tab after Escape could not
+  reopen the list. While the list shows, each change's request is answered once the
+  new text's matches are read and matched off the main actor, and a newer request
+  cancels an older one's matching. Escape closes the list without telling the
+  delegate, so it checks the list (a child window of the field's window) is still
+  there before narrowing it. The smoke test picks from the real list with Down and
+  Return, and narrows it by typing.
 - **As built (opening a file from the path field):** the field is a `PathField` whose
   scope, `item.browser.pathField`, binds ⌘↩ to `browser.openInEditor`. Return still
   goes through the field's action, which checks for a file under the folder's grant.

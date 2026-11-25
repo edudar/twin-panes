@@ -82,6 +82,14 @@ import Testing
         #expect(listed == [root.path + "/Report 1.txt", root.path + "/Report 2.txt"])
     }
 
+    @Test func typingWhileListedListsTheTypedPathsMatches() async throws {
+        defer { cleanUp() }
+        let documents = root.path + "/Documents/"
+        #expect(await item.controller.listedMatchTexts(for: root.path + "/doc") == [documents])
+        #expect(await item.controller.listedMatchTexts(for: root.path + "/zz").isEmpty)
+        #expect(await item.controller.listedMatchTexts(for: "Music").isEmpty)
+    }
+
     @Test func textChangedBeforeTheNamesArriveIsLeftAlone() async throws {
         defer { cleanUp() }
         let editor = try editor

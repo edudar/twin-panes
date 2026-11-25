@@ -18,7 +18,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// The completion waiting for a folder's names; for tests.
     nonisolated(unsafe) var pendingCompletion: Task<Void, Never>?
     /// The path field's list of matches; the field holds it weakly.
-    let pathSuggestions = PathSuggestions()
+    lazy var pathSuggestions = PathSuggestions(matchTexts: { [weak self] typed in
+        await self?.listedMatchTexts(for: typed) ?? []
+    })
     /// Lists these texts under the field; tests stand in for it.
     lazy var showCompletionList: ([String], NSTextView) -> Void = { [pathSuggestions] in
         pathSuggestions.list($0, in: $1)

@@ -19,15 +19,8 @@ extension BrowserViewController {
             return true
         }
         pendingCompletion = Task { [weak self, weak textView] in
-            guard let found = await names.names(in: query.folder) else {
-                if !Task.isCancelled { self?.pendingCompletion = nil }
-                return
-            }
-            if Task.isCancelled { return }
-            // Matching 100k names takes tens of milliseconds: off the main actor too.
-            let completion = await Task.detached { PathCompletion(query: query, names: found) }
-                .value
-            guard !Task.isCancelled, let self, self.isEditingPath, let textView,
+            let completion = await Self.complete(query, among: names)
+            guard !Task.isCancelled, let completion, let self, self.isEditingPath, let textView,
                 self.pathField.currentEditor() === textView, textView.string == text
             else {
                 if !Task.isCancelled { self?.pendingCompletion = nil }
@@ -48,6 +41,28 @@ extension BrowserViewController {
         } else {
             NSSound.beep()
         }
+    }
+
+    /// The whole texts `typed`'s matches complete to, as the second Tab lists them; empty
+    /// when it isn't a path to complete or its folder can't be read.
+    func listedMatchTexts(for typed: String) async -> [String] {
+        guard let names = completionNames,
+            let query = PathCompletion.query(for: typed, home: DirectoryReader.realHomeDirectory),
+            let completion = await Self.complete(query, among: names)
+        else { return [] }
+        return Array(completion.matchTexts.prefix(Self.listedMatchLimit))
+    }
+
+    /// Reads `query`'s folder and matches its names; nil when the folder can't be read or
+    /// the task was cancelled first. Matching 100k names takes tens of milliseconds: off
+    /// the main actor too.
+    private static func complete(
+        _ query: PathCompletion.Query, among names: CompletionNames
+    ) async -> PathCompletion? {
+        guard let found = await names.names(in: query.folder), !Task.isCancelled else {
+            return nil
+        }
+        return await Task.detached { PathCompletion(query: query, names: found) }.value
     }
 
     /// More would only make a list nobody scrolls, built on every second Tab.

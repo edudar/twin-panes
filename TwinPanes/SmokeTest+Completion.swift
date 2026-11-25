@@ -151,6 +151,23 @@ extension SmokeTest {
         await pickFromCompletionList(
             check, browser: browser, window: window, expecting: path + "/folder-one/")
 
+        // Typing while the list shows narrows it: with only folder-two left, Down picks it.
+        typeInPathField(path + "/fo", browser: browser, window: window)
+        _ = await pressTabInPathField(browser: browser, window: window)
+        press("\t", in: window)
+        await settle(milliseconds: 100)
+        press("t", in: window)
+        await settle(milliseconds: 100)
+        pressDownArrow(in: window)
+        await settle(milliseconds: 100)
+        let narrowed = Self.view(in: browser.viewController.view, id: "browserPath")
+            .flatMap { ($0 as? NSTextField)?.currentEditor()?.string }
+        check(
+            narrowed == path + "/folder-two/",
+            "typing while the list shows narrows it: \(narrowed ?? "field closed")")
+        press("\u{1b}\u{1b}", in: window)
+        await settle(milliseconds: 50)
+
         typeInPathField("~", browser: browser, window: window)
         let tilde = await pressTabInPathField(browser: browser, window: window)
         check(
