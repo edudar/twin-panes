@@ -13,7 +13,11 @@ public struct OperationProgress: Sendable, Equatable {
 /// What a copy did: what it created at the top level of the destination (for undo),
 /// the items that failed, and whether it was cancelled.
 public struct CopyOutcome: Sendable {
+    /// Items made where nothing of this copy's was: the top-level copies, and the new
+    /// items inside folders it merged into.
     public var created: [URL] = []
+    /// What Replace sent to the Trash.
+    public var replaced: [TrashedItem] = []
     public var failures: [FileSystemError] = []
     public var wasCancelled = false
 }
@@ -31,61 +35,101 @@ public struct TreeCopier: Sendable {
     }
 
     /// Blocks until done. `progress` is called on this thread after every item and
-    /// while a file's data is copied.
+    /// while a file's data is copied; `resolve` when an item's name is taken, and the
+    /// copy waits for its answer.
     public func copy(
         _ walks: [SourceWalk], into destination: URL, control: OperationControl,
-        progress: (OperationProgress) -> Void
+        resolve: (Conflict) -> ConflictAnswer, progress: (OperationProgress) -> Void
     ) -> CopyOutcome {
-        var outcome = CopyOutcome()
-        var state = OperationProgress(
-            bytesTotal: walks.reduce(0) { $0 + $1.totalBytes },
-            itemsTotal: walks.reduce(0) { $0 + $1.items.count })
-        var madeFolders: [(source: URL, copy: URL)] = []
-        // Folders that couldn't be made, as "path/", so their contents are skipped.
-        var lostFolders: [String] = []
+        var run = CopyRun(destination: destination)
+        run.progress.bytesTotal = walks.reduce(0) { $0 + $1.totalBytes }
+        run.progress.itemsTotal = walks.reduce(0) { $0 + $1.items.count }
         copying: for walk in walks {
-            outcome.failures += walk.unreadable
+            run.outcome.failures += walk.unreadable
             for item in walk.items {
                 guard control.checkpoint() else {
-                    outcome.wasCancelled = true
+                    run.outcome.wasCancelled = true
                     break copying
                 }
-                let target = destination.appendingPathComponent(item.relativePath)
-                state.currentItem = item.relativePath
-                if lostFolders.contains(where: { item.relativePath.hasPrefix($0) }) {
-                    // Its folder's failure stands for it.
-                } else if item.metadata.kind == .folder {
-                    do {
-                        try fileSystem.makeFolder(at: target)
-                        madeFolders.append((item.source, target))
-                        if !item.relativePath.contains("/") { outcome.created.append(target) }
-                    } catch {
-                        outcome.failures.append(error)
-                        lostFolders.append(item.relativePath + "/")
-                    }
-                } else {
-                    switch copyFile(item, to: target, control: control, state: state, progress) {
-                    case .copied:
-                        if !item.relativePath.contains("/") { outcome.created.append(target) }
-                    case .failed(let error): outcome.failures.append(error)
-                    case .cancelled:
-                        outcome.wasCancelled = true
+                run.progress.currentItem = item.relativePath
+                if !run.isLeftOut(item) {
+                    guard copyItem(item, in: &run, control: control, resolve, progress) else {
+                        run.outcome.wasCancelled = true
                         break copying
                     }
                 }
-                state.itemsDone += 1
-                state.bytesDone += item.metadata.size
-                progress(state)
+                run.progress.itemsDone += 1
+                run.progress.bytesDone += item.metadata.size
+                progress(run.progress)
             }
         }
-        for folder in madeFolders.reversed() {
+        for folder in run.madeFolders.reversed() {
             do {
                 try fileSystem.copyMetadata(from: folder.source, to: folder.copy)
             } catch {
-                outcome.failures.append(error)
+                run.outcome.failures.append(error)
             }
         }
-        return outcome
+        return run.outcome
+    }
+
+    /// Copies one item, first settling a conflict if its name is taken. False once the
+    /// copy is to stop (cancelled, or the user chose Stop).
+    private func copyItem(
+        _ item: PlannedItem, in run: inout CopyRun, control: OperationControl,
+        _ resolve: (Conflict) -> ConflictAnswer, _ progress: (OperationProgress) -> Void
+    ) -> Bool {
+        var target = run.target(of: item)
+        let isFolder = item.metadata.kind == .folder
+        if let existing = try? fileSystem.metadata(of: target) {
+            let conflict = Conflict(item: item, existing: target, existingMetadata: existing)
+            let answer = run.remembered[isFolder] ?? resolve(conflict)
+            if answer.applyToAll { run.remembered[isFolder] = answer }
+            // An answer remembered for all may not fit this conflict (Merge for a file).
+            let choice = conflict.choices.contains(answer.choice) ? answer.choice : .skip
+            switch choice {
+            case .stop: return false
+            case .skip:
+                run.leaveOut(item)
+                return true
+            case .merge:
+                run.merged.insert(item.relativePath)
+                return true
+            case .keepBoth:
+                let name = KeepBothName.next(for: target.lastPathComponent) {
+                    (try? fileSystem.metadata(
+                        of: target.deletingLastPathComponent()
+                            .appendingPathComponent($0))) != nil
+                }
+                target = target.deletingLastPathComponent().appendingPathComponent(name)
+                run.rename(item, to: target)
+            case .replace:
+                do {
+                    let trashed = try fileSystem.trash(target)
+                    run.outcome.replaced.append(TrashedItem(original: target, trashed: trashed))
+                } catch {
+                    run.outcome.failures.append(error)
+                    run.leaveOut(item)
+                    return true
+                }
+            }
+        }
+        if isFolder {
+            do {
+                try fileSystem.makeFolder(at: target)
+                run.made(item, at: target)
+            } catch {
+                run.outcome.failures.append(error)
+                run.leaveOut(item)
+            }
+            return true
+        }
+        switch copyFile(item, to: target, control: control, state: run.progress, progress) {
+        case .copied: run.made(item, at: target)
+        case .failed(let error): run.outcome.failures.append(error)
+        case .cancelled: return false
+        }
+        return true
     }
 
     private enum FileResult {
@@ -116,5 +160,55 @@ public struct TreeCopier: Sendable {
             if error.errno != EEXIST { try? fileSystem.remove(target) }
             return control.isCancelled ? .cancelled : .failed(error)
         }
+    }
+}
+
+/// One copy's bookkeeping: where each item lands, given the folders renamed by Keep
+/// Both, merged, or left out by Skip or a failure.
+private struct CopyRun {
+    let destination: URL
+    var outcome = CopyOutcome()
+    var progress = OperationProgress()
+    var madeFolders: [(source: URL, copy: URL)] = []
+    /// Answers given with Apply to All, for folders (true) and everything else.
+    var remembered: [Bool: ConflictAnswer] = [:]
+    /// Relative paths of folders merged into, whose contents land in the existing one.
+    var merged: Set<String> = []
+    private var made: Set<String> = []
+    private var leftOut: [String] = []
+    /// Folders Keep Both renamed: original relative path to the new destination URL.
+    private var renamed: [String: URL] = [:]
+
+    init(destination: URL) { self.destination = destination }
+
+    func target(of item: PlannedItem) -> URL {
+        var parent = (item.relativePath as NSString).deletingLastPathComponent
+        var tail = [(item.relativePath as NSString).lastPathComponent]
+        while !parent.isEmpty {
+            if let moved = renamed[parent] {
+                return tail.reversed().reduce(moved) { $0.appendingPathComponent($1) }
+            }
+            tail.append((parent as NSString).lastPathComponent)
+            parent = (parent as NSString).deletingLastPathComponent
+        }
+        return destination.appendingPathComponent(item.relativePath)
+    }
+
+    func isLeftOut(_ item: PlannedItem) -> Bool {
+        leftOut.contains { item.relativePath.hasPrefix($0) }
+    }
+
+    mutating func leaveOut(_ item: PlannedItem) { leftOut.append(item.relativePath + "/") }
+
+    mutating func rename(_ item: PlannedItem, to target: URL) {
+        renamed[item.relativePath] = target
+    }
+
+    /// Records a made item; it counts as created unless its folder was made by this copy.
+    mutating func made(_ item: PlannedItem, at target: URL) {
+        made.insert(item.relativePath)
+        if item.metadata.kind == .folder { madeFolders.append((item.source, target)) }
+        let parent = (item.relativePath as NSString).deletingLastPathComponent
+        if !made.contains(parent) { outcome.created.append(target) }
     }
 }

@@ -37,7 +37,7 @@ import Testing
         let walk = OperationPlanner(fileSystem: system).walk(tree)
         var reports: [OperationProgress] = []
         let outcome = TreeCopier(fileSystem: system).copy(
-            [walk], into: destination, control: control
+            [walk], into: destination, control: control, resolve: { _ in ConflictAnswer(.stop) }
         ) { reports.append($0) }
         return (outcome, reports)
     }
@@ -85,7 +85,8 @@ import Testing
         var walk = OperationPlanner(fileSystem: system).walk(tree)
         walk.unreadable.append(FileSystemError("list", "/somewhere", errno: EACCES))
         let outcome = TreeCopier(fileSystem: system).copy(
-            [walk], into: destination, control: OperationControl()
+            [walk], into: destination, control: OperationControl(),
+            resolve: { _ in ConflictAnswer(.stop) }
         ) { _ in }
         #expect(outcome.failures.map(\.path) == ["/somewhere"])
     }
@@ -117,7 +118,9 @@ import Testing
         let walk = OperationPlanner(fileSystem: system).walk(tree)
         let destination = destination
         let task = Task.detached {
-            copier.copy([walk], into: destination, control: control) { _ in }
+            copier.copy(
+                [walk], into: destination, control: control, resolve: { _ in ConflictAnswer(.stop) }
+            ) { _ in }
         }
         await withCheckedContinuation { continuation in
             DispatchQueue.global().async {
