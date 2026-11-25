@@ -61,7 +61,7 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D45 | **Two panels, always** (M5) | Every window shows a browser in each panel, as halves at first. A panel's only browser tab can't be closed or moved out; any other last tab leaves a browser at the other panel's folder. The status line takes only the messages of the item in front. See docs/plans/M5.md, D-a. |
 | D46 | **The active panel follows focus** (M5) | Clicking or tabbing into a panel activates it. Tab and ⇧Tab switch panels while a file list has focus; tabs move by dragging or Window › Move Tab to Other Panel, as the same item. See docs/plans/M5.md, D-b. |
 | D47 | **Restoration: versioned state through AppKit** (M5) | Each window keeps a `WindowState` (tabs, selection, active panel, zoom, divider, sidebar) as one JSON value in its restorable state; items save versioned `ItemState`, and kinds or versions a build doesn't know are skipped. Crash recovery runs before restoration, so a restored editor tab claims its recovered session (`LaunchRecovery`). Smoke and bench runs never read or write saved windows. See docs/plans/M5.md, D-c. |
-| D48 | **The sidebar** (M5) | Favorites as paths in user defaults (access from folder grants, D42) and Locations from the mounted volumes, kept current by NSWorkspace's notifications; ejectable volumes get an eject button, which the sandbox allows. ⌃⌘S toggles it; edits show in every window. See docs/plans/M5.md, D-d. |
+| D48 | **The sidebar** (M5) | Favorites as paths in user defaults (access from folder grants, D42) and Locations: Home, the mounted volumes (kept current by NSWorkspace's notifications) and the Trash, greyed out unless the app can list `~/.Trash` (Full Disk Access), checked again whenever the app becomes active; ejectable volumes get an eject button, which the sandbox allows. ⌃⌘S toggles it; edits show in every window. See docs/plans/M5.md, D-d. |
 | D49 | **Path completion** (M5) | Tab in the path field completes as a shell does (§4.7). Names are read and matched off the main actor and cached while the field is open; a second Tab opens AppKit's completion list. See docs/plans/M5.md, D-e. |
 
 ## 3. Constraints that drive the design
@@ -511,7 +511,8 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
 ```
 
 - **Sidebar (left, collapsible):** Finder-like source list — Favorites (user-editable),
-  Locations/volumes (mounted, ejectable), later Tags. Clicking navigates the active
+  Locations (Home, mounted and ejectable volumes, the Trash with Full Disk Access),
+  later Tags. Clicking navigates the active
   panel. Toggle ⌃⌘S as in Finder.
 - **Two panels:** active panel has focus ring/highlight; Tab switches panels (only
   when a browser has focus — inside an editor Tab inserts a tab). Each panel owns its

@@ -9,16 +9,19 @@ final class SidebarNode: NSObject {
     let symbol: String?
     /// Set for a volume that can be ejected: its row gets an eject button.
     let volume: Volume?
+    /// Why the row can't be chosen now; nil when it can. Shown as its tooltip.
+    let unavailableReason: String?
     var children: [SidebarNode]
 
     init(
         title: String, folder: URL? = nil, symbol: String? = nil, volume: Volume? = nil,
-        children: [SidebarNode] = []
+        unavailableReason: String? = nil, children: [SidebarNode] = []
     ) {
         self.title = title
         self.folder = folder
         self.symbol = symbol
         self.volume = volume
+        self.unavailableReason = unavailableReason
         self.children = children
     }
 }
@@ -52,6 +55,8 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
     /// Set while the app highlights a row, so the selection doesn't count as a click.
     private var isHighlighting = false
     private var highlighted: URL?
+    private var volumeNodes: [SidebarNode] = []
+    private var isTrashListable = false
     var validatedDrag: (sequence: Int, hasFolder: Bool)?
 
     public override func loadView() {
@@ -79,6 +84,12 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
         scroll.drawsBackground = false
         view = scroll
         reloadFavorites()
+        reloadLocations()
+        Task { await refreshTrashAccess() }
+        // A selector observer, removed by NotificationCenter when the sidebar goes.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appDidBecomeActive(_:)),
+            name: NSApplication.didBecomeActiveNotification, object: nil)
     }
 
     public override func viewDidLayout() {
@@ -87,12 +98,50 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
     }
 
     public func show(volumes: [Volume]) {
-        locationsSection.children = volumes.map { volume in
+        volumeNodes = volumes.map { volume in
             SidebarNode(
                 title: volume.name, folder: volume.url,
                 symbol: volume.url.path == "/" ? "internaldrive" : "externaldrive",
                 volume: volume.isEjectable ? volume : nil)
         }
+        reloadLocations()
+    }
+
+    /// Checks again whether the Trash can be listed, which the user may have changed in
+    /// System Settings while the app ran, and shows its row enabled or greyed out.
+    public func refreshTrashAccess() async {
+        guard let home = favorites.standard.first else { return }
+        let trash = TrashFolder(home: home)
+        let isListable = await Task.detached { trash.isListable() }.value
+        guard isListable != isTrashListable else { return }
+        isTrashListable = isListable
+        reloadLocations()
+    }
+
+    @objc private func appDidBecomeActive(_ notification: Notification) {
+        Task { await refreshTrashAccess() }
+    }
+
+    /// Home, the volumes, then the Trash, which needs Full Disk Access to be listed.
+    private func reloadLocations() {
+        var places: [SidebarNode] = []
+        if let home = favorites.standard.first {
+            places.append(
+                SidebarNode(
+                    title: FileManager.default.displayName(atPath: home.path), folder: home,
+                    symbol: "house"))
+        }
+        places += volumeNodes
+        if let home = favorites.standard.first {
+            places.append(
+                SidebarNode(
+                    title: "Trash", folder: TrashFolder(home: home).url, symbol: "trash",
+                    unavailableReason: isTrashListable
+                        ? nil
+                        : "Showing the Trash needs Full Disk Access: System Settings › "
+                            + "Privacy & Security › Full Disk Access."))
+        }
+        locationsSection.children = places
         reload()
     }
 
@@ -211,7 +260,8 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
     }
 
     public func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-        node(item)?.folder != nil
+        guard let node = node(item) else { return false }
+        return node.folder != nil && node.unavailableReason == nil
     }
 
     public func outlineView(
@@ -260,6 +310,11 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailing, constant: -4),
             label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
+        if let reason = node.unavailableReason {
+            cell.toolTip = reason
+            label.textColor = .disabledControlTextColor
+            cell.imageView?.alphaValue = 0.4
+        }
         return cell
     }
 

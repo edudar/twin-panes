@@ -50,7 +50,7 @@ import Testing
         #expect(
             titles == [
                 "Favorites", "home", "Desktop", "Documents", "Downloads", "Applications",
-                "Locations", "Macintosh HD", "USB",
+                "Locations", "home", "Macintosh HD", "USB", "Trash",
             ])
     }
 

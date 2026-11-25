@@ -47,6 +47,8 @@ extension SmokeTest {
             appsIcon?.isTemplate == true
                 && appsIcon?.representations.contains { $0 is NSBitmapImageRep } == true,
             "Applications shows Finder's glyph")
+        await trashRow(check, in: outline)
+
         outline.selectRowIndexes([row], byExtendingSelection: false)
         await browser.listed()
         check(
@@ -69,6 +71,29 @@ extension SmokeTest {
         check(browser.folder.path == "/", "choosing the boot volume opens it in the active panel")
 
         await editFavorites(check, in: outline, alongside: other)
+    }
+
+    /// Locations lists Home and the Trash. In the sandboxed app the Trash row can be chosen
+    /// exactly when the app may list `~/.Trash`, which takes Full Disk Access.
+    private func trashRow(_ check: (Bool, String) -> Void, in outline: NSOutlineView) async {
+        let titles = (0..<outline.numberOfRows).map { row in
+            (outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView)?
+                .textField?.stringValue
+        }
+        guard let locations = titles.firstIndex(of: "Locations"),
+            let trash = titles.lastIndex(of: "Trash")
+        else { return check(false, "Locations lists the Trash") }
+        let home = DirectoryReader.realHomeDirectory
+        check(
+            titles[locations + 1] == FileManager.default.displayName(atPath: home.path),
+            "Locations starts with Home")
+        let isListable = await Task.detached { TrashFolder(home: home).isListable() }.value
+        let canChoose =
+            outline.delegate?.outlineView?(
+                outline, shouldSelectItem: outline.item(atRow: trash) as Any) ?? false
+        check(
+            canChoose == isListable,
+            "the Trash row can be chosen only with Full Disk Access (listable: \(isListable))")
     }
 
     /// A folder dropped on Favorites through the outline view's real drop methods shows in
