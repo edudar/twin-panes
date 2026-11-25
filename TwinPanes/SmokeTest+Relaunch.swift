@@ -1,6 +1,25 @@
 import AppKit
 
 extension SmokeTest {
+    /// Whether this macOS lets the sandboxed app start its own executable. On macOS 15
+    /// the child dies at launch with SIGTRAP before it can report (CI, 2026-11-24): a
+    /// second sandbox can't be set up inside the first. macOS 26 and later allow it.
+    static var canLaunchItself: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26
+    }
+
+    /// The checks that launch the app again (docs/plans/M5.md, D-f), where macOS lets
+    /// them; PLAN.md §9 ("From M5") tracks the gap on macOS 15.
+    func relaunchChecks(_ check: (Bool, String) -> Void) async {
+        guard Self.canLaunchItself else {
+            print("  info relaunch checks skipped: macOS 15 can't start a sandboxed child")
+            return
+        }
+        await selfLaunch(check)
+        await restoreRelaunch(check)
+        await crashRelaunch(check)
+    }
+
     /// Step 12 of docs/plans/M5.md (D-f): the sandboxed app can start its own executable
     /// as a child, which inherits the sandbox. The relaunch checks build on this.
     func selfLaunch(_ check: (Bool, String) -> Void) async {

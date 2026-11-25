@@ -1171,3 +1171,10 @@ byte histogram.
     steadier in A/B runs, so it stayed. The base limit is 75 ms on the dev Mac, still
     scaled per machine. Tighten it back to 50 ms in M6, once CI's history shows the
     readings under it, or sooner if the noisiest checks are made steadier.
+  - *Relaunch checks on macOS 15*: the smoke test's restore and crash relaunches start
+    the app's own executable as a sandboxed child, which macOS 15 kills at launch with
+    SIGTRAP (macOS 26 and later allow it). They run on 26 and later only, so restoring
+    windows and recovering after a crash aren't proven on 15. If that coverage is
+    needed, run the two launches as steps of the CI workflow instead (D-f's fallback):
+    the workflow's shell starts each child and kills the crash one. Revisit with M6's
+    CI work or the first restore bug reported on 15.
