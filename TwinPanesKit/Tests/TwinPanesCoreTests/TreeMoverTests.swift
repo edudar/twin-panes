@@ -52,6 +52,15 @@ import Testing
         #expect(outcome.moved.first?.from.lastPathComponent == "a.txt")
     }
 
+    @Test func movingIntoItsOwnFolderDoesNothing() {
+        defer { cleanUp() }
+        let outcome = TreeMover(fileSystem: system).move(
+            [source.appendingPathComponent("a.txt")], into: source, control: OperationControl(),
+            resolve: { _ in ConflictAnswer(.keepBoth) }, progress: { _ in })
+        #expect(outcome.moved.isEmpty && outcome.failures.isEmpty)
+        #expect(exists("src/a.txt") && !exists("src/a 2.txt"))
+    }
+
     @Test func acrossVolumesItemsAreCopiedThenRemoved() {
         defer { cleanUp() }
         system.failRename(endingWith: "src/docs", errno: EXDEV)

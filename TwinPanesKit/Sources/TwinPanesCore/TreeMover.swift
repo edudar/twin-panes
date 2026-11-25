@@ -42,6 +42,14 @@ public struct TreeMover: Sendable {
             }
             let target = destination.appendingPathComponent(source.lastPathComponent)
             state.currentItem = source.lastPathComponent
+            // Already there: nothing to move, and nothing for undo to move back.
+            if source.deletingLastPathComponent().standardizedFileURL.path
+                == destination.standardizedFileURL.path
+            {
+                state.itemsDone += 1
+                progress(state)
+                continue
+            }
             do {
                 try fileSystem.rename(source, to: target)
                 outcome.moved.append(MovedItem(from: source, to: target))

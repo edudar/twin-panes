@@ -39,6 +39,9 @@ public struct PutBack: Sendable {
         resolve: (Conflict) -> ConflictAnswer
     ) -> Bool {
         var target = item.from
+        guard target.standardizedFileURL.path != item.to.standardizedFileURL.path else {
+            return true
+        }
         let metadata: FileItemMetadata
         do {
             metadata = try fileSystem.metadata(of: item.to)
