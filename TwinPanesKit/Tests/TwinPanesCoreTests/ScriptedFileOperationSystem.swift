@@ -15,6 +15,7 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
         var onChunk: (@Sendable (_ path: String, _ chunk: Int) -> Void)?
         var copied: [String] = []
         var renameFailures: [String: Int32] = [:]
+        var removeFailures: [String: Int32] = [:]
         var truncated: [String] = []
         var trashFolder: URL?
         var trashFailures: [String: Int32] = [:]
@@ -41,6 +42,10 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
     /// Copies of these sources come out one byte short, as a copy cut off unnoticed.
     func truncateCopies(endingWith suffix: String) {
         script.withLock { $0.truncated.append(suffix) }
+    }
+
+    func failRemove(endingWith suffix: String, errno: Int32) {
+        script.withLock { $0.removeFailures[suffix] = errno }
     }
 
     /// `EXDEV` here stands for a move to another volume.
@@ -107,7 +112,13 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
         try real.copyMetadata(from: source, to: destination)
     }
 
-    func remove(_ url: URL) throws(FileSystemError) { try real.remove(url) }
+    func remove(_ url: URL) throws(FileSystemError) {
+        let failure = script.withLock { script in
+            script.removeFailures.first { url.path.hasSuffix($0.key) }?.value
+        }
+        if let failure { throw FileSystemError("remove", url.path, errno: failure) }
+        try real.remove(url)
+    }
 
     func rename(_ source: URL, to destination: URL) throws(FileSystemError) {
         let failure = script.withLock { script in
