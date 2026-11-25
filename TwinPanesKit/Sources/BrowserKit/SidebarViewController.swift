@@ -157,11 +157,15 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
 
     public func highlight(_ folder: URL?) {
         highlighted = folder?.standardizedFileURL
-        let row = highlighted.flatMap { target in
+        // Only the shown folder is resolved (the panel has opened it anyway); the rows are
+        // compared by path. Resolving them touched Desktop, Documents and Downloads on
+        // every update, and macOS asked for access to each at launch.
+        let target = highlighted.map { $0.resolvingSymlinksInPath().path }
+        let row = target.flatMap { target in
             (0..<outlineView.numberOfRows).first { row in
                 guard let nodeFolder = (outlineView.item(atRow: row) as? SidebarNode)?.folder
                 else { return false }
-                return BookmarkStore.pathsEqual(nodeFolder, target)
+                return Self.samePath(nodeFolder, target)
             }
         }
         isHighlighting = true
@@ -186,11 +190,17 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
 
     /// Finder's sidebar symbols for the standard folders, a plain folder for the rest.
     /// Finder's Applications glyph isn't a public symbol; `a.circle` is the closest.
+    /// Compares paths without touching the disk, so choosing icons and highlights never
+    /// opens a folder macOS guards (Desktop, Documents, Downloads). Case-insensitive, as
+    /// on the boot volume; a favorite reached through a symlink isn't matched.
+    private static func samePath(_ folder: URL, _ path: String) -> Bool {
+        folder.standardizedFileURL.path.caseInsensitiveCompare(path) == .orderedSame
+    }
+
     private static func symbol(for folder: URL, home: URL?) -> String {
-        let apps = URL(fileURLWithPath: "/Applications", isDirectory: true)
-        if BookmarkStore.pathsEqual(folder, apps) { return "a.circle" }
+        if samePath(folder, "/Applications") { return "a.circle" }
         guard let home else { return "folder" }
-        if BookmarkStore.pathsEqual(folder, home) { return "house" }
+        if samePath(folder, home.standardizedFileURL.path) { return "house" }
         let standardSymbols: [(String, String)] = [
             ("Desktop", "menubar.dock.rectangle"),
             ("Documents", "doc"),
@@ -202,7 +212,7 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
         ]
         for (name, symbol) in standardSymbols {
             let candidate = home.appendingPathComponent(name, isDirectory: true)
-            if BookmarkStore.pathsEqual(folder, candidate) { return symbol }
+            if samePath(folder, candidate.standardizedFileURL.path) { return symbol }
         }
         return "folder"
     }

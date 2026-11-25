@@ -244,6 +244,24 @@ import Testing
         #expect(outline.selectedRow == -1)
     }
 
+    /// The rows' own paths are never resolved on disk: doing so touched Desktop, Documents
+    /// and Downloads on every update, and macOS asked for access to each at launch. So a
+    /// favorite that is a symlink to the shown folder isn't the one highlighted.
+    @Test func highlightingDoesntResolveTheRowsPaths() throws {
+        defer { cleanUp() }
+        let real = folder.appendingPathComponent("Real", isDirectory: true)
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        let link = folder.appendingPathComponent("Link", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        favorites.add(link)
+        sidebar.reloadFavorites()
+
+        sidebar.highlight(real)
+        #expect(outline.selectedRow == -1)
+        sidebar.highlight(link)
+        #expect(outline.selectedRow == -1)
+    }
+
     func draggingInfo(urls: [URL], sequence: Int) -> any NSDraggingInfo {
         let pb = NSPasteboard.withUniqueName()
         pb.writeObjects(urls as [NSURL])
