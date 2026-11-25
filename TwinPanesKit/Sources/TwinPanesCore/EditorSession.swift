@@ -8,12 +8,17 @@ public enum EditorSessionError: Error, Equatable, CustomStringConvertible {
     /// The file changed on disk before the first edit; the session reloaded it instead of
     /// applying an edit computed from stale bytes.
     case reloadedBeforeEdit
+    /// The file's bytes were only in iCloud at the first edit: the download has started,
+    /// and the edit is refused until it's done, since a clone of an evicted file would
+    /// hold no bytes (docs/plans/M6.md, D-h).
+    case downloadingBeforeEdit
 
     public var description: String {
         switch self {
         case .readOnly(let reason): return "The file is read-only: \(reason)"
         case .saveInProgress: return "A save is already in progress"
         case .reloadedBeforeEdit: return "The file changed on disk and was reloaded"
+        case .downloadingBeforeEdit: return "The file is being downloaded from iCloud"
         }
     }
 }
@@ -59,6 +64,8 @@ public final class EditorSession {
     /// Where session folders go (`SessionFolder.defaultRoot` in the app); nil keeps no
     /// folder and no clone.
     public let sessionsRoot: URL?
+    /// Whether the file is only in iCloud at the first edit; tests stand in for it.
+    var cloudDownloads: any CloudDownloads = RealCloudDownloads()
     /// Made on the first edit: the clone the original pieces read, the add buffer, and
     /// the manifest (docs/plans/M3c.md, D-a).
     public internal(set) var folder: SessionFolder?

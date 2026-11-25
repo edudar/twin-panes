@@ -6,7 +6,9 @@ extension EditorSession {
     /// `EditorSessionError.reloadedBeforeEdit` so the stale edit is dropped; otherwise make
     /// the folder, clone the file into it and switch the original pieces to the clone, so
     /// nothing another app does to the file can change the bytes under the edits. A clone
-    /// that fails leaves the session narrowed.
+    /// that fails leaves the session narrowed. A file whose bytes are only in iCloud
+    /// starts downloading and throws `.downloadingBeforeEdit`; the next edit after it has
+    /// arrived goes ahead (docs/plans/M6.md, D-h).
     func protectBeforeFirstEdit() throws {
         guard folder == nil, let root = sessionsRoot else { return }
         if try !FileIdentity(url: url).isUnchanged(from: identity) {
@@ -15,6 +17,11 @@ extension EditorSession {
             lastOutsideChange = nil
             watcher?.watch(url)
             throw EditorSessionError.reloadedBeforeEdit
+        }
+        // Evicted to iCloud since it was opened: a clone would share no bytes.
+        if cloudDownloads.isDataless(url) {
+            try cloudDownloads.startDownload(url)
+            throw EditorSessionError.downloadingBeforeEdit
         }
         let bookmark = try? url.bookmarkData(
             options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)

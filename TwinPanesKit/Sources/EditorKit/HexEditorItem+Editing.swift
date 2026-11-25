@@ -56,6 +56,9 @@ extension HexEditorItem {
             controller.bytesChanged()
             host?.showStatus("“\(title)” changed on disk and was reloaded")
             return false
+        } catch EditorSessionError.downloadingBeforeEdit {
+            host?.showStatus("“\(title)” is downloading from iCloud. Edit again once it’s here.")
+            return false
         } catch {
             host?.showStatus("Can't change the byte at \(Self.hex(offset)): \(error)")
             return false
