@@ -16,20 +16,19 @@ extension BrowserViewController {
             NSSound.beep()
             return true
         }
-        if let cached = names.cached(in: query.folder) {
-            apply(PathCompletion(query: query, names: cached), to: textView, typed: text)
-            return true
-        }
         pendingCompletion = Task { [weak self, weak textView] in
-            guard let found = await names.names(in: query.folder), let self, let textView,
-                textView.string == text
-            else { return }
-            apply(PathCompletion(query: query, names: found), to: textView, typed: text)
+            guard let found = await names.names(in: query.folder) else { return }
+            // Matching 100k names takes tens of milliseconds: off the main actor too.
+            let completion = await Task.detached { PathCompletion(query: query, names: found) }
+                .value
+            guard let self, let textView, textView.string == text else { return }
+            apply(completion, to: textView, typed: text)
         }
         return true
     }
 
     private func apply(_ completion: PathCompletion, to textView: NSTextView, typed: String) {
+        lastCompletion = completion
         if completion.completedText != typed {
             let whole = NSRange(location: 0, length: (typed as NSString).length)
             textView.insertText(completion.completedText, replacementRange: whole)
@@ -38,16 +37,6 @@ extension BrowserViewController {
         } else {
             NSSound.beep()
         }
-    }
-
-    /// The matches for the text in the field now, from names already read.
-    private func currentMatches(in textView: NSTextView) -> [PathCompletion.Candidate] {
-        guard
-            let query = PathCompletion.query(
-                for: textView.string, home: DirectoryReader.realHomeDirectory),
-            let names = completionNames?.cached(in: query.folder)
-        else { return [] }
-        return PathCompletion(query: query, names: names).matches
     }
 
     /// AppKit's completion list: each match as a replacement for `charRange`, AppKit's
@@ -59,7 +48,11 @@ extension BrowserViewController {
         index.pointee = -1
         let text = textView.string as NSString
         let componentStart = NSMaxRange(text.range(of: "/", options: .backwards))
-        return currentMatches(in: textView).map { match in
+        // The list opens only when a completion left the text as it is, so the last one
+        // applied holds the matches, already worked out off the main actor.
+        guard let completion = lastCompletion, completion.completedText == textView.string
+        else { return [] }
+        return completion.matches.map { match in
             let name = (match.name + (match.isFolder ? "/" : "")) as NSString
             if charRange.location <= componentStart {
                 let between = NSRange(

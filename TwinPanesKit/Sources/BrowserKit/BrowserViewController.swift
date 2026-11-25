@@ -17,6 +17,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     var completionNames: CompletionNames?
     /// The completion waiting for a folder's names; for tests.
     var pendingCompletion: Task<Void, Never>?
+    /// The last completion applied, whose matches AppKit's list offers.
+    var lastCompletion: PathCompletion?
     /// Opens AppKit's completion list; tests stand in for it.
     var showCompletionList: (NSTextView) -> Void = { $0.complete(nil) }
     private let scrollView = NSScrollView()
