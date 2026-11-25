@@ -531,7 +531,7 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
     first, as in the file list), each as the whole path it completes to, in the
     field's font and lined up with its text. Typing while the list shows narrows it
     to what the text then matches; it closes when nothing does. The arrow keys pick
-    one and Return takes it, leaving the field open.
+    one and Return takes it, leaving the field open with the caret after the path.
   - **Matching:** case-insensitive, like the default APFS volume, and `~` expands to
     the real home folder, not the app's container. Hidden entries are offered only
     when the typed component starts with `.`, whatever the tab's hidden-files toggle

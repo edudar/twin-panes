@@ -87,7 +87,11 @@ final class PathSuggestions: NSObject, NSTextSuggestionsDelegate {
         item.representedValue
     }
 
+    /// AppKit leaves the part of the pick past the typed text selected; the caret goes
+    /// after the path instead, ready for its next component.
     func textField(_ textField: NSTextField, didSelect item: Item) {
         isListing = false
+        guard let editor = textField.currentEditor() else { return }
+        editor.selectedRange = NSRange(location: (editor.string as NSString).length, length: 0)
     }
 }

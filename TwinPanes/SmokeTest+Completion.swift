@@ -47,6 +47,11 @@ extension SmokeTest {
         check(
             field?.currentEditor()?.string == picked && browser.folder == folder,
             "Return takes the pick and stays in the path field")
+        let caret = NSRange(location: (picked as NSString).length, length: 0)
+        let selected = (field?.currentEditor() as? NSTextView)?.selectedRange()
+        check(
+            selected == caret,
+            "and leaves the caret after it: \(selected.map(NSStringFromRange) ?? "field closed")")
         press("\u{1b}", in: window)
         await settle(milliseconds: 50)
     }

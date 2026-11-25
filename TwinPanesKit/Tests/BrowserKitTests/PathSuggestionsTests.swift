@@ -152,6 +152,22 @@ import Testing
         #expect(!olderAnswered)
     }
 
+    @Test func aPickLeavesTheCaretAfterTheText() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView?.addSubview(field)
+        window.makeFirstResponder(field)
+        let editor = try #require(field.currentEditor() as? NSTextView)
+        editor.string = "/x/Documents/"
+        editor.selectedRange = NSRange(location: 4, length: 9)
+        let item = PathSuggestions.Item(representedValue: "/x/Documents/", title: "")
+        suggestions.textField(field, didSelect: item)
+        #expect(editor.selectedRange == NSRange(location: 13, length: 0))
+    }
+
     @Test func aPickedItemBecomesTheFieldsText() {
         let item = PathSuggestions.Item(representedValue: "/x/Documents/", title: "/x/Documents/")
         #expect(suggestions.textField(field, textCompletionFor: item) == "/x/Documents/")
