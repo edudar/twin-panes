@@ -32,6 +32,7 @@ public enum MountedVolumes {
             .volumeLocalizedNameKey, .volumeIsBrowsableKey, .volumeIsInternalKey,
             .volumeIsEjectableKey, .volumeIsRemovableKey,
         ]
+        let keySet = Set(keys)
         let urls =
             FileManager.default.mountedVolumeURLs(
                 includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
@@ -39,7 +40,7 @@ public enum MountedVolumes {
             urls.compactMap { url in
                 // A volume that can't describe itself is going away (being unmounted):
                 // it isn't listed.
-                guard let values = try? url.resourceValues(forKeys: Set(keys)) else {
+                guard let values = try? url.resourceValues(forKeys: keySet) else {
                     return nil
                 }
                 return Candidate(
@@ -60,11 +61,15 @@ public enum MountedVolumes {
             candidates
             .filter { $0.isBrowsable && (isBoot($0) || !$0.isInternal) }
             .sorted { a, b in
-                isBoot(a) != isBoot(b)
-                    ? isBoot(a) : a.name.localizedStandardCompare(b.name) == .orderedAscending
+                if isBoot(a) != isBoot(b) { return isBoot(a) }
+                let order = a.name.localizedStandardCompare(b.name)
+                return order == .orderedSame
+                    ? a.url.path < b.url.path : order == .orderedAscending
             }
             .map {
-                Volume(url: $0.url, name: $0.name, isEjectable: $0.isEjectable || $0.isRemovable)
+                Volume(
+                    url: $0.url, name: $0.name,
+                    isEjectable: !isBoot($0) && ($0.isEjectable || $0.isRemovable))
             }
     }
 }

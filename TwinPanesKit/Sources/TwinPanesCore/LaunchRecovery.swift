@@ -1,6 +1,10 @@
 /// The sessions crash recovery found at launch, held until windows are restored
 /// (docs/plans/M5.md, D-c). The registry holds sessions weakly, so without this a
 /// recovered session would go before a restored tab on its file could claim it.
+///
+/// Either `takeUnclaimed` or `SessionRegistry` (via a restored tab) must take ownership
+/// of every recovered session; dropping `LaunchRecovery` without transferring them lets
+/// `EditorSession.deinit` mark their session folders closed and delete them.
 @MainActor
 public final class LaunchRecovery {
     private var held: [EditorSession]

@@ -28,7 +28,10 @@ public final class SessionRegistry {
     public func open(
         _ url: URL, scope: SecurityScope? = nil, addDirectory: URL? = nil
     ) throws -> (session: EditorSession, isNew: Bool) {
-        if let session = session(for: url) { return (session, false) }
+        if let session = session(for: url) {
+            if session.scope == nil, let scope { session.scope = scope }
+            return (session, false)
+        }
         let session = try EditorSession(
             url: url, scope: scope, addDirectory: addDirectory, sessionsRoot: sessionsRoot)
         register(session, key: session.identity.key)

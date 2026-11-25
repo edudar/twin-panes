@@ -30,9 +30,12 @@ import Testing
 
     @Test func aRestoredTabOnTheFileGetsTheRecoveredSession() throws {
         defer { cleanUp() }
-        let (url, session) = try crashed("a.bin")
-        weak var recovered = session
-        let recovery = LaunchRecovery([session], registry: registry)
+        weak var recovered: EditorSession?
+        let (url, recovery) = try {
+            let (url, session) = try crashed("a.bin")
+            recovered = session
+            return (url, LaunchRecovery([session], registry: registry))
+        }()
         let opened = try registry.open(url)
         #expect(recovered != nil && opened.session === recovered && !opened.isNew)
         #expect(opened.session.isDirty)
@@ -60,5 +63,26 @@ import Testing
         #expect(recovered != nil)
         _ = recovery.takeUnclaimed { _ in true }
         #expect(recovered == nil)
+    }
+
+    @Test func takeUnclaimedIsIdempotent() throws {
+        defer { cleanUp() }
+        let a = try crashed("a.bin")
+        let recovery = LaunchRecovery([a.session], registry: registry)
+        #expect(recovery.takeUnclaimed { _ in false }.count == 1)
+        #expect(recovery.takeUnclaimed { _ in false }.isEmpty)
+    }
+
+    @Test func openingAnAdoptedSessionWithoutScopeAttachesTheNewScope() throws {
+        defer { cleanUp() }
+        let url = folder.appendingPathComponent("a.bin")
+        try Data([1, 2, 3]).write(to: url)
+        let session = try EditorSession(url: url)
+        #expect(session.scope == nil)
+        registry.adopt(session)
+        let scope = SecurityScope(url: url)
+        let opened = try registry.open(url, scope: scope)
+        #expect(opened.session === session && !opened.isNew)
+        #expect(opened.session.scope === scope)
     }
 }

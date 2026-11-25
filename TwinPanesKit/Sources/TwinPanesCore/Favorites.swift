@@ -13,10 +13,9 @@ public final class Favorites {
     /// `home` is the real home folder, not the sandbox container's.
     public init(defaults: UserDefaults, home: URL) {
         self.defaults = defaults
-        self.home = home
+        self.home = home.standardizedFileURL
     }
 
-    /// Home, Desktop, Documents, Downloads and Applications.
     public var standard: [URL] {
         [home]
             + ["Desktop", "Documents", "Downloads"].map {
@@ -26,7 +25,7 @@ public final class Favorites {
 
     public var folders: [URL] {
         guard let paths = defaults.stringArray(forKey: Self.key) else { return standard }
-        return paths.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        return paths.map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL }
     }
 
     private func save(_ folders: [URL]) {
@@ -37,13 +36,15 @@ public final class Favorites {
     /// so the list never holds one twice.
     public func add(_ folder: URL, at index: Int? = nil) {
         let folder = folder.standardizedFileURL
-        var list = folders.filter { $0.path != folder.path }
+        var list = folders.filter { !BookmarkStore.pathsEqual($0, folder) }
         list.insert(folder, at: min(max(index ?? list.count, 0), list.count))
         save(list)
     }
 
     public func remove(_ folder: URL) {
-        let path = folder.standardizedFileURL.path
-        save(folders.filter { $0.path != path })
+        let list = folders
+        let remaining = list.filter { !BookmarkStore.pathsEqual($0, folder) }
+        guard remaining.count != list.count else { return }
+        save(remaining)
     }
 }

@@ -122,7 +122,8 @@ public final class EditorSession {
         var stale = false
         let resolved = manifest.bookmark.flatMap {
             try? URL(
-                resolvingBookmarkData: $0, options: [.withSecurityScope, .withoutUI],
+                resolvingBookmarkData: $0,
+                options: [.withSecurityScope, .withoutUI, .withoutMounting],
                 relativeTo: nil, bookmarkDataIsStale: &stale)
         }
         let target = resolved ?? URL(fileURLWithPath: manifest.path)
