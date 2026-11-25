@@ -6,12 +6,14 @@ public enum OperationRequest: Sendable, Equatable {
     case move([URL], into: URL)
     case trash([URL])
     case delete([URL])
+    /// Undo moving items back where they were (docs/plans/M6.md, D-g).
+    case putBack([MovedItem])
 
     /// Copies and moves wait their turn; trash and delete are quick and run at once
     /// (docs/plans/M6.md, D-e).
     var waitsItsTurn: Bool {
         switch self {
-        case .copy, .move: true
+        case .copy, .move, .putBack: true
         case .trash, .delete: false
         }
     }

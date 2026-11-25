@@ -13,6 +13,7 @@ import Testing
         #expect(OperationRequest.move([here], into: here).waitsItsTurn)
         #expect(!OperationRequest.trash([here]).waitsItsTurn)
         #expect(!OperationRequest.delete([here]).waitsItsTurn)
+        #expect(OperationRequest.putBack([MovedItem(from: here, to: here)]).waitsItsTurn)
     }
 
     @Test func aResultReportsItsFailuresAndCancel() {

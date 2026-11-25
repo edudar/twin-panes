@@ -110,6 +110,10 @@ public final class FileOperationQueue {
             return .removed(
                 TreeRemover(fileSystem: fileSystem).remove(
                     items, control: control, progress: progress))
+        case .putBack(let items):
+            return .moved(
+                PutBack(fileSystem: fileSystem).putBack(
+                    items, control: control, resolve: resolve, progress: progress))
         }
     }
 
