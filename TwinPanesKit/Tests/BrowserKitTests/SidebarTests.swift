@@ -92,4 +92,77 @@ import Testing
         #expect(titles[1] == "Projects")
         #expect(outline.selectedRow == (try row("Applications")))
     }
+
+    // MARK: Editing the favorites (step 17)
+
+    func makeFolder(_ name: String) throws -> URL {
+        let url = folder.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    var favoriteNames: [String] { favorites.folders.map(\.lastPathComponent) }
+
+    @Test func aFolderDroppedOnFavoritesIsAddedWhereItLands() throws {
+        defer { cleanUp() }
+        let projects = try makeFolder("Projects")
+        #expect(sidebar.acceptDrop(of: [projects], at: 1))
+        #expect(favoriteNames[1] == "Projects")
+        #expect(titles[2] == "Projects")
+    }
+
+    @Test func aDroppedFileIsRefused() throws {
+        defer { cleanUp() }
+        let file = folder.appendingPathComponent("notes.txt")
+        try Data([1]).write(to: file)
+        #expect(!sidebar.acceptDrop(of: [file], at: 0))
+        #expect(favorites.folders.count == 5)
+    }
+
+    @Test func aFavoriteDraggedFurtherDownLandsWhereItWasDropped() {
+        defer { cleanUp() }
+        let home = favorites.folders[0]
+        try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        // Dropped between Documents (2) and Downloads (3), as the list shows it.
+        #expect(sidebar.acceptDrop(of: [home], at: 3))
+        #expect(favoriteNames == ["Desktop", "Documents", "home", "Downloads", "Applications"])
+    }
+
+    @Test func dropsLandBetweenFavoritesOrBeforeOneButNotOnLocations() throws {
+        defer { cleanUp() }
+        let section = sidebar.favoritesSection, locations = sidebar.locationsSection
+        #expect(sidebar.dropIndex(proposedItem: section, childIndex: 2) == 2)
+        #expect(sidebar.dropIndex(proposedItem: section.children[3], childIndex: -1) == 3)
+        #expect(sidebar.dropIndex(proposedItem: locations, childIndex: 0) == nil)
+        #expect(sidebar.dropIndex(proposedItem: locations.children[0], childIndex: -1) == nil)
+    }
+
+    /// A real drag is checked by hand; this checks AppKit finds the drag methods.
+    @Test func theOutlineViewTakesDropsAndDragsFavorites() throws {
+        defer { cleanUp() }
+        let source = try #require(outline.dataSource)
+        #expect(outline.registeredDraggedTypes.contains(.fileURL))
+        for selector in [
+            #selector(NSOutlineViewDataSource.outlineView(_:pasteboardWriterForItem:)),
+            #selector(
+                NSOutlineViewDataSource.outlineView(_:validateDrop:proposedItem:proposedChildIndex:)
+            ),
+            #selector(NSOutlineViewDataSource.outlineView(_:acceptDrop:item:childIndex:)),
+        ] {
+            #expect(source.responds(to: selector))
+        }
+    }
+
+    @Test func removingAFavoriteTakesItOutOfTheList() throws {
+        defer { cleanUp() }
+        sidebar.removeFavorite(atRow: try row("Documents"))
+        #expect(!favoriteNames.contains("Documents") && !titles.contains("Documents"))
+    }
+
+    @Test func removingLeavesVolumesAndHeadingsAlone() throws {
+        defer { cleanUp() }
+        sidebar.removeFavorite(atRow: try row("USB"))
+        sidebar.removeFavorite(atRow: try row("Favorites"))
+        #expect(titles.contains("USB") && favorites.folders.count == 5)
+    }
 }

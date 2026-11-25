@@ -21,7 +21,7 @@ final class SidebarNode: NSObject {
 /// Clicking a folder reports it through `onOpen`; the app opens it in the active panel
 /// and highlights the row for the folder that panel shows.
 @MainActor
-public final class SidebarViewController: NSViewController {
+public final class SidebarViewController: NSViewController, NSMenuItemValidation {
     /// Called with the folder of a row the user chose.
     public var onOpen: ((URL) -> Void)?
 
@@ -52,6 +52,9 @@ public final class SidebarViewController: NSViewController {
         outlineView.dataSource = self
         outlineView.delegate = self
         outlineView.setAccessibilityIdentifier("sidebar")
+        outlineView.registerForDraggedTypes([.fileURL])
+        outlineView.setDraggingSourceOperationMask([.move, .link], forLocal: true)
+        outlineView.menu = makeContextMenu()
         let scroll = NSScrollView()
         scroll.documentView = outlineView
         scroll.hasVerticalScroller = true
@@ -93,6 +96,10 @@ public final class SidebarViewController: NSViewController {
         } else {
             outlineView.deselectAll(nil)
         }
+    }
+
+    public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        menuItem.action == #selector(removeClickedFavorite(_:)) ? isClickedRowAFavorite : true
     }
 
     private func reload() {
