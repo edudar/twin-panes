@@ -30,6 +30,7 @@ public struct PathCompletion: Equatable, Sendable {
 
     /// The query `text` asks for, or nil when it isn't an absolute path or one starting
     /// with `~`, which means `home` (the real home folder, not the app's container).
+    /// Bare `"~"` expands to `"~/"` so it completes inside `home`.
     public static func query(for text: String, home: URL) -> Query? {
         let typed = text == "~" ? "~/" : text
         guard typed.hasPrefix("/") || typed.hasPrefix("~/"), let slash = typed.lastIndex(of: "/")
@@ -45,19 +46,23 @@ public struct PathCompletion: Equatable, Sendable {
     /// Completes `query` among `names`. Matching ignores case; hidden names are offered
     /// only when the partial component starts with `.`.
     public init(query: Query, names: [Candidate]) {
-        let partial = query.partial.lowercased()
-        let offersHidden = partial.hasPrefix(".")
+        let partial = Self.fold(query.partial)
+        let offersHidden = query.partial.hasPrefix(".")
         matches = names.filter { candidate in
             (offersHidden || !candidate.name.hasPrefix("."))
-                && candidate.name.lowercased().hasPrefix(partial)
+                && Self.fold(candidate.name).hasPrefix(partial)
         }.sorted(by: Self.inListOrder)
         guard let first = matches.first else {
             completedText = query.typedFolder + query.partial
             return
         }
-        let shared = Self.sharedLength(of: matches.map(\.name))
+        let shared = min(first.name.count, max(query.partial.count, Self.sharedLength(of: matches)))
         let slash = matches.count == 1 && first.isFolder ? "/" : ""
         completedText = query.typedFolder + first.name.prefix(shared) + slash
+    }
+
+    private static func fold(_ text: String) -> String {
+        text.folding(options: .caseInsensitive, locale: nil)
     }
 
     /// Folders first, then by name as Finder sorts it, then by the raw name so the order
@@ -68,12 +73,21 @@ public struct PathCompletion: Equatable, Sendable {
         return order == .orderedSame ? a.name < b.name : order == .orderedAscending
     }
 
-    /// How many leading characters every name shares, ignoring case.
-    private static func sharedLength(of names: [String]) -> Int {
-        let characters = names.map { $0.map { String($0).lowercased() } }
-        let shortest = characters.map(\.count).min() ?? 0
-        return (0..<shortest).first { index in
-            characters.contains { $0[index] != characters[0][index] }
-        } ?? shortest
+    /// How many leading characters every match shares, using the same case folding as
+    /// matching so context-sensitive forms (such as Greek final sigma) agree.
+    private static func sharedLength(of matches: [Candidate]) -> Int {
+        guard let first = matches.first else { return 0 }
+        let common = Array(fold(first.name))
+        var commonLength = common.count
+        for candidate in matches.dropFirst() {
+            if commonLength == 0 { return 0 }
+            var matched = 0
+            for (a, b) in zip(common.prefix(commonLength), fold(candidate.name)) {
+                if a != b { break }
+                matched += 1
+            }
+            commonLength = matched
+        }
+        return commonLength
     }
 }

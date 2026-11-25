@@ -26,6 +26,20 @@ import Testing
         let query = try #require(PathCompletion.query(for: "~", home: home))
         #expect(query.folder.path == "/Users/someone")
         #expect(try complete("~", among: [folder("Music")]).completedText == "~/Music/")
+        let empty = try complete("~", among: [])
+        #expect(empty.completedText == "~/" && empty.matches.isEmpty)
+    }
+
+    @Test func anotherUsersTildeHasNothingToComplete() {
+        #expect(PathCompletion.query(for: "~other/foo", home: home) == nil)
+    }
+
+    @Test func rootFolderCompletesWithEmptyPartial() throws {
+        let query = try #require(PathCompletion.query(for: "/", home: home))
+        #expect(query.folder.path == "/")
+        let completion = try complete("/", among: [folder("Applications"), file("etc")])
+        #expect(completion.completedText == "/")
+        #expect(completion.matches.map(\.name) == ["Applications", "etc"])
     }
 
     @Test func anAbsolutePathCompletesItsLastComponent() throws {
@@ -72,6 +86,30 @@ import Testing
         let completion = try complete(
             "/x/", among: [file("b.txt"), folder("zeta"), file("a.txt"), folder("Alpha")])
         #expect(completion.matches.map(\.name) == ["Alpha", "zeta", "a.txt", "b.txt"])
+    }
+
+    @Test func greekFinalSigmaKeepsTypedCharacterAcrossCaseVariants() throws {
+        let completion = try complete("/x/ος", among: [file("ΟΣ"), file("ος")])
+        #expect(completion.matches.count == 2)
+        #expect(completion.completedText == "/x/" + completion.matches[0].name)
+    }
+
+    @Test func decomposedAndPrecomposedUnicodeMatchAndSharePrefix() throws {
+        let nfd = "Cafe\u{0301} 1"
+        let nfc = "Café 2"
+        let completion = try complete("/x/café", among: [file(nfd), file(nfc)])
+        #expect(completion.matches.count == 2)
+        #expect(completion.completedText.lowercased() == "/x/café ")
+
+        let single = try complete("/x/cafe\u{0301}", among: [file("Café")])
+        #expect(single.completedText == "/x/Café")
+    }
+
+    @Test func hundredThousandNamesCompleteSharedPrefixQuickly() throws {
+        let names = (0..<100_000).map { file(String(format: "item-%05d", $0)) }
+        let completion = try complete("/x/it", among: names)
+        #expect(completion.matches.count == 100_000)
+        #expect(completion.completedText == "/x/item-")
     }
 
     /// Random names and typing against a brute-force model of the rules.

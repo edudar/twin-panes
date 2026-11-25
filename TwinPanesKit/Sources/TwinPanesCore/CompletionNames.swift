@@ -10,7 +10,15 @@ public final class CompletionNames {
 
     private let read: Read
     private let access: (URL) -> SecurityScope?
+    private let readQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "CompletionNames"
+        queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = 4
+        return queue
+    }()
     private var cache: [String: [PathCompletion.Candidate]] = [:]
+    private var inFlight: [String: Task<[PathCompletion.Candidate], Never>] = [:]
     private var latestRequest = 0
 
     /// `read` lists one folder off the main actor, while the scope `access` gives for it
@@ -30,10 +38,25 @@ public final class CompletionNames {
     nonisolated static func readFolder(_ folder: URL) -> [PathCompletion.Candidate] {
         // Completion offers nothing for a folder it can't read and never prompts
         // (PLAN.md §4.7); going to the folder reports why.
-        guard let entries = try? DirectoryReader.entries(of: folder, includeHidden: true) else {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isPackageKey, .isSymbolicLinkKey]
+        guard
+            let urls = try? FileManager.default.contentsOfDirectory(
+                at: folder, includingPropertiesForKeys: Array(keys), options: [])
+        else {
             return []
         }
-        return entries.map { .init(name: $0.name, isFolder: $0.isDirectory && !$0.isPackage) }
+        return urls.map { url in
+            let values = try? url.resourceValues(forKeys: keys)
+            let isFolder: Bool
+            if values?.isSymbolicLink == true {
+                let resolved = try? url.resolvingSymlinksInPath().resourceValues(
+                    forKeys: [.isDirectoryKey, .isPackageKey])
+                isFolder = (resolved?.isDirectory ?? false) && !(resolved?.isPackage ?? false)
+            } else {
+                isFolder = (values?.isDirectory ?? false) && !(values?.isPackage ?? false)
+            }
+            return .init(name: url.lastPathComponent, isFolder: isFolder)
+        }
     }
 
     /// The names already read for `folder`, or nil when they aren't yet.
@@ -44,13 +67,32 @@ public final class CompletionNames {
     /// The names in `folder`, read once. Returns nil when a request for another folder
     /// came while this one was being read: the caller's text has moved on.
     public func names(in folder: URL) async -> [PathCompletion.Candidate]? {
+        let folder = folder.standardizedFileURL
+        let key = folder.path
         latestRequest += 1
         let request = latestRequest
-        if let names = cached(in: folder) { return names }
-        let (read, scope) = (read, access(folder))
-        let names = await Task.detached { withExtendedLifetime(scope) { read(folder) } }.value
-        // Kept even when overtaken: the names are right, and typing may come back here.
-        cache[folder.standardizedFileURL.path] = names
+        if let names = cache[key] { return names }
+        let task: Task<[PathCompletion.Candidate], Never>
+        if let existing = inFlight[key] {
+            task = existing
+        } else {
+            let (read, access, readQueue) = (self.read, self.access, self.readQueue)
+            task = Task {
+                let scope = access(folder)
+                let names = await withCheckedContinuation { continuation in
+                    readQueue.addOperation {
+                        let result = withExtendedLifetime(scope) { read(folder) }
+                        continuation.resume(returning: result)
+                    }
+                }
+                // Kept even when overtaken: the names are right, and typing may come back here.
+                cache[key] = names
+                inFlight[key] = nil
+                return names
+            }
+            inFlight[key] = task
+        }
+        let names = await task.value
         return request == latestRequest ? names : nil
     }
 }
