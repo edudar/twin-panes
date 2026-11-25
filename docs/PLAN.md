@@ -1217,15 +1217,14 @@ byte histogram.
   - *External volumes by hand*: granting a whole drive and a renamed volume asking
     again aren't automated (they need real drives), like the M3c volume spike.
 - **From M5 (2026-11-24):**
-  - *The stall gate relaxed to 75 ms*: with two panels, CI failed stall checks on
-    every push, each a little over its limit (1.01–1.22× it, across the outside
-    changes, dark-appearance and folder-moved-away checks), and the dev Mac under load
-    failed 16 of 600 readings, most at 51–60 ms. Profiling the light-appearance check
-    found part of each slow gap was the smoke test's own icon probe sharing a run-loop
-    turn with the redraw; moving the probe out of that turn didn't make the runs
-    steadier in A/B runs, so it stayed. The base limit is 75 ms on the dev Mac, still
-    scaled per machine. Tighten it back to 50 ms in M6, once CI's history shows the
-    readings under it, or sooner if the noisiest checks are made steadier.
+  - *The stall gate relaxed to 95 ms*: with two panels, CI failed stall checks at
+    50 ms on every push (1.01–1.22× limit), and after `0ea630b` added the full-height
+    sidebar material and unified toolbar, switching the whole window to Dark Aqua hit
+    140.5–145.8 ms CPU on GPU-less CI runners (0.1–0.2 ms in `cell draw`, the rest
+    AppKit window chrome) against 122–133 ms limits at 75 ms base. The base limit is
+    95 ms on the dev Mac, still scaled per machine. Tighten it back in M6, once CI's
+    history shows the readings under it, or sooner if the noisiest checks are made
+    steadier.
   - *Relaunch checks on macOS 15*: the smoke test's restore and crash relaunches start
     the app's own executable as a sandboxed child, which macOS 15 kills at launch with
     SIGTRAP (macOS 26 and later allow it). They run on 26 and later only, so restoring

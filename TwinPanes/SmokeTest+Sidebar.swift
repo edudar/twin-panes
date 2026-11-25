@@ -16,7 +16,7 @@ extension SmokeTest {
             let outline = Self.view(in: content, id: "sidebar") as? NSOutlineView,
             let browser = controller.layout.focusedPanelItem as? BrowserItem
         else { return check(false, "the window shows the sidebar beside a browser") }
-        let width = outline.enclosingScrollView?.frame.width ?? 0
+        let width = outline.enclosingScrollView?.superview?.frame.width ?? 0
         check(
             frame.isSidebarShown && abs(width - 180) < 2,
             "the sidebar is shown, \(Int(width)) pt wide")
