@@ -20,6 +20,13 @@ extension SmokeTest {
         check(
             frame.isSidebarShown && abs(width - 180) < 2,
             "the sidebar is shown, \(Int(width)) pt wide")
+        // The one column fills the sidebar, less the outline's indent; at its default
+        // 100 pt every name was cut off.
+        let column = outline.tableColumns.first?.width ?? 0
+        check(
+            column >= outline.frame.width - 40,
+            "the sidebar's names have its full width: column \(Int(column)) of \(Int(outline.frame.width)) pt"
+        )
         let toggle = KeyChord("s", [.control, .command])
         check(dispatch(toggle, in: window) && !frame.isSidebarShown, "⌃⌘S hides the sidebar")
         check(dispatch(toggle, in: window) && frame.isSidebarShown, "and shows it again")

@@ -54,11 +54,17 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
     private var highlighted: URL?
 
     public override func loadView() {
+        // One column as wide as the sidebar: left at its default 100 pt, every name was
+        // cut off at a fraction of the sidebar's width.
         let column = NSTableColumn(identifier: .init("sidebar"))
+        column.resizingMask = .autoresizingMask
         outlineView.addTableColumn(column)
         outlineView.outlineTableColumn = column
+        outlineView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         outlineView.headerView = nil
         outlineView.style = .sourceList
+        // Row height and text follow the system's sidebar size setting, as in Finder.
+        outlineView.rowSizeStyle = .default
         outlineView.floatsGroupRows = false
         outlineView.dataSource = self
         outlineView.delegate = self
@@ -72,6 +78,11 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
         scroll.drawsBackground = false
         view = scroll
         reloadFavorites()
+    }
+
+    public override func viewDidLayout() {
+        super.viewDidLayout()
+        outlineView.sizeLastColumnToFit()
     }
 
     public func show(volumes: [Volume]) {
@@ -122,16 +133,25 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
     }
 
     /// Finder's symbols for the standard folders, a plain folder for the rest.
+    /// Finder's sidebar symbols for the standard folders, a plain folder for the rest.
+    /// Finder's Applications glyph isn't a public symbol; `a.circle` is the closest.
     private static func symbol(for folder: URL, home: URL?) -> String {
         if folder.path == home?.path { return "house" }
         switch folder.lastPathComponent {
         case "Desktop": return "menubar.dock.rectangle"
         case "Documents": return "doc"
         case "Downloads": return "arrow.down.circle"
-        case "Applications": return "app.dashed"
+        case "Applications": return "a.circle"
+        case "Movies": return "film"
+        case "Music": return "music.note"
+        case "Pictures": return "photo"
         default: return "folder"
         }
     }
+
+    /// The icon size Finder's sidebar uses for its rows.
+    private static let iconConfiguration = NSImage.SymbolConfiguration(
+        pointSize: 15, weight: .regular)
 }
 
 extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate {
@@ -171,6 +191,7 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
         guard let node = node(item) else { return nil }
         let cell = NSTableCellView()
         let label = NSTextField(labelWithString: node.title)
+        label.font = .systemFont(ofSize: NSFont.systemFontSize)
         label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(label)
@@ -178,15 +199,15 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
         var leading = label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2)
         if let symbol = node.symbol {
             let image = NSImageView(
-                image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-                    ?? NSImage())
+                image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                    .withSymbolConfiguration(Self.iconConfiguration) ?? NSImage())
             image.translatesAutoresizingMaskIntoConstraints = false
             cell.addSubview(image)
             cell.imageView = image
             NSLayoutConstraint.activate([
                 image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
                 image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                image.widthAnchor.constraint(equalToConstant: 16),
+                image.widthAnchor.constraint(equalToConstant: 20),
             ])
             leading = label.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6)
         }
