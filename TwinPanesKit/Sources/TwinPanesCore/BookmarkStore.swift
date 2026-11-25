@@ -170,7 +170,9 @@ public final class BookmarkStore {
         }
     }
 
-    static func pathsEqual(_ lhs: URL, _ rhs: URL) -> Bool {
+    /// Whether two file URLs refer to the same canonical path, respecting volume case
+    /// sensitivity and symlinks.
+    public static func pathsEqual(_ lhs: URL, _ rhs: URL) -> Bool {
         let a = canonicalPath(lhs)
         let b = canonicalPath(rhs)
         if !isCaseSensitive(lhs) || !isCaseSensitive(rhs) {

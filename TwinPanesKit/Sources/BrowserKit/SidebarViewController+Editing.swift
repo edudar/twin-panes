@@ -1,4 +1,5 @@
 import AppKit
+import TwinPanesCore
 
 /// Editing the favorites in the sidebar (docs/plans/M5.md, D-d, step 17): folders are
 /// dropped in, favorites are dragged to reorder, and the context menu removes one.
@@ -21,7 +22,7 @@ extension SidebarViewController {
         var insertion = index
         for folder in folders {
             let current = favorites.folders.firstIndex {
-                $0.path == folder.standardizedFileURL.path
+                BookmarkStore.pathsEqual($0, folder)
             }
             // Adding a favorite that's there takes it out first, so one moving down
             // lands a place earlier than the index the list showed.
@@ -29,14 +30,14 @@ extension SidebarViewController {
             favorites.add(folder, at: insertion)
             insertion += 1
         }
-        reloadFavorites()
-        onFavoritesEdited?()
+        notifyFavoritesChanged()
         return true
     }
 
     /// A folder the user can browse into: packages count as files, as in the browser.
     private static func isFolder(_ url: URL) -> Bool {
-        let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+        let resolved = url.resolvingSymlinksInPath()
+        let values = try? resolved.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
         return values?.isDirectory == true && values?.isPackage != true
     }
 
@@ -46,8 +47,15 @@ extension SidebarViewController {
             favoritesSection.children.contains(where: { $0 === node }), let folder = node.folder
         else { return }
         favorites.remove(folder)
-        reloadFavorites()
-        onFavoritesEdited?()
+        notifyFavoritesChanged()
+    }
+
+    private func notifyFavoritesChanged() {
+        if let onFavoritesEdited {
+            onFavoritesEdited()
+        } else {
+            reloadFavorites()
+        }
     }
 
     func makeContextMenu() -> NSMenu {
@@ -72,7 +80,36 @@ extension SidebarViewController {
     /// The row the context menu is for: the one right-clicked, or the selected one when
     /// the menu came up from the keyboard.
     private var menuRow: Int {
-        outlineView.clickedRow >= 0 ? outlineView.clickedRow : outlineView.selectedRow
+        if outlineView.clickedRow >= 0 { return outlineView.clickedRow }
+        if let event = NSApp.currentEvent, Self.isContextClick(event) {
+            return -1
+        }
+        return outlineView.selectedRow
+    }
+
+    private static func isContextClick(_ event: NSEvent) -> Bool {
+        switch event.type {
+        case .rightMouseDown, .rightMouseUp:
+            true
+        case .leftMouseDown, .leftMouseUp:
+            event.modifierFlags.contains(.control)
+        default:
+            false
+        }
+    }
+
+    private func dragHasFolder(_ info: any NSDraggingInfo) -> Bool {
+        let sequence = info.draggingSequenceNumber
+        if let validatedDrag, validatedDrag.sequence == sequence {
+            return validatedDrag.hasFolder
+        }
+        let urls =
+            info.draggingPasteboard.readObjects(
+                forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+            ?? []
+        let hasFolder = urls.contains(where: Self.isFolder)
+        validatedDrag = (sequence, hasFolder)
+        return hasFolder
     }
 
     // MARK: Dragging
@@ -90,7 +127,9 @@ extension SidebarViewController {
         _ outlineView: NSOutlineView, validateDrop info: any NSDraggingInfo,
         proposedItem item: Any?, proposedChildIndex index: Int
     ) -> NSDragOperation {
-        guard let target = dropIndex(proposedItem: item, childIndex: index) else { return [] }
+        guard let target = dropIndex(proposedItem: item, childIndex: index),
+            dragHasFolder(info)
+        else { return [] }
         outlineView.setDropItem(favoritesSection, dropChildIndex: target)
         return info.draggingSource as? NSOutlineView === outlineView ? .move : .link
     }

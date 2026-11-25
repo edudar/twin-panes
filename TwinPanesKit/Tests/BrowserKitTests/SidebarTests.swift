@@ -162,7 +162,10 @@ import Testing
     @Test func editsAreReportedSoOtherSidebarsCanShowThem() throws {
         defer { cleanUp() }
         var edits = 0
-        sidebar.onFavoritesEdited = { edits += 1 }
+        sidebar.onFavoritesEdited = {
+            edits += 1
+            sidebar.reloadFavorites()
+        }
         _ = sidebar.acceptDrop(of: [try makeFolder("Projects")], at: 0)
         sidebar.removeFavorite(atRow: try row("Projects"))
         #expect(edits == 2)
@@ -201,4 +204,149 @@ import Testing
         defer { cleanUp() }
         #expect(try ejectButton(onRow: "Macintosh HD") == nil)
     }
+
+    @Test func ejectButtonKeepsRequiredHorizontalCompressionAndHugging() throws {
+        defer { cleanUp() }
+        let eject = try #require(try ejectButton(onRow: "USB"))
+        #expect(eject.contentCompressionResistancePriority(for: .horizontal) == .required)
+        #expect(eject.contentHuggingPriority(for: .horizontal) == .required)
+    }
+
+    @Test func layoutSizesColumnToSidebarWidthAndStylesHeadingsDifferently() throws {
+        defer { cleanUp() }
+        sidebar.view.frame = NSRect(x: 0, y: 0, width: 220, height: 400)
+        sidebar.view.layoutSubtreeIfNeeded()
+        #expect((outline.outlineTableColumn?.width ?? 0) > 150)
+
+        let heading =
+            outline.view(atColumn: 0, row: try row("Favorites"), makeIfNecessary: true)
+            as? NSTableCellView
+        let item =
+            outline.view(atColumn: 0, row: try row("Desktop"), makeIfNecessary: true)
+            as? NSTableCellView
+        #expect(heading?.textField?.font?.pointSize == NSFont.smallSystemFontSize)
+        #expect(heading?.textField?.textColor == .secondaryLabelColor)
+        #expect(item?.textField?.font?.pointSize == NSFont.systemFontSize)
+        #expect(heading?.textField?.font != item?.textField?.font)
+    }
+
+    @Test func highlightingMatchesSymlinkPathsAndNilClearsSelection() throws {
+        defer { cleanUp() }
+        let desktop = favorites.standard[1]
+        try FileManager.default.createDirectory(at: desktop, withIntermediateDirectories: true)
+        let alias = folder.appendingPathComponent("DesktopAlias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: desktop)
+
+        sidebar.highlight(alias)
+        #expect(outline.selectedRow == (try row("Desktop")))
+
+        sidebar.highlight(nil)
+        #expect(outline.selectedRow == -1)
+    }
+
+    func draggingInfo(urls: [URL], sequence: Int) -> any NSDraggingInfo {
+        let pb = NSPasteboard.withUniqueName()
+        pb.writeObjects(urls as [NSURL])
+        return StubDraggingInfo(pasteboard: pb, sequence: sequence)
+    }
+
+    @Test func appPackagesAndRegularFilesAreRefusedInValidateDropAndAcceptDrop() throws {
+        defer { cleanUp() }
+        let app = folder.appendingPathComponent("Tool.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("notes.txt")
+        try Data([1]).write(to: file)
+
+        #expect(!sidebar.acceptDrop(of: [app], at: 0))
+        #expect(
+            sidebar.outlineView(
+                outline, validateDrop: draggingInfo(urls: [app], sequence: 1),
+                proposedItem: sidebar.favoritesSection, proposedChildIndex: 0) == [])
+        #expect(
+            sidebar.outlineView(
+                outline, validateDrop: draggingInfo(urls: [file], sequence: 2),
+                proposedItem: sidebar.favoritesSection, proposedChildIndex: 0) == [])
+    }
+
+    @Test func symlinkToFolderIsAcceptedInValidateDropAndAcceptDrop() throws {
+        defer { cleanUp() }
+        let target = try makeFolder("Real")
+        let link = folder.appendingPathComponent("Link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+
+        let operation = sidebar.outlineView(
+            outline, validateDrop: draggingInfo(urls: [link], sequence: 3),
+            proposedItem: sidebar.favoritesSection, proposedChildIndex: 0)
+        #expect(operation == .link)
+        #expect(sidebar.acceptDrop(of: [link], at: 0))
+        #expect(favoriteNames.first == "Link")
+    }
+
+    @Test func emptySpaceRightClickDisablesRemoveFromSidebarEvenWithSelection() throws {
+        defer { cleanUp() }
+        _ = NSApplication.shared
+        outline.selectRowIndexes([try row("Downloads")], byExtendingSelection: false)
+        let rightClick = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [],
+                timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+                clickCount: 1, pressure: 1))
+        NSApp.postEvent(rightClick, atStart: true)
+        _ = NSApp.nextEvent(
+            matching: .rightMouseDown, until: .distantPast, inMode: .default, dequeue: true)
+        defer {
+            if let reset = NSEvent.otherEvent(
+                with: .applicationDefined, location: .zero, modifierFlags: [],
+                timestamp: 0, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0)
+            {
+                NSApp.postEvent(reset, atStart: true)
+                _ = NSApp.nextEvent(
+                    matching: .applicationDefined, until: .distantPast, inMode: .default,
+                    dequeue: true)
+            }
+        }
+        let removeItem = try #require(
+            outline.menu?.items.first {
+                $0.action == #selector(SidebarViewController.removeClickedFavorite(_:))
+            })
+        #expect(!sidebar.validateMenuItem(removeItem))
+    }
+}
+
+@MainActor
+private final class StubDraggingInfo: NSObject, @preconcurrency NSDraggingInfo {
+    let draggingPasteboard: NSPasteboard
+    let draggingSequenceNumber: Int
+
+    init(pasteboard: NSPasteboard, sequence: Int) {
+        self.draggingPasteboard = pasteboard
+        self.draggingSequenceNumber = sequence
+    }
+
+    var draggingDestinationWindow: NSWindow? { nil }
+    var draggingSourceOperationMask: NSDragOperation { .every }
+    var draggingLocation: NSPoint { .zero }
+    var draggedImageLocation: NSPoint { .zero }
+    var draggedImage: NSImage? { nil }
+    var draggingSource: Any? { nil }
+    var draggingFormation: NSDraggingFormation {
+        get { .default }
+        set {}
+    }
+    var animatesToDestination: Bool {
+        get { false }
+        set {}
+    }
+    var numberOfValidItemsForDrop: Int {
+        get { 1 }
+        set {}
+    }
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    func enumerateDraggingItems(
+        options enumOpts: NSDraggingItemEnumerationOptions = [], for view: NSView?,
+        classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:],
+        using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {}
+    func resetSpringLoading() {}
 }

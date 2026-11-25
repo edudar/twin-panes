@@ -52,6 +52,7 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
     /// Set while the app highlights a row, so the selection doesn't count as a click.
     private var isHighlighting = false
     private var highlighted: URL?
+    var validatedDrag: (sequence: Int, hasFolder: Bool)?
 
     public override func loadView() {
         // One column as wide as the sidebar: left at its default 100 pt, every name was
@@ -63,7 +64,7 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
         outlineView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         outlineView.headerView = nil
         outlineView.style = .sourceList
-        // Row height and text follow the system's sidebar size setting, as in Finder.
+        // Row height follows the system's sidebar size setting, as in Finder.
         outlineView.rowSizeStyle = .default
         outlineView.floatsGroupRows = false
         outlineView.dataSource = self
@@ -107,10 +108,12 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
 
     public func highlight(_ folder: URL?) {
         highlighted = folder?.standardizedFileURL
-        let row = (0..<outlineView.numberOfRows).first { row in
-            guard let path = (outlineView.item(atRow: row) as? SidebarNode)?.folder?.path
-            else { return false }
-            return path == highlighted?.path
+        let row = highlighted.flatMap { target in
+            (0..<outlineView.numberOfRows).first { row in
+                guard let nodeFolder = (outlineView.item(atRow: row) as? SidebarNode)?.folder
+                else { return false }
+                return BookmarkStore.pathsEqual(nodeFolder, target)
+            }
         }
         isHighlighting = true
         defer { isHighlighting = false }
@@ -132,21 +135,27 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
         highlight(highlighted)
     }
 
-    /// Finder's symbols for the standard folders, a plain folder for the rest.
     /// Finder's sidebar symbols for the standard folders, a plain folder for the rest.
     /// Finder's Applications glyph isn't a public symbol; `a.circle` is the closest.
     private static func symbol(for folder: URL, home: URL?) -> String {
-        if folder.path == home?.path { return "house" }
-        switch folder.lastPathComponent {
-        case "Desktop": return "menubar.dock.rectangle"
-        case "Documents": return "doc"
-        case "Downloads": return "arrow.down.circle"
-        case "Applications": return "a.circle"
-        case "Movies": return "film"
-        case "Music": return "music.note"
-        case "Pictures": return "photo"
-        default: return "folder"
+        let apps = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        if BookmarkStore.pathsEqual(folder, apps) { return "a.circle" }
+        guard let home else { return "folder" }
+        if BookmarkStore.pathsEqual(folder, home) { return "house" }
+        let standardSymbols: [(String, String)] = [
+            ("Desktop", "menubar.dock.rectangle"),
+            ("Documents", "doc"),
+            ("Downloads", "arrow.down.circle"),
+            ("Applications", "a.circle"),
+            ("Movies", "film"),
+            ("Music", "music.note"),
+            ("Pictures", "photo"),
+        ]
+        for (name, symbol) in standardSymbols {
+            let candidate = home.appendingPathComponent(name, isDirectory: true)
+            if BookmarkStore.pathsEqual(folder, candidate) { return symbol }
         }
+        return "folder"
     }
 
     /// The icon size Finder's sidebar uses for its rows.
@@ -191,8 +200,14 @@ extension SidebarViewController: NSOutlineViewDataSource, NSOutlineViewDelegate 
         guard let node = node(item) else { return nil }
         let cell = NSTableCellView()
         let label = NSTextField(labelWithString: node.title)
-        label.font = .systemFont(ofSize: NSFont.systemFontSize)
+        if node.folder != nil {
+            label.font = .systemFont(ofSize: NSFont.systemFontSize)
+        } else {
+            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            label.textColor = .secondaryLabelColor
+        }
         label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         label.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(label)
         cell.textField = label
@@ -254,6 +269,8 @@ final class EjectButton: NSButton {
         self.target = target
         self.action = action
         toolTip = "Eject “\(volume.name)”"
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setContentHuggingPriority(.required, for: .horizontal)
         translatesAutoresizingMaskIntoConstraints = false
     }
 
