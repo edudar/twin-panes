@@ -143,6 +143,7 @@ struct SmokeTest {
         }
         await parentRow(check, browser: browser, table: table, folder: folder, window: window)
         await selectionAndFunctionKeys(check, browser: browser, table: table, controller: first)
+        await fileOperations(check, in: first)
         table.selectRowIndexes([1], byExtendingSelection: false)
         check(dispatch(.returnKey, in: window), "Return opens the selected folder")
         check(browser.folder.lastPathComponent == "sub", "now inside sub")
