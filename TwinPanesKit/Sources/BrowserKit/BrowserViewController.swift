@@ -130,6 +130,13 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     private(set) var selection = ListingSelection.none
     private var selectedParentRow = false
 
+    /// Selects `name` once the listing has it, as a navigation selects the folder you
+    /// came from.
+    func selectWhenListed(_ name: String) {
+        wantedSelection = name
+        reloadKeepingSelection()
+    }
+
     /// A new folder: empties the list (it fills as batches arrive), selects the first
     /// row, and remembers `name` to select once it's listed.
     func startShowing(selecting name: String?) {
@@ -274,6 +281,13 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
                 // The selected entry went: the row that took its place is selected.
                 restoreSelection(min(selected, tableView.numberOfRows - 1), parentRow: false)
             }
+        }
+        // A name waiting to be selected (a new folder, a rename) that this update
+        // brought; its row was found off the main actor with the others.
+        if let wanted = wantedSelection, asked.contains(wanted), let row = found[wanted] {
+            wantedSelection = nil
+            restoreSelection(row + offset, parentRow: false)
+            tableView.scrollRowToVisible(row + offset)
         }
         return true
     }
@@ -500,6 +514,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard let item else { return false }
+        if let command = fileCommand(for: menuItem.action) {
+            return validateFileCommand(command, menuItem: menuItem)
+        }
         switch menuItem.action {
         case #selector(browserOpen(_:)):
             return !isEditingPath && !item.needsAccess

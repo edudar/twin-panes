@@ -40,6 +40,8 @@ public final class BrowserItem: WorkspaceItem {
     public let kind: ItemKind = .browser
     public let preferredSlot: SlotID = .leftPanel
     public weak var host: WorkspaceHost?
+    /// Runs the file commands (F2 to ⇧F8, undo); the app supplies it.
+    public weak var fileCommands: FileCommandHandling?
     public var onChange: (() -> Void)?
 
     public let grants: FolderGrants
