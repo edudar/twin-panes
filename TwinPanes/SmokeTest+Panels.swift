@@ -38,7 +38,10 @@ extension SmokeTest {
         window.makeKeyAndOrderFront(nil)
         window.layoutIfNeeded()
         for (panel, browser) in [(SlotID.rightPanel, right), (.leftPanel, left)] {
-            guard let list = browser.preferredFirstResponder else { continue }
+            guard let list = browser.preferredFirstResponder else {
+                check(false, "the \(panel.rawValue)'s file list takes focus")
+                continue
+            }
             click(list, in: window)
             await settle()
             check(

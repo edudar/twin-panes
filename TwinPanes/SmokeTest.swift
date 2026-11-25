@@ -5,14 +5,20 @@ import Synchronization
 import TwinPanesCore
 import WorkspaceKit
 
-/// `Twin Panes --smoke-test`: drives the real app (signed, sandboxed) through the M0–M2
-/// integration checks (M3a editing included) with its real window layout and exits 0 on success, 1 on failure.
+/// `Twin Panes --smoke-test`: drives the real app (signed, sandboxed) through the M0–M5
+/// integration checks with its real window layout and exits 0 on success, 1 on failure.
 /// Pass `--bench` to also run the slow 480-frame scroll and 256 MiB random-data search
 /// throughput benchmarks (PLAN.md §7).
+@MainActor
+final class ChildTracker {
+    var process: Process?
+}
+
 @MainActor
 struct SmokeTest {
     let app: AppDelegate
     var includeBenchmarks = false
+    let childTracker = ChildTracker()
 
     func run() {
         // A guard against hangs, not a performance gate: the full run takes about 10 s on
@@ -24,6 +30,14 @@ struct SmokeTest {
         let activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiated, .latencyCritical], reason: "smoke test")
         DispatchQueue.main.asyncAfter(deadline: .now() + 240) {
+            MainActor.assumeIsolated {
+                if let process = childTracker.process, process.isRunning {
+                    process.terminate()
+                    kill(process.processIdentifier, SIGKILL)
+                    process.waitUntilExit()
+                }
+                app.cleanUpIsolatedRun()
+            }
             print("SMOKE FAIL: timed out after 240 s")
             if ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true" {
                 print("::error title=Smoke test::timed out after 240 s")
@@ -44,7 +58,6 @@ struct SmokeTest {
             // `exit` skips teardown: close sessions as quitting does.
             app.applicationWillTerminate(
                 Notification(name: NSApplication.willTerminateNotification))
-            app.recentFiles.cleanUp()
             print("  info the smoke test took \(ContinuousClock.now - started)")
             ProcessInfo.processInfo.endActivity(activity)
             print(failures.isEmpty ? "SMOKE OK" : "SMOKE FAIL: \(failures.count) check(s)")

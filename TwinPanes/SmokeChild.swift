@@ -35,6 +35,10 @@ struct ShownWindow: Codable {
     var editorSelection: [UInt64]?
     var editorBytesPerRow: String?
     var editorIsDirty: Bool?
+    var dividerFraction: Double?
+    var sidebarShown: Bool?
+    var sidebarWidth: Double?
+    var editorTopRow: UInt64?
 }
 
 /// The app as the smoke test's child, `--smoke-child <step> <folder>`
@@ -77,13 +81,22 @@ struct SmokeChild {
                 case "crash-recover": report.recovered = try await recover(app: app)
                 default: throw SmokeChildError.unknownStep(step)
                 }
-                try JSONEncoder().encode(report)
-                    .write(to: folder.appendingPathComponent("\(step).json"), options: .atomic)
-                // The parent kills this one with SIGKILL: the crash under test.
-                if waitsToBeKilled { return }
-                // `exit` skips teardown: close sessions as quitting does.
+                if waitsToBeKilled {
+                    try JSONEncoder().encode(report)
+                        .write(to: folder.appendingPathComponent("\(step).json"), options: .atomic)
+                    // The parent kills this one with SIGKILL: the crash under test.
+                    // Safety exit so an orphaned child never lingers if the parent fails.
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(30))
+                        exit(1)
+                    }
+                    return
+                }
+                // `exit` skips teardown: close sessions as quitting does before signalling.
                 app.applicationWillTerminate(
                     Notification(name: NSApplication.willTerminateNotification))
+                try JSONEncoder().encode(report)
+                    .write(to: folder.appendingPathComponent("\(step).json"), options: .atomic)
                 exit(0)
             } catch {
                 // The parent sees no report and says so; this is for anyone reading the log.

@@ -25,7 +25,7 @@ extension SmokeChild {
                     windowNumber: window.windowNumber, context: nil, characters: text,
                     charactersIgnoringModifiers: text, isARepeat: false, keyCode: 0)
             else { throw SmokeChildError.missing("a key event for \(text)") }
-            NSApp.sendEvent(event)
+            window.sendEvent(event)
         }
         guard editor.isDirty else { throw SmokeChildError.missing("the typed edit") }
         try controller.frameController.windowState.encoded().write(to: stateFile)

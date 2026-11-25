@@ -49,6 +49,13 @@ extension SmokeTest {
         _ check: (Bool, String) -> Void, browser: BrowserItem, window: NSWindow, folder: URL
     ) async {
         let path = folder.standardizedFileURL.path
+        let fm = FileManager.default
+        let extraFolders = ["folder-one", "folder-two"].map { folder.appendingPathComponent($0) }
+        for url in extraFolders {
+            try? fm.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        defer { for url in extraFolders { try? fm.removeItem(at: url) } }
+
         typeInPathField(path + "/su", browser: browser, window: window)
         let completed = await pressTabInPathField(browser: browser, window: window)
         check(
@@ -60,6 +67,28 @@ extension SmokeTest {
             browser.folder.lastPathComponent == "sub"
                 && window.firstResponder === browser.preferredFirstResponder,
             "and Return goes there")
+
+        typeInPathField(path + "/fo", browser: browser, window: window)
+        let prefix = await pressTabInPathField(browser: browser, window: window)
+        check(
+            prefix == path + "/folder-",
+            "Tab completes ambiguous prefix to shared part: \(prefix ?? "nothing")")
+        press("\t", in: window)
+        await settle(milliseconds: 100)
+        let field = Self.view(in: browser.viewController.view, id: "browserPath") as? NSTextField
+        check(
+            field?.currentEditor()?.string == path + "/folder-",
+            "second Tab opens completion list without stalling")
+        press("\u{1b}", in: window)
+        await settle(milliseconds: 50)
+
+        typeInPathField("~", browser: browser, window: window)
+        let tilde = await pressTabInPathField(browser: browser, window: window)
+        check(
+            tilde?.hasPrefix("~/") == true,
+            "Tab expands ~ in the path field: \(tilde ?? "nothing")")
+        press("\u{1b}", in: window)
+
         browser.go(to: folder)
         await browser.listed()
     }

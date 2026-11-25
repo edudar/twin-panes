@@ -21,11 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         ["--smoke-test", "--bench", SmokeChild.flag].contains(where: CommandLine.arguments.contains)
     }
 
-    let recentFiles: RecentFiles = isIsolatedRun ? .isolated() : RecentFiles()
+    let recentFiles: RecentFiles
     /// One session per open file (docs/plans/M3b.md, D-a).
-    let sessions = SessionRegistry(
-        sessionsRoot: SmokeChild(arguments: CommandLine.arguments)?.sessionsRoot
-            ?? SessionFolder.defaultRoot)
+    let sessions: SessionRegistry
 
     private(set) var windowControllers: [MainWindowController] = []
     private var editorCount = 0
@@ -36,24 +34,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     let favorites: Favorites
 
     override init() {
+        let child = SmokeChild(arguments: CommandLine.arguments)
         if Self.isIsolatedRun {
-            let dir = FileManager.default.temporaryDirectory
+            let baseFolder =
+                child?.folder
+                ?? FileManager.default.temporaryDirectory
                 .appendingPathComponent("smoke-grants-\(UUID().uuidString)", isDirectory: true)
                 .resolvingSymlinksInPath()
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let suite = dir.appendingPathComponent("defaults").path
+            let grantsDir =
+                child != nil
+                ? baseFolder.appendingPathComponent("grants", isDirectory: true) : baseFolder
+            try? FileManager.default.createDirectory(
+                at: grantsDir, withIntermediateDirectories: true)
+            let suite = grantsDir.appendingPathComponent("defaults").path
             guard let defaults = UserDefaults(suiteName: suite) else {
                 preconditionFailure("Unable to create isolated UserDefaults suite at \(suite)")
             }
-            isolatedGrantsFolder = dir
+            isolatedGrantsFolder = grantsDir
             isolatedGrantsSuite = suite
             folderGrants = FolderGrants(defaults: defaults)
             favorites = Favorites(defaults: defaults, home: DirectoryReader.realHomeDirectory)
+
+            let recentsDir = baseFolder.appendingPathComponent("recents", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: recentsDir, withIntermediateDirectories: true)
+            let recentsSuite = recentsDir.appendingPathComponent("defaults").path
+            guard let recentsDefaults = UserDefaults(suiteName: recentsSuite) else {
+                preconditionFailure(
+                    "Unable to create isolated UserDefaults suite at \(recentsSuite)")
+            }
+            recentFiles = RecentFiles(
+                defaults: recentsDefaults,
+                recordSystemRecents: false,
+                isolatedFolder: recentsDir,
+                isolatedSuite: recentsSuite)
+            let sessionsRoot =
+                child?.sessionsRoot
+                ?? baseFolder.appendingPathComponent("Sessions", isDirectory: true)
+            sessions = SessionRegistry(sessionsRoot: sessionsRoot)
         } else {
             isolatedGrantsFolder = nil
             isolatedGrantsSuite = nil
             folderGrants = FolderGrants()
             favorites = Favorites(defaults: .standard, home: DirectoryReader.realHomeDirectory)
+            recentFiles = RecentFiles()
+            sessions = SessionRegistry(sessionsRoot: SessionFolder.defaultRoot)
         }
         super.init()
         if Self.isIsolatedRun { Self.ignoreSavedWindows() }
@@ -188,6 +213,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// look like a crash at the next launch.
     func applicationWillTerminate(_ notification: Notification) {
         for session in sessions.sessions { session.close() }
+        cleanUpIsolatedRun()
+    }
+
+    func cleanUpIsolatedRun() {
+        recentFiles.cleanUp()
         if let isolatedGrantsSuite {
             UserDefaults().removePersistentDomain(forName: isolatedGrantsSuite)
         }

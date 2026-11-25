@@ -38,34 +38,58 @@ extension SmokeTest {
 
     /// Runs the app's executable with `--smoke-child <step> <folder>` and waits up to
     /// 20 s for its report. Returns the report, if one came, and what happened, for the
-    /// log. A child still running then is stopped.
+    /// log. A child still running after reporting gets a brief grace window to exit on
+    /// its own before termination; a timed-out child is terminated immediately.
     func launchChild(_ step: String, in folder: URL) async -> (SmokeChildReport?, String) {
-        await runChild(step, in: folder) { process in
-            if process.isRunning { process.terminate() }
+        await runChild(step, in: folder) { process, didReport in
+            if didReport {
+                let deadline = ContinuousClock.now + .seconds(2)
+                while process.isRunning && ContinuousClock.now < deadline {
+                    Thread.sleep(forTimeInterval: 0.02)
+                }
+            }
+            terminateAndWait(process)
         }
     }
 
     /// Runs a child that keeps running after its report, then kills it with SIGKILL, as
     /// a crash would, and waits for it to go.
     func crashChild(_ step: String, in folder: URL) async -> (SmokeChildReport?, String) {
-        await runChild(step, in: folder) { process in
+        await runChild(step, in: folder) { process, _ in
             guard process.isRunning else { return }
             kill(process.processIdentifier, SIGKILL)
             process.waitUntilExit()
         }
     }
 
+    private func terminateAndWait(_ process: Process) {
+        guard process.isRunning else { return }
+        process.terminate()
+        let deadline = ContinuousClock.now + .milliseconds(500)
+        while process.isRunning && ContinuousClock.now < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        process.waitUntilExit()
+    }
+
     private func runChild(
-        _ step: String, in folder: URL, finally end: (Process) -> Void
+        _ step: String, in folder: URL, finally end: (Process, Bool) -> Void
     ) async -> (SmokeChildReport?, String) {
         let process = Process()
         process.executableURL = Bundle.main.executableURL
         process.arguments = [SmokeChild.flag, step, folder.path]
         do { try process.run() } catch { return (nil, "can't start: \(error)") }
-        defer { end(process) }
+        childTracker.process = process
+        var didReport = false
+        defer {
+            end(process, didReport)
+            childTracker.process = nil
+        }
         let file = folder.appendingPathComponent("\(step).json")
         for _ in 0..<200 {
             if let data = try? Data(contentsOf: file) {
+                didReport = true
                 guard let report = try? JSONDecoder().decode(SmokeChildReport.self, from: data)
                 else { return (nil, "its report doesn't decode") }
                 return (
@@ -125,8 +149,13 @@ extension SmokeTest {
             "and its sort order and hidden files")
         check(
             shown.editorFile == "data.bin" && shown.editorSelection == [100, 120]
-                && shown.editorBytesPerRow == "fixed(8)" && shown.editorIsDirty == false,
-            "and the editor, through its bookmark, with its view and no edits")
+                && shown.editorBytesPerRow == "fixed(8)" && shown.editorIsDirty == false
+                && shown.editorTopRow == 5,
+            "and the editor, through its bookmark, with its view, scroll row and no edits")
+        check(
+            shown.dividerFraction.map { $0 > 0.1 && $0 < 0.45 } == true
+                && shown.sidebarShown == false && shown.sidebarWidth != nil,
+            "and the panel divider and sidebar state")
     }
 }
 

@@ -13,13 +13,14 @@ enum SmokeChildError: Error {
 /// goes through a file in the test folder, never AppKit's saved state, so the checks
 /// leave the user's saved windows alone (D-c).
 extension SmokeChild {
-    var stateFile: URL { folder.appendingPathComponent("window.json") }
+    var stateFile: URL { folder.appendingPathComponent("window.state") }
 
     /// Sets up a window the way someone would leave it, and saves its state.
     func saveWindow(app: AppDelegate) async throws {
         let controller = app.openMainWindow()
         let layout = controller.layout
-        guard let left = layout.selectedItem(in: .leftPanel) as? BrowserItem,
+        guard let window = controller.window,
+            let left = layout.selectedItem(in: .leftPanel) as? BrowserItem,
             let right = layout.selectedItem(in: .rightPanel) as? BrowserItem
         else { throw SmokeChildError.missing("a browser in each panel") }
         for path in ["", "a", "a/inner"] {
@@ -41,20 +42,53 @@ extension SmokeChild {
         NSApp.sendAction(
             #selector(HexEditorActions.setBytesPerRow(_:)), to: editor.viewController,
             from: eightPerRow)
+        window.layoutIfNeeded()
+        try? await Task.sleep(for: .milliseconds(50))
+        controller.frameController.toggleSidebarShown(nil)
+        if let panelSplit = Self.panelSplitView(
+            in: controller.frameController.view, delegate: controller.frameController)
+        {
+            panelSplit.setPosition(240, ofDividerAt: 0)
+        }
+        window.layoutIfNeeded()
         editor.hexView.select(100..<120)
-        try controller.frameController.windowState.encoded().write(to: stateFile)
+        editor.hexView.scroll(toTopRow: 5)
+        let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+        controller.window(window, willEncodeRestorableState: archiver)
+        archiver.finishEncoding()
+        try archiver.encodedData.write(to: stateFile)
     }
 
-    /// Restores a window from the saved state, as AppKit would, and reports what it shows.
+    /// Restores a window from the saved state through `MainWindowRestoration` and reports
+    /// what it shows.
     func loadWindow(app: AppDelegate) async throws -> ShownWindow {
-        let state = try WindowState(decoding: Data(contentsOf: stateFile))
-        let layout = app.openMainWindow(restoring: state).layout
+        let data = try Data(contentsOf: stateFile)
+        let unarchiver = try NSKeyedUnarchiver(forReadingFrom: data)
+        unarchiver.requiresSecureCoding = true
+        defer { unarchiver.finishDecoding() }
+        var restoredWindow: NSWindow?
+        var restoreError: (any Error)?
+        MainWindowRestoration.restoreWindow(
+            withIdentifier: MainWindowRestoration.identifier, state: unarchiver
+        ) { window, error in
+            restoredWindow = window
+            restoreError = error
+        }
+        if let restoreError { throw restoreError }
+        guard let restoredWindow,
+            let controller = app.windowControllers.first(where: { $0.window === restoredWindow })
+        else { throw SmokeChildError.missing("a restored window") }
+        controller.showWindow(nil)
+        restoredWindow.layoutIfNeeded()
+        try? await Task.sleep(for: .milliseconds(50))
+        let layout = controller.layout
         for case let browser as BrowserItem in layout.allItems { await browser.listed() }
         guard let left = layout.selectedItem(in: .leftPanel) as? BrowserItem else {
             throw SmokeChildError.missing("a browser selected in the left panel")
         }
         let editor = layout.items(in: .rightPanel).lazy.compactMap { $0 as? HexEditorItem }.first
         let selection = editor?.hexView.selection.range
+        let state = controller.frameController.windowState
         return ShownWindow(
             leftTabs: layout.items(in: .leftPanel).map(\.title),
             rightTabs: layout.items(in: .rightPanel).map(\.title),
@@ -67,6 +101,18 @@ extension SmokeChild {
             editorFile: editor?.url.lastPathComponent,
             editorSelection: selection.map { [$0.lowerBound, $0.upperBound] },
             editorBytesPerRow: editor.map { String(describing: $0.hexView.options.bytesPerRow) },
-            editorIsDirty: editor?.isDirty)
+            editorIsDirty: editor?.isDirty,
+            dividerFraction: state.dividerFraction,
+            sidebarShown: state.sidebarShown,
+            sidebarWidth: state.sidebarWidth,
+            editorTopRow: editor?.hexView.topRow)
+    }
+
+    private static func panelSplitView(in root: NSView, delegate: AnyObject) -> NSSplitView? {
+        if let split = root as? NSSplitView, split.delegate === delegate { return split }
+        for child in root.subviews {
+            if let found = panelSplitView(in: child, delegate: delegate) { return found }
+        }
+        return nil
     }
 }
