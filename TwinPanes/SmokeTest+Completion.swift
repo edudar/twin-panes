@@ -26,6 +26,31 @@ extension SmokeTest {
         return nil
     }
 
+    /// The second Tab opens the list of matches (D49): Down highlights the first, which
+    /// puts its whole path in the field, and Return takes it without leaving the field.
+    func pickFromCompletionList(
+        _ check: (Bool, String) -> Void, browser: BrowserItem, window: NSWindow,
+        expecting picked: String
+    ) async {
+        let field = Self.view(in: browser.viewController.view, id: "browserPath") as? NSTextField
+        let folder = browser.folder
+        press("\t", in: window)
+        await settle(milliseconds: 100)
+        pressDownArrow(in: window)
+        await settle(milliseconds: 100)
+        check(
+            field?.currentEditor()?.string == picked,
+            "second Tab lists the matches and Down picks the first: "
+                + (field?.currentEditor()?.string ?? "field closed"))
+        press("\r", in: window)
+        await settle(milliseconds: 100)
+        check(
+            field?.currentEditor()?.string == picked && browser.folder == folder,
+            "Return takes the pick and stays in the path field")
+        press("\u{1b}", in: window)
+        await settle(milliseconds: 50)
+    }
+
     /// A file's path in the path field (§4.7): ⌘↩ opens it in a hex editor tab and Return
     /// in its default app (recorded here, so the smoke test launches no other app), each
     /// from the file's folder.
@@ -61,6 +86,18 @@ extension SmokeTest {
             inDefaultApp.map(\.path) == [file.path]
                 && window.firstResponder === browser.preferredFirstResponder,
             "Return opens a typed file in its default app and leaves the field")
+    }
+
+    func pressDownArrow(in window: NSWindow) {
+        let key = String(UnicodeScalar(UInt16(NSDownArrowFunctionKey))!)
+        guard
+            let event = NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [.function, .numericPad],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, characters: key,
+                charactersIgnoringModifiers: key, isARepeat: false, keyCode: 125)
+        else { return }
+        window.sendEvent(event)
     }
 
     /// Sends `text` as key presses to `window` itself, as AppKit hands a key window its
@@ -111,14 +148,8 @@ extension SmokeTest {
         check(
             prefix == path + "/folder-",
             "Tab completes ambiguous prefix to shared part: \(prefix ?? "nothing")")
-        press("\t", in: window)
-        await settle(milliseconds: 100)
-        let field = Self.view(in: browser.viewController.view, id: "browserPath") as? NSTextField
-        check(
-            field?.currentEditor()?.string == path + "/folder-",
-            "second Tab opens completion list without stalling")
-        press("\u{1b}", in: window)
-        await settle(milliseconds: 50)
+        await pickFromCompletionList(
+            check, browser: browser, window: window, expecting: path + "/folder-one/")
 
         typeInPathField("~", browser: browser, window: window)
         let tilde = await pressTabInPathField(browser: browser, window: window)

@@ -27,6 +27,14 @@ public struct PathCompletion: Equatable, Sendable {
     /// The typed text with the last component completed as far as every match agrees,
     /// in the matches' spelling; a folder that's the only match gets a trailing `/`.
     public let completedText: String
+    /// The text up to and including its last `/`, as typed.
+    private let typedFolder: String
+
+    /// The whole text each match completes to, in the matches' order: the folder as
+    /// typed, then the match's name, with a trailing `/` for a folder.
+    public var matchTexts: [String] {
+        matches.map { typedFolder + $0.name + ($0.isFolder ? "/" : "") }
+    }
 
     /// The query `text` asks for, or nil when it isn't an absolute path or one starting
     /// with `~`, which means `home` (the real home folder, not the app's container).
@@ -52,6 +60,7 @@ public struct PathCompletion: Equatable, Sendable {
             (offersHidden || !candidate.name.hasPrefix("."))
                 && Self.fold(candidate.name).hasPrefix(partial)
         }.sorted(by: Self.inListOrder)
+        typedFolder = query.typedFolder
         guard let first = matches.first else {
             completedText = query.typedFolder + query.partial
             return

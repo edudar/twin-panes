@@ -17,10 +17,12 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     var completionNames: CompletionNames?
     /// The completion waiting for a folder's names; for tests.
     nonisolated(unsafe) var pendingCompletion: Task<Void, Never>?
-    /// The last completion applied, whose matches AppKit's list offers.
-    var lastCompletion: PathCompletion?
-    /// Opens AppKit's completion list; tests stand in for it.
-    var showCompletionList: (NSTextView) -> Void = { $0.complete(nil) }
+    /// The path field's list of matches; the field holds it weakly.
+    let pathSuggestions = PathSuggestions()
+    /// Lists these texts under the field; tests stand in for it.
+    lazy var showCompletionList: ([String], NSTextView) -> Void = { [pathSuggestions] in
+        pathSuggestions.list($0, in: $1)
+    }
     private let scrollView = NSScrollView()
     private let accessPrompt = NSStackView()
     private let accessLabel = NSTextField(wrappingLabelWithString: "")
@@ -44,12 +46,15 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
 
     override func loadView() {
         pathField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        // The size the suggestions list takes its font and row height from.
+        pathField.controlSize = .small
         pathField.lineBreakMode = .byTruncatingHead
         pathField.placeholderString = "Folder path"
         pathField.target = self
         pathField.action = #selector(pathEntered(_:))
         pathField.setAccessibilityIdentifier("browserPath")
         pathField.delegate = self
+        pathField.suggestionsDelegate = pathSuggestions
         configurePathBar()
 
         configureTable()

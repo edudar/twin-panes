@@ -88,6 +88,16 @@ import Testing
         #expect(completion.matches.map(\.name) == ["Alpha", "zeta", "a.txt", "b.txt"])
     }
 
+    @Test func eachMatchTextIsTheTypedFolderThenTheNameWithAFoldersSlash() throws {
+        let completion = try complete(
+            "~/Do", among: [file("Dock.txt"), folder("Documents"), folder("Music")])
+        #expect(completion.matchTexts == ["~/Documents/", "~/Dock.txt"])
+    }
+
+    @Test func noMatchHasNoMatchTexts() throws {
+        #expect(try complete("/x/zz", among: [folder("a")]).matchTexts.isEmpty)
+    }
+
     @Test func greekFinalSigmaKeepsTypedCharacterAcrossCaseVariants() throws {
         let completion = try complete("/x/ος", among: [file("ΟΣ"), file("ος")])
         #expect(completion.matches.count == 2)
