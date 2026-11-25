@@ -30,6 +30,7 @@ extension SidebarViewController {
             insertion += 1
         }
         reloadFavorites()
+        onFavoritesEdited?()
         return true
     }
 
@@ -46,6 +47,7 @@ extension SidebarViewController {
         else { return }
         favorites.remove(folder)
         reloadFavorites()
+        onFavoritesEdited?()
     }
 
     func makeContextMenu() -> NSMenu {
@@ -59,12 +61,18 @@ extension SidebarViewController {
     }
 
     @objc func removeClickedFavorite(_ sender: Any?) {
-        removeFavorite(atRow: outlineView.clickedRow)
+        removeFavorite(atRow: menuRow)
     }
 
     var isClickedRowAFavorite: Bool {
-        let node = outlineView.item(atRow: outlineView.clickedRow) as? SidebarNode
+        let node = outlineView.item(atRow: menuRow) as? SidebarNode
         return favoritesSection.children.contains { $0 === node }
+    }
+
+    /// The row the context menu is for: the one right-clicked, or the selected one when
+    /// the menu came up from the keyboard.
+    private var menuRow: Int {
+        outlineView.clickedRow >= 0 ? outlineView.clickedRow : outlineView.selectedRow
     }
 
     // MARK: Dragging

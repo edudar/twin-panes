@@ -282,6 +282,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         controller.frameController.onUpdate = { [weak sidebar, weak controller] in
             sidebar?.highlight((controller?.layout.focusedPanelItem as? BrowserItem)?.folder)
         }
+        sidebar.onFavoritesEdited = { [weak self] in
+            for controller in self?.windowControllers ?? [] {
+                (controller.frameController.sidebar as? SidebarViewController)?.reloadFavorites()
+            }
+        }
         sidebar.onEject = { [weak self, weak controller] volume in
             guard let self, let controller else { return }
             self.eject(volume, reportingIn: controller)

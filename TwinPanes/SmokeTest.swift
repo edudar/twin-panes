@@ -74,7 +74,7 @@ struct SmokeTest {
             "smoke-test windows are left out of window restoration")
         await settle()
         await twoPanels(check, in: second)
-        await sidebar(check, in: second)
+        await sidebar(check, in: second, alongside: first)
         await selfLaunch(check)
         await restoreRelaunch(check)
         await crashRelaunch(check)

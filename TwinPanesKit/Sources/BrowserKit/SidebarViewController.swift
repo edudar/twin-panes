@@ -32,6 +32,9 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
     public var onOpen: ((URL) -> Void)?
     /// Called with a volume whose eject button was clicked.
     public var onEject: ((Volume) -> Void)?
+    /// Called after the user added, moved or removed a favorite here, so the app can
+    /// show the change in every window's sidebar.
+    public var onFavoritesEdited: (() -> Void)?
 
     let favorites: Favorites
     let outlineView = NSOutlineView()

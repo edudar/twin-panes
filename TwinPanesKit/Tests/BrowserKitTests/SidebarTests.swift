@@ -159,6 +159,22 @@ import Testing
         #expect(!favoriteNames.contains("Documents") && !titles.contains("Documents"))
     }
 
+    @Test func editsAreReportedSoOtherSidebarsCanShowThem() throws {
+        defer { cleanUp() }
+        var edits = 0
+        sidebar.onFavoritesEdited = { edits += 1 }
+        _ = sidebar.acceptDrop(of: [try makeFolder("Projects")], at: 0)
+        sidebar.removeFavorite(atRow: try row("Projects"))
+        #expect(edits == 2)
+    }
+
+    @Test func theMenusRemoveActsOnTheSelectedFavoriteWithoutARightClick() throws {
+        defer { cleanUp() }
+        outline.selectRowIndexes([try row("Downloads")], byExtendingSelection: false)
+        sidebar.removeClickedFavorite(nil)
+        #expect(!favoriteNames.contains("Downloads"))
+    }
+
     @Test func removingLeavesVolumesAndHeadingsAlone() throws {
         defer { cleanUp() }
         sidebar.removeFavorite(atRow: try row("USB"))
