@@ -52,6 +52,8 @@ public protocol FileOperationSystem: Sendable {
     func copyMetadata(from source: URL, to destination: URL) throws(FileSystemError)
     /// Removes one file, symlink or empty folder.
     func remove(_ url: URL) throws(FileSystemError)
+    /// Moves `url` to its volume's Trash and returns where it went.
+    func trash(_ url: URL) throws(FileSystemError) -> URL
 }
 
 public struct RealFileOperationSystem: FileOperationSystem {
@@ -143,6 +145,27 @@ public struct RealFileOperationSystem: FileOperationSystem {
     public func copyMetadata(from source: URL, to destination: URL) throws(FileSystemError) {
         guard copyfile(source.path, destination.path, nil, copyfile_flags_t(COPYFILE_METADATA)) == 0
         else { throw FileSystemError("copy metadata to", destination.path, errno: errno) }
+    }
+
+    public func trash(_ url: URL) throws(FileSystemError) -> URL {
+        var trashed: NSURL?
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
+        } catch {
+            // Foundation wraps the POSIX error when there is one; a volume without a
+            // Trash gives a Cocoa error alone.
+            var code = ENOTSUP
+            if let underlying = (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError,
+                underlying.domain == NSPOSIXErrorDomain
+            {
+                code = Int32(underlying.code)
+            }
+            throw FileSystemError("move to the Trash", url.path, errno: code)
+        }
+        guard let trashed = trashed as URL? else {
+            throw FileSystemError("move to the Trash", url.path, errno: ENOENT)
+        }
+        return trashed
     }
 
     public func remove(_ url: URL) throws(FileSystemError) {

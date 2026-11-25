@@ -14,6 +14,8 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
         var chunks = 0
         var onChunk: (@Sendable (_ path: String, _ chunk: Int) -> Void)?
         var copied: [String] = []
+        var trashFolder: URL?
+        var trashFailures: [String: Int32] = [:]
     }
     private let script = Mutex(Script())
 
@@ -32,6 +34,13 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
             $0.chunks = count
             $0.onChunk = onChunk
         }
+    }
+
+    /// Where `trash` moves items, so tests never touch the real Trash.
+    func useTrash(_ folder: URL) { script.withLock { $0.trashFolder = folder } }
+
+    func failTrash(endingWith suffix: String, errno: Int32) {
+        script.withLock { $0.trashFailures[suffix] = errno }
     }
 
     /// The source paths `copyFile` was asked to copy, in order.
@@ -83,4 +92,22 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
     }
 
     func remove(_ url: URL) throws(FileSystemError) { try real.remove(url) }
+
+    func trash(_ url: URL) throws(FileSystemError) -> URL {
+        let (folder, failure) = script.withLock { script in
+            (script.trashFolder, script.trashFailures.first { url.path.hasSuffix($0.key) }?.value)
+        }
+        if let failure { throw FileSystemError("move to the Trash", url.path, errno: failure) }
+        guard let folder else { preconditionFailure("call useTrash(_:) before trashing") }
+        let trashed = folder.appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent(url.lastPathComponent)
+        do {
+            try FileManager.default.createDirectory(
+                at: trashed.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: url, to: trashed)
+        } catch {
+            throw FileSystemError("move to the Trash", url.path, errno: EIO)
+        }
+        return trashed
+    }
 }
