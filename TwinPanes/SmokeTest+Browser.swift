@@ -141,6 +141,25 @@ extension SmokeTest {
         check(
             browser.folder.path == folder.deletingLastPathComponent().standardizedFileURL.path,
             "a folder moved away sends the tab to its parent")
+        // ⇧F8 on a 100k folder the tab shows: 100k unlinks streamed in as live updates
+        // stalled the tab when another app did them (PLAN.md §9, from M4; M6 step 20).
+        browser.go(to: trashed)
+        await browser.listed()
+        await gate("deleting the shown 100k folder for good") {
+            let operation = app.fileOperations.queue.add(.delete([trashed]), scopes: []) { _, _ in
+                ConflictAnswer(.stop)
+            }
+            let result = await operation.finished()
+            check(
+                result.failures.isEmpty, "the 100k folder is deleted: \(result.failures.prefix(3))")
+            await waitFor { browser.folder.path != trashed.standardizedFileURL.path }
+            await browser.listed()
+        }
+        check(
+            !FileManager.default.fileExists(atPath: trashed.path)
+                && browser.folder.path
+                    == trashed.deletingLastPathComponent().standardizedFileURL.path,
+            "deleting the shown folder sends the tab to its parent")
         await Task.detached { try? FileManager.default.removeItem(at: trashed) }.value
     }
 
