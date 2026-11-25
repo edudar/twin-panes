@@ -111,7 +111,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
 
     /// The entry to select once it has been listed (the folder you came from), until the
     /// user moves the selection first.
-    private var wantedSelection: String?
+    private(set) var wantedSelection: String?
     /// Set while the selection is changed here rather than by the user.
     private(set) var isRestoringSelection = false
     /// What's selected, recorded as it changes: by the time the table reloads, the
@@ -256,7 +256,10 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     func selectionChanged() {
         selectedName = selectedEntry?.name
         selectedParentRow = isParentRowSelected
-        if !isRestoringSelection { wantedSelection = nil }
+        if !isRestoringSelection {
+            wantedSelection = nil
+            viewIfLoaded?.window?.invalidateRestorableState()
+        }
     }
 
     /// Row 0 is "..", the parent folder, everywhere but the top folder. It's a view row

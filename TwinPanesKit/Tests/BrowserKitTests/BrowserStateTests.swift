@@ -114,4 +114,83 @@ private final class StatusHost: WorkspaceHost {
         let state = ItemState(kind: .browser, version: 1, payload: Data("not json".utf8))
         #expect(BrowserItem.restored(from: state, grants: grants) { _, _ in } == nil)
     }
+
+    @Test func backgroundTabRestorableStatePreservesRestoredSelection() async throws {
+        defer { cleanUp() }
+        let table = item.controller.tableView
+        table.selectRowIndexes(
+            [try #require(item.controller.row(named: "z.txt"))], byExtendingSelection: false)
+        let saved = try #require(item.restorableState)
+        let background = try #require(BrowserItem.restored(from: saved, grants: grants) { _, _ in })
+        #expect(!background.hasListed)
+        #expect(background.restoredSelection == "z.txt")
+        let reencoded = try #require(background.restorableState)
+        #expect(!background.hasListed)
+        let decoded = try JSONDecoder().decode(BrowserState.self, from: reencoded.payload)
+        #expect(decoded.selected == "z.txt")
+    }
+
+    @Test func invalidKindVersionOrRelativePathIsRefused() throws {
+        defer { cleanUp() }
+        let validPayload = try #require(item.restorableState).payload
+        let wrongKind = ItemState(kind: ItemKind("other"), version: 1, payload: validPayload)
+        #expect(BrowserItem.restored(from: wrongKind, grants: grants) { _, _ in } == nil)
+        for badVersion in [0, -1, BrowserItem.stateVersion + 1] {
+            let state = ItemState(kind: .browser, version: badVersion, payload: validPayload)
+            #expect(BrowserItem.restored(from: state, grants: grants) { _, _ in } == nil)
+        }
+        let relative = BrowserState(
+            folder: "relative/path", selected: nil, back: [], forward: [],
+            sortColumn: ListingOrder.Column.name.rawValue, ascending: true,
+            foldersFirst: true, showsHidden: false)
+        let relState = ItemState(
+            kind: .browser, version: 1, payload: try JSONEncoder().encode(relative))
+        #expect(BrowserItem.restored(from: relState, grants: grants) { _, _ in } == nil)
+    }
+
+    @Test func historyIsCappedAndRelativePlacesAreFiltered() throws {
+        defer { cleanUp() }
+        let places = (0..<120).map { BrowserState.Place(path: "/dir/\($0)", selected: nil) }
+        let state = BrowserState(
+            folder: root.path, selected: nil,
+            back: [BrowserState.Place(path: "rel/a", selected: nil)] + places,
+            forward: places + [BrowserState.Place(path: "rel/b", selected: nil)],
+            sortColumn: "unknownColumn", ascending: true,
+            foldersFirst: true, showsHidden: false)
+        let itemState = ItemState(
+            kind: .browser, version: 1, payload: try JSONEncoder().encode(state))
+        let tab = try #require(BrowserItem.restored(from: itemState, grants: grants) { _, _ in })
+        #expect(tab.order.column == .name)
+        #expect(tab.backStack.count == BrowserItem.maxHistory)
+        #expect(tab.backStack.first?.folder.path == "/dir/20")
+        #expect(tab.backStack.last?.folder.path == "/dir/119")
+        #expect(tab.forwardStack.count == BrowserItem.maxHistory)
+        #expect(tab.forwardStack.first?.folder.path == "/dir/20")
+        #expect(tab.forwardStack.last?.folder.path == "/dir/119")
+    }
+
+    @Test func historyPushCapsAtMaxHistory() async throws {
+        defer { cleanUp() }
+        let fm = FileManager.default
+        for i in 0..<(BrowserItem.maxHistory + 5) {
+            try fm.createDirectory(at: url("h\(i)"), withIntermediateDirectories: true)
+            item.go(to: url("h\(i)"))
+        }
+        await item.listed()
+        #expect(item.backStack.count == BrowserItem.maxHistory)
+        #expect(item.backStack.last?.folder == url("h\(BrowserItem.maxHistory + 3)"))
+    }
+
+    @Test func historyEntrySelectedRoundTrips() async throws {
+        defer { cleanUp() }
+        let table = item.controller.tableView
+        table.selectRowIndexes(
+            [try #require(item.controller.row(named: "z.txt"))], byExtendingSelection: false)
+        await go("a")
+        let tab = try await restored()
+        #expect(tab.backStack.last?.selected == "z.txt")
+        tab.goBack()
+        await tab.listed()
+        #expect(tab.controller.selectedEntry?.name == "z.txt")
+    }
 }

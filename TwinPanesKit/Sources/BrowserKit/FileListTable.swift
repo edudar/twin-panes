@@ -231,16 +231,19 @@ final class IconCache {
     /// a burst of small updates, 78 in one turn, would walk the probes each time
     /// (docs/plans/M4.md, performance pass; PLAN.md §9, "From M5").
     func forget(_ names: Set<String>, in folder: URL) {
+        guard !names.isEmpty else { return }
         let parent = folder.path.hasSuffix("/") ? folder.path : folder.path + "/"
-        let nameStart = parent.utf8.count
-        // `hasPrefix` and a set lookup, not `NSString` path methods or `utf8.starts(with:)`:
-        // those cost 3-6 µs a path in the Debug build, 12 ms per update over 1024 probes.
-        // Entry paths are the folder's path, "/" and the name, so the name starts at
-        // `nameStart`.
+        let parentNS = parent as NSString
+        let nameStart = parentNS.length
+        // `NSString` literal prefix and `substring(from:)` share UTF-16 offsets, avoiding
+        // Swift String's canonical-equivalence prefix vs UTF-8 byte-offset mismatch and
+        // grapheme-cluster rejection when a filename starts with a combining mark.
         func changedPath(_ path: String) -> Bool {
-            guard path.hasPrefix(parent), path.utf8.count > nameStart else { return false }
-            return names.contains(
-                String(path[path.utf8.index(path.startIndex, offsetBy: nameStart)...]))
+            let ns = path as NSString
+            guard ns.length > nameStart,
+                ns.range(of: parent, options: [.anchored, .literal]).location == 0
+            else { return false }
+            return names.contains(ns.substring(from: nameStart))
         }
         func changed(_ key: Key) -> Bool { key.isPath && changedPath(key.id) }
         for key in pathOrder where changed(key) { icons[key] = nil }

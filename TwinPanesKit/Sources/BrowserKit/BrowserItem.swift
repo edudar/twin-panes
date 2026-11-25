@@ -101,6 +101,7 @@ public final class BrowserItem: WorkspaceItem {
     var isMerging = false
     private var listedWaiters: [CheckedContinuation<Void, Never>] = []
     /// Folders to go back and forward to, most recent last (D-d).
+    static let maxHistory = 100
     var backStack: [HistoryEntry] = []
     var forwardStack: [HistoryEntry] = []
     /// Set when the sandbox refuses the folder until the user grants access.
@@ -170,7 +171,7 @@ public final class BrowserItem: WorkspaceItem {
             return false
         }
         if recording, hasListed, target.path != folder.path {
-            backStack.append(here)
+            pushHistory(here, onto: \.backStack)
             forwardStack = []
         }
         let order = self.order
@@ -244,6 +245,7 @@ public final class BrowserItem: WorkspaceItem {
         showsHidden = shows
         pendingHidden = shows
         applyPending()
+        controller.viewIfLoaded?.window?.invalidateRestorableState()
     }
 
     /// Sorts the rows (D-c): here for a small folder, off the main actor for a big one,
@@ -253,6 +255,7 @@ public final class BrowserItem: WorkspaceItem {
         self.order = order
         pendingOrder = order
         applyPending()
+        controller.viewIfLoaded?.window?.invalidateRestorableState()
     }
 
     func received(_ event: FolderLister.Event) {

@@ -43,7 +43,7 @@ extension BrowserItem {
                 if leaving.folder.path != entry.folder.path,
                     self[keyPath: destination].last?.folder.path != leaving.folder.path
                 {
-                    self[keyPath: destination].append(leaving)
+                    pushHistory(leaving, onto: destination)
                 }
                 showSkipped(skipped)
                 return
@@ -52,6 +52,15 @@ extension BrowserItem {
         }
         showSkipped(skipped)
         NSSound.beep()
+    }
+
+    func pushHistory(
+        _ entry: HistoryEntry, onto stack: ReferenceWritableKeyPath<BrowserItem, [HistoryEntry]>
+    ) {
+        self[keyPath: stack].append(entry)
+        if self[keyPath: stack].count > Self.maxHistory {
+            self[keyPath: stack].removeFirst(self[keyPath: stack].count - Self.maxHistory)
+        }
     }
 
     private func showSkipped(_ skipped: [String]) {

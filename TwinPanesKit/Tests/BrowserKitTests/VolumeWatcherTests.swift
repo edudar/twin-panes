@@ -7,7 +7,7 @@ import Testing
 
 /// The sidebar's volume list follows mounts (docs/plans/M5.md, D-d, step 18).
 @MainActor
-@Suite struct VolumeWatcherTests {
+@Suite(.timeLimit(.minutes(1))) struct VolumeWatcherTests {
     /// The lists a watcher reported, waited for one at a time.
     @MainActor final class Reported {
         var lists: [[String]] = []
@@ -69,6 +69,7 @@ import Testing
     }
 
     @Test func aReadThatFinishesAfterANewerOneIsDropped() async {
+        let (started, startedCont) = AsyncStream.makeStream(of: Void.self)
         let firstMayFinish = DispatchSemaphore(value: 0)
         let calls = Mutex(0)
         let watcher = VolumeWatcher(
@@ -78,7 +79,10 @@ import Testing
                     calls += 1
                     return calls
                 }
-                if call == 1 { firstMayFinish.wait() }
+                if call == 1 {
+                    startedCont.yield()
+                    firstMayFinish.wait()
+                }
                 let name = call == 1 ? "old" : "new"
                 return [
                     Volume(
@@ -90,10 +94,11 @@ import Testing
         let dropped = Reported()
         watcher.didDropRead = { dropped.add([]) }
         watcher.start()
+        for await _ in started { break }
         center.post(name: NSWorkspace.didMountNotification, object: nil)
-        await reported.wait(for: 1)
         firstMayFinish.signal()
         await dropped.wait(for: 1)
+        await reported.wait(for: 1)
         #expect(reported.lists == [["new"]])
     }
 
@@ -105,5 +110,17 @@ import Testing
         let before = watcher.readsRequested
         center.post(name: NSWorkspace.didMountNotification, object: nil)
         #expect(watcher.readsRequested == before)
+    }
+
+    @Test func deallocatingStartedWatcherRemovesObservers() async {
+        do {
+            let watcher = watcher()
+            watcher.start()
+            await reported.wait(for: 1)
+        }
+        mounted.names.withLock { $0.append("USB") }
+        center.post(name: NSWorkspace.didMountNotification, object: nil)
+        await Task.yield()
+        #expect(reported.lists == [["Macintosh HD"]])
     }
 }

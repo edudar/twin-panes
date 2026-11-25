@@ -29,7 +29,9 @@ extension BrowserItem {
             BrowserState.Place(path: entry.folder.path, selected: entry.selected)
         }
         let state = BrowserState(
-            folder: folder.path, selected: controller.selectedName,
+            folder: folder.path,
+            selected: hasListed
+                ? (controller.selectedName ?? controller.wantedSelection) : restoredSelection,
             back: backStack.map(place), forward: forwardStack.map(place),
             sortColumn: order.column.rawValue, ascending: order.ascending,
             foldersFirst: order.foldersFirst, showsHidden: showsHidden)
@@ -47,7 +49,10 @@ extension BrowserItem {
         openFile: @escaping (URL, SecurityScope?) -> Void
     ) -> BrowserItem? {
         // Nil is the restorer's "can't use this state": the tab is skipped.
-        guard let saved = try? JSONDecoder().decode(BrowserState.self, from: state.payload)
+        guard state.kind == .browser,
+            (1...Self.stateVersion).contains(state.version),
+            let saved = try? JSONDecoder().decode(BrowserState.self, from: state.payload),
+            saved.folder.hasPrefix("/")
         else { return nil }
         let wanted = URL(fileURLWithPath: saved.folder, isDirectory: true).standardizedFileURL
         let folder = nearestFolderThere(at: wanted, grants: grants)
@@ -57,8 +62,11 @@ extension BrowserItem {
         item.order = ListingOrder(
             column: column, ascending: saved.ascending, foldersFirst: saved.foldersFirst)
         item.showsHidden = saved.showsHidden
-        item.backStack = saved.back.map(historyEntry)
-        item.forwardStack = saved.forward.map(historyEntry)
+        item.backStack = Array(
+            saved.back.filter { $0.path.hasPrefix("/") }.map(historyEntry).suffix(Self.maxHistory))
+        item.forwardStack = Array(
+            saved.forward.filter { $0.path.hasPrefix("/") }.map(historyEntry)
+                .suffix(Self.maxHistory))
         if folder.path == wanted.path {
             item.restoredSelection = saved.selected
         } else {

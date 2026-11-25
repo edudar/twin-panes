@@ -340,4 +340,67 @@ import UniformTypeIdentifiers
         item.controller.refreshIcons()
         #expect(cell.icon != nil && item.shownIconsAreCurrent)
     }
+
+    @Test func forgettingHandlesUnicodeCombiningMarksAndNonASCIIPaths() async {
+        let cache = IconCache(center: center)
+        let combining = app(at: "/tmp/café/\u{0301}foo.app")
+        let emoji = app(at: "/tmp/café/😀.app")
+        let nfdEntry = app(at: "/tmp/café/cafe\u{0301}.app")
+        let nfcInNfdFolder = app(at: "/tmp/cafe\u{0301}/Tool.app")
+        for item in [combining, emoji, nfdEntry, nfcInNfdFolder] {
+            _ = await loaded(cache, item)
+        }
+        cache.forget([], in: URL(fileURLWithPath: "/tmp/café"))
+        #expect(cache.icon(for: combining, scale: 2, appearance: .aqua) != nil)
+        cache.forget(
+            ["\u{0301}foo.app", "😀.app", "café.app"], in: URL(fileURLWithPath: "/tmp/café"))
+        #expect(cache.icon(for: combining, scale: 2, appearance: .aqua) == nil)
+        #expect(cache.icon(for: emoji, scale: 2, appearance: .aqua) == nil)
+        #expect(cache.icon(for: nfdEntry, scale: 2, appearance: .aqua) == nil)
+        #expect(cache.icon(for: nfcInNfdFolder, scale: 2, appearance: .aqua) != nil)
+        cache.forget(["Tool.app"], in: URL(fileURLWithPath: "/tmp/cafe\u{0301}"))
+        #expect(cache.icon(for: nfcInNfdFolder, scale: 2, appearance: .aqua) == nil)
+    }
+
+    @Test func forgettingEvictsCustomIconsInBothFastAndFullPaths() async throws {
+        let (root, _) = try tempFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sym = { (n: String) in NSImage(systemSymbolName: n, accessibilityDescription: nil)! }
+        let aURL = root.appendingPathComponent("a.txt")
+        let bURL = root.appendingPathComponent("b.txt")
+        for url in [aURL, bURL] {
+            FileManager.default.createFile(atPath: url.path, contents: Data("x".utf8))
+            #expect(NSWorkspace.shared.setIcon(sym("star"), forFile: url.path, options: []))
+        }
+        let cache = IconCache(center: center)
+        let plain = await loaded(cache, entry("plain.txt", .plainText))
+        let aEntry = DirectoryEntry(
+            url: aURL, name: "a.txt", isDirectory: false, isPackage: false,
+            isSymbolicLink: false, isHidden: false, size: 1, modified: nil, type: .plainText)
+        let bEntry = DirectoryEntry(
+            url: bURL, name: "b.txt", isDirectory: false, isPackage: false,
+            isSymbolicLink: false, isHidden: false, size: 1, modified: nil, type: .plainText)
+        func waitCustom(_ e: DirectoryEntry, excluding: [NSImage]) async throws -> NSImage? {
+            for _ in 0..<20 {
+                if let icon = cache.icon(for: e, scale: 2, appearance: .aqua),
+                    !excluding.contains(where: { $0 === icon })
+                {
+                    return icon
+                }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            return nil
+        }
+        let aFirst = try #require(await waitCustom(aEntry, excluding: [plain]))
+        let bFirst = try #require(await waitCustom(bEntry, excluding: [plain]))
+        #expect(NSWorkspace.shared.setIcon(sym("heart"), forFile: aURL.path, options: []))
+        #expect(NSWorkspace.shared.setIcon(sym("heart"), forFile: bURL.path, options: []))
+        // Fast path: names.count (1) < customIcons.count (2).
+        cache.forget(["a.txt"], in: root)
+        #expect(try await waitCustom(aEntry, excluding: [plain, aFirst]) != nil)
+        #expect(cache.icon(for: bEntry, scale: 2, appearance: .aqua) === bFirst)
+        // Full path: names.count >= customIcons.count + probingCustomIcons.count.
+        cache.forget(Set((0..<10).map { "f\($0)" }).union(["b.txt"]), in: root)
+        #expect(try await waitCustom(bEntry, excluding: [plain, bFirst]) != nil)
+    }
 }
