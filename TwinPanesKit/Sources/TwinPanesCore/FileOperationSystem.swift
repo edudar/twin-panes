@@ -55,6 +55,9 @@ public protocol FileOperationSystem: Sendable {
     /// Moves or renames an item on one volume (`rename(2)`, atomic); never replaces:
     /// `EEXIST` if `destination` is taken, `EXDEV` if it's on another volume.
     func rename(_ source: URL, to destination: URL) throws(FileSystemError)
+    /// Brings an iCloud file's bytes down (`SF_DATALESS`), blocking until they're here
+    /// or `isCancelled` says to stop (`ECANCELED`).
+    func download(_ url: URL, isCancelled: () -> Bool) throws(FileSystemError)
     /// Moves `url` to its volume's Trash and returns where it went.
     func trash(_ url: URL) throws(FileSystemError) -> URL
 }
@@ -150,6 +153,28 @@ public struct RealFileOperationSystem: FileOperationSystem {
         else { throw FileSystemError("copy metadata to", destination.path, errno: errno) }
     }
 
+    /// Asks iCloud for the file and checks every 100 ms until its bytes are here: a
+    /// coordinated read would download it too, but couldn't be cancelled.
+    public func download(_ url: URL, isCancelled: () -> Bool) throws(FileSystemError) {
+        do {
+            try FileManager.default.startDownloadingUbiquitousItem(at: url)
+        } catch {
+            throw FileSystemError(
+                "download", url.path, errno: Self.posixCode(of: error, otherwise: EIO))
+        }
+        while try metadata(of: url).isDataless {
+            if isCancelled() { throw FileSystemError("download", url.path, errno: ECANCELED) }
+            usleep(100_000)
+        }
+    }
+
+    /// The POSIX error Foundation wraps in `error`, or `otherwise` when it has none.
+    private static func posixCode(of error: any Error, otherwise: Int32) -> Int32 {
+        let underlying = (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError
+        guard let underlying, underlying.domain == NSPOSIXErrorDomain else { return otherwise }
+        return Int32(underlying.code)
+    }
+
     public func rename(_ source: URL, to destination: URL) throws(FileSystemError) {
         guard renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 else {
             throw FileSystemError("move", source.path, errno: errno)
@@ -161,15 +186,9 @@ public struct RealFileOperationSystem: FileOperationSystem {
         do {
             try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
         } catch {
-            // Foundation wraps the POSIX error when there is one; a volume without a
-            // Trash gives a Cocoa error alone.
-            var code = ENOTSUP
-            if let underlying = (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError,
-                underlying.domain == NSPOSIXErrorDomain
-            {
-                code = Int32(underlying.code)
-            }
-            throw FileSystemError("move to the Trash", url.path, errno: code)
+            // A volume without a Trash gives a Cocoa error alone.
+            throw FileSystemError(
+                "move to the Trash", url.path, errno: Self.posixCode(of: error, otherwise: ENOTSUP))
         }
         guard let trashed = trashed as URL? else {
             throw FileSystemError("move to the Trash", url.path, errno: ENOENT)

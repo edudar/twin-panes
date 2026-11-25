@@ -8,6 +8,8 @@ public struct OperationProgress: Sendable, Equatable {
     public var itemsTotal = 0
     /// The path, below the destination, of the item being copied.
     public var currentItem: String?
+    /// The current item is being downloaded from iCloud before it's copied.
+    public var isDownloading = false
 }
 
 /// An item a copy made, and the source it was made from.
@@ -153,6 +155,16 @@ public struct TreeCopier: Sendable {
     ) -> FileResult {
         guard item.metadata.kind != .other else {
             return .failed(FileSystemError("copy", item.source.path, errno: ENOTSUP))
+        }
+        if item.metadata.isDataless {
+            var downloading = state
+            downloading.isDownloading = true
+            progress(downloading)
+            do {
+                try fileSystem.download(item.source) { control.isCancelled }
+            } catch {
+                return control.isCancelled ? .cancelled : .failed(error)
+            }
         }
         do {
             try fileSystem.copyFile(item.source, to: target) { copied in

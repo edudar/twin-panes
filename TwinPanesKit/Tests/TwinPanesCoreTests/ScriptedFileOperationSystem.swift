@@ -17,6 +17,10 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
         var renameFailures: [String: Int32] = [:]
         var removeFailures: [String: Int32] = [:]
         var truncated: [String] = []
+        var dataless: Set<String> = []
+        var downloads: [String] = []
+        var downloadFailures: [String: Int32] = [:]
+        var onDownload: (@Sendable (String) -> Void)?
         var trashFolder: URL?
         var trashFailures: [String: Int32] = [:]
     }
@@ -53,6 +57,21 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
         script.withLock { $0.renameFailures[suffix] = errno }
     }
 
+    /// These items' bytes are only in iCloud until `download` brings them down.
+    func markDataless(_ paths: [String]) { script.withLock { $0.dataless.formUnion(paths) } }
+
+    func failDownload(endingWith suffix: String, errno: Int32) {
+        script.withLock { $0.downloadFailures[suffix] = errno }
+    }
+
+    /// Runs `hook` with the path when a download starts, before it finishes.
+    func onDownload(_ hook: @escaping @Sendable (String) -> Void) {
+        script.withLock { $0.onDownload = hook }
+    }
+
+    /// The paths downloaded, in order.
+    var downloads: [String] { script.withLock { $0.downloads } }
+
     /// Where `trash` moves items, so tests never touch the real Trash.
     func useTrash(_ folder: URL) { script.withLock { $0.trashFolder = folder } }
 
@@ -64,7 +83,23 @@ final class ScriptedFileOperationSystem: FileOperationSystem {
     var copied: [String] { script.withLock { $0.copied } }
 
     func metadata(of url: URL) throws(FileSystemError) -> FileItemMetadata {
-        try real.metadata(of: url)
+        let metadata = try real.metadata(of: url)
+        guard script.withLock({ $0.dataless.contains(url.path) }) else { return metadata }
+        return FileItemMetadata(
+            kind: metadata.kind, size: metadata.size, device: metadata.device, isDataless: true)
+    }
+
+    func download(_ url: URL, isCancelled: () -> Bool) throws(FileSystemError) {
+        let (failure, hook) = script.withLock { script in
+            (script.downloadFailures.first { url.path.hasSuffix($0.key) }?.value, script.onDownload)
+        }
+        hook?(url.path)
+        if let failure { throw FileSystemError("download", url.path, errno: failure) }
+        if isCancelled() { throw FileSystemError("download", url.path, errno: ECANCELED) }
+        script.withLock { script in
+            script.downloads.append(url.path)
+            script.dataless.remove(url.path)
+        }
     }
 
     func contents(of folder: URL) throws(FileSystemError) -> [String] {
