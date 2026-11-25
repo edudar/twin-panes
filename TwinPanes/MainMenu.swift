@@ -51,6 +51,9 @@ enum MainMenu {
                 command(.newEditorView), .separator(), command(.openFile), recentHolder,
                 .separator(), command(.save), command(.saveAs), command(.revertToSaved),
                 command(.saveSelection),
+                .separator(), command(.browserNewFolder), command(.browserRename),
+                command(.browserCopyToOtherPanel), command(.browserMoveToOtherPanel),
+                command(.browserTrash), command(.browserDeletePermanently),
                 .separator(), command(.closeTab),
                 command(.closeWindow),
             ])

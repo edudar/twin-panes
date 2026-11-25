@@ -57,6 +57,12 @@ extension CommandID {
     static let browserBack: CommandID = "browser.back"
     static let browserShowPackageContents: CommandID = "browser.showPackageContents"
     static let browserForward: CommandID = "browser.forward"
+    static let browserRename: CommandID = "browser.rename"
+    static let browserCopyToOtherPanel: CommandID = "browser.copyToOtherPanel"
+    static let browserMoveToOtherPanel: CommandID = "browser.moveToOtherPanel"
+    static let browserNewFolder: CommandID = "browser.newFolder"
+    static let browserTrash: CommandID = "browser.trash"
+    static let browserDeletePermanently: CommandID = "browser.deletePermanently"
     static let editorFind: CommandID = "editor.find"
     static let editorFindNext: CommandID = "editor.findNext"
     static let editorFindPrevious: CommandID = "editor.findPrevious"
@@ -131,6 +137,19 @@ enum DefaultCommands {
             .browserShowPackageContents, "Show Package Contents",
             #selector(BrowserActions.browserShowPackageContents(_:)))
         add(.browserForward, "Forward", #selector(BrowserActions.browserForward(_:)))
+        // File operations (docs/plans/M6.md); short titles, since the F-key bar shows them.
+        add(.browserRename, "Rename…", #selector(FileCommandActions.browserRename(_:)))
+        add(
+            .browserCopyToOtherPanel, "Copy…",
+            #selector(FileCommandActions.browserCopyToOtherPanel(_:)))
+        add(
+            .browserMoveToOtherPanel, "Move…",
+            #selector(FileCommandActions.browserMoveToOtherPanel(_:)))
+        add(.browserNewFolder, "New Folder…", #selector(FileCommandActions.browserNewFolder(_:)))
+        add(.browserTrash, "Move to Trash", #selector(FileCommandActions.browserTrash(_:)))
+        add(
+            .browserDeletePermanently, "Delete Immediately…",
+            #selector(FileCommandActions.browserDeletePermanently(_:)))
         add(
             .browserToggleHidden, "Show Hidden Files",
             #selector(BrowserActions.browserToggleHidden(_:)))
@@ -182,6 +201,22 @@ enum DefaultCommands {
         registry.bind(KeyChord("\t", .shift), to: .switchPanel, in: fileList)
         registry.bind(.function(3), to: .browserView, in: browser)
         registry.bind(.function(4), to: .browserEdit, in: browser)
+        // ⌘ shortcuts first, so menus show them (docs/plans/M6.md, "Default keys").
+        registry.bind(KeyChord("r", .command), to: .browserRename, in: browser)
+        registry.bind(.function(2), to: .browserRename, in: browser)
+        registry.bind(KeyChord("c", [.command, .shift]), to: .browserCopyToOtherPanel, in: browser)
+        registry.bind(.function(5), to: .browserCopyToOtherPanel, in: browser)
+        registry.bind(KeyChord("m", [.command, .shift]), to: .browserMoveToOtherPanel, in: browser)
+        registry.bind(.function(6), to: .browserMoveToOtherPanel, in: browser)
+        // ⇧⌘N and ⌘⌫ are Finder's.
+        registry.bind(KeyChord("n", [.command, .shift]), to: .browserNewFolder, in: browser)
+        registry.bind(.function(7), to: .browserNewFolder, in: browser)
+        registry.bind(KeyChord("\u{7f}", .command), to: .browserTrash, in: browser)
+        registry.bind(.function(8), to: .browserTrash, in: browser)
+        registry.bind(
+            KeyChord("\u{7f}", [.command, .option]), to: .browserDeletePermanently, in: browser)
+        registry.bind(
+            KeyChord(KeyChord.function(8).key, .shift), to: .browserDeletePermanently, in: browser)
         registry.bind(.returnKey, to: .browserOpen, in: fileList)
         registry.bind(KeyChord("\r", .command), to: .browserOpenInEditor, in: pathField)
         registry.bind(

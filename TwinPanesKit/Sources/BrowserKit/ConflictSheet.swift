@@ -4,12 +4,12 @@ import TwinPanesCore
 /// Asks what to do with an item whose name is taken (docs/plans/M6.md, D-d): both items
 /// described, a button for each choice that fits, and Apply to All.
 @MainActor
-final class ConflictSheet {
+public final class ConflictSheet {
     let alert = NSAlert()
     let applyToAll = NSButton(checkboxWithTitle: "Apply to All", target: nil, action: nil)
     private let choices: [ConflictChoice]
 
-    init(_ conflict: Conflict) {
+    public init(_ conflict: Conflict) {
         choices = conflict.choices
         let name = conflict.existing.lastPathComponent
         if conflict.isSameItem {
@@ -28,7 +28,7 @@ final class ConflictSheet {
     }
 
     /// Shows the sheet on `window` and returns the answer once a button is clicked.
-    func ask(on window: NSWindow) async -> ConflictAnswer {
+    public func ask(on window: NSWindow) async -> ConflictAnswer {
         let response = await alert.beginSheetModal(for: window)
         return answer(
             forButtonAt: response.rawValue
