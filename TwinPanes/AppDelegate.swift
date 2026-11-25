@@ -92,7 +92,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func restoredEditor(from state: ItemState) -> HexEditorItem? {
         guard let saved = HexEditorItem.editorState(from: state),
             let (url, _) = BookmarkStore.resolve(saved.fileBookmark),
-            let (session, _) = try? sessions.open(url, scope: SecurityScope(url: url))
+            let (session, _) = try? sessions.open(url, scope: SecurityScope(url: url)),
+            editorItem(showing: session) == nil
         else { return nil }
         let item = HexEditorItem(session: session)
         item.didSaveAs = { [weak self] url in self?.recentFiles.note(url) }
@@ -103,7 +104,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.mainMenu = MainMenu.build(updater: menuUpdater, recentFiles: recentFiles)
         if let child = SmokeChild(arguments: CommandLine.arguments) {
             child.run(app: self)
             return
@@ -121,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let unclaimed = launchRecovery?.takeUnclaimed { self.editorItem(showing: $0) != nil }
         showRecovered(unclaimed ?? [])
         launchRecovery = nil
+        if let menu = NSApp.mainMenu { menuUpdater.refresh(menu) }
         NSApp.activate()
     }
 
@@ -128,6 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// recovered file gets its session, edits and all (docs/plans/M5.md, D-c). The smoke
     /// test runs recovery itself, on its own folders.
     func applicationWillFinishLaunching(_ notification: Notification) {
+        NSApp.mainMenu = MainMenu.build(updater: menuUpdater, recentFiles: recentFiles)
         guard !Self.isIsolatedRun else { return }
         launchRecovery = LaunchRecovery(crashedSessions(), registry: sessions)
     }
@@ -227,7 +229,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// A new main window with the default browsers, or with the tabs and divider of
     /// `saved` when AppKit restores one.
     @discardableResult
-    func openMainWindow(restoring saved: WindowState? = nil) -> MainWindowController {
+    func openMainWindow(
+        restoring saved: WindowState? = nil, show: Bool = true
+    ) -> MainWindowController {
         let layout = MainFrameLayout(
             // Holds the app strongly: the app delegate lives as long as the process.
             filler: PanelFiller(kind: .browser) { panel, layout in
@@ -261,13 +265,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         } else {
             layout.fillEmptyPanels()
         }
-        if let frame = NSApp.keyWindow?.frame {
-            controller.window?.setFrameTopLeftPoint(
-                NSPoint(x: frame.minX + 24, y: frame.maxY - 24))
-        } else {
-            controller.window?.center()
+        if show {
+            if let frame = NSApp.keyWindow?.frame {
+                controller.window?.setFrameTopLeftPoint(
+                    NSPoint(x: frame.minX + 24, y: frame.maxY - 24))
+            } else {
+                controller.window?.center()
+            }
+            controller.showWindow(nil)
         }
-        controller.showWindow(nil)
         return controller
     }
 
@@ -280,7 +286,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             self.open(folder, inActivePanelOf: controller)
         }
         controller.frameController.onUpdate = { [weak sidebar, weak controller] in
-            sidebar?.highlight((controller?.layout.focusedPanelItem as? BrowserItem)?.folder)
+            let active = controller?.layout.zoomedItem ?? controller?.layout.focusedPanelItem
+            sidebar?.highlight((active as? BrowserItem)?.folder)
         }
         sidebar.onFavoritesEdited = { [weak self] in
             for controller in self?.windowControllers ?? [] {
@@ -298,6 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// The volumes the sidebars show, kept current for all windows.
     private var volumes: [Volume] = []
+    private var ejectingVolumes: Set<String> = []
     private lazy var volumeWatcher = VolumeWatcher { [weak self] volumes in
         guard let self else { return }
         self.volumes = volumes
@@ -309,17 +317,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Unmounts and ejects off the main actor: it can take seconds. The watcher hears of
     /// the unmount; a refusal is shown in the window's status line.
     private func eject(_ volume: Volume, reportingIn controller: MainWindowController) {
-        Task { [weak controller] in
+        let key = volume.url.standardizedFileURL.path
+        guard ejectingVolumes.insert(key).inserted else { return }
+        let url = volume.url
+        let name = volume.name
+        Task { [weak self, weak controller] in
+            defer { self?.ejectingVolumes.remove(key) }
             let failure: String? = await Task.detached {
                 do {
-                    try NSWorkspace.shared.unmountAndEjectDevice(at: volume.url)
+                    try NSWorkspace.shared.unmountAndEjectDevice(at: url)
                     return nil
                 } catch {
                     return error.localizedDescription
                 }
             }.value
             if let failure {
-                controller?.frameController.showStatus("Can’t eject “\(volume.name)”: \(failure)")
+                controller?.frameController.showStatus("Can’t eject “\(name)”: \(failure)")
             }
         }
     }
@@ -328,8 +341,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// that panel shows something else.
     func open(_ folder: URL, inActivePanelOf controller: MainWindowController) {
         let layout = controller.layout
+        if layout.zoomedItem != nil { layout.exitZoom() }
         if let browser = layout.focusedPanelItem as? BrowserItem {
-            browser.go(to: folder)
+            if !browser.go(to: folder) {
+                (controller.frameController.sidebar as? SidebarViewController)?.highlight(
+                    (layout.focusedPanelItem as? BrowserItem)?.folder)
+            }
         } else {
             layout.insert(makeBrowser(at: folder), in: layout.activePanel)
         }

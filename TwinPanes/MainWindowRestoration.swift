@@ -18,7 +18,7 @@ final class MainWindowRestoration: NSObject, NSWindowRestoration {
             }
             do {
                 let saved = try WindowState(restorableStateFrom: state)
-                completionHandler(app.openMainWindow(restoring: saved).window, nil)
+                completionHandler(app.openMainWindow(restoring: saved, show: false).window, nil)
             } catch {
                 // AppKit leaves the window out; with none restored, the app opens a new
                 // one as on a first launch.

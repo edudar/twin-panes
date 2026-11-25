@@ -165,8 +165,8 @@ enum DefaultCommands {
         registry.bind(.escape, to: .exitZoom, in: .mainFrame)
         registry.bind(KeyChord("\t", .control), to: .nextTab)
         registry.bind(KeyChord("\t", [.control, .shift]), to: .previousTab)
-        // Only in the file list, so the path field and the editor keep Tab (§4.11).
         registry.bind(KeyChord("s", [.control, .command]), to: .toggleSidebar)  // as in Finder
+        // Only in the file list, so the path field and the editor keep Tab (§4.11).
         registry.bind(.tab, to: .switchPanel, in: fileList)
         registry.bind(KeyChord("\t", .shift), to: .switchPanel, in: fileList)
         registry.bind(.function(3), to: .browserView, in: browser)
