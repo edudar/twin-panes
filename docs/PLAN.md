@@ -1218,8 +1218,13 @@ byte histogram.
   - *By hand only*: dragging tabs and favorites (a synthesized drag session isn't
     reliable; the drop logic is unit-tested and the smoke test calls the real drop
     methods), and ejecting a real USB drive (a disk image was ejected in testing).
-  - *Live updates on the main thread*: the "folder changed" step costs up to ~30 ms
-    of main-thread CPU per event on a 100k folder, and bursts stack in one gap (79 ms
-    on a macOS 26 runner). Proposed as its own task; it was M4 code.
+  - *Live updates on the main thread* (fixed): the "folder changed" step cost up to
+    ~30 ms of main-thread CPU per event on a 100k folder, and bursts stacked in one gap
+    (79 ms on a macOS 26 runner). All of it was `IconCache.forget` walking the up to
+    1024 cached custom-icon probes with `NSString` path methods, ~3 µs a path in the
+    Debug build. It now looks the changed names up when they're fewer than the probes
+    and matches with `hasPrefix` otherwise: on the dev Mac the longest step went from
+    12–14 ms to under 0.4 ms. The ~10 ms left when the shown folder vanishes is the
+    navigation to its parent, not the update.
   - *A smoke check that sometimes types late*: "Keep Mine keeps the edits" once found
     its typed byte at offset 1 instead of 0. Not reproduced on demand; watch CI.

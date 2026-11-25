@@ -147,6 +147,38 @@ import UniformTypeIdentifiers
         #expect(here !== there)
     }
 
+    func app(at path: String) -> DirectoryEntry {
+        let url = URL(fileURLWithPath: path)
+        return DirectoryEntry(
+            url: url, name: url.lastPathComponent, isDirectory: false, isPackage: true,
+            isSymbolicLink: false, isHidden: false, size: nil, modified: nil, type: .application)
+    }
+
+    /// Only the folder's own entries go: not a subfolder's, nor a sibling folder's whose
+    /// name starts with the folder's.
+    @Test func forgettingNamesSparesSubfoldersAndSiblings() async {
+        let cache = IconCache(center: center)
+        let (own, nested, sibling) = (
+            app(at: "/tmp/Tool.app"), app(at: "/tmp/sub/Tool.app"), app(at: "/tmp2/Tool.app")
+        )
+        _ = await loaded(cache, own)
+        let (nestedIcon, siblingIcon) = (await loaded(cache, nested), await loaded(cache, sibling))
+        cache.forget(["Tool.app", "sub"], in: URL(fileURLWithPath: "/tmp"))
+        #expect(cache.icon(for: own, scale: 2, appearance: .aqua) == nil)
+        #expect(cache.icon(for: nested, scale: 2, appearance: .aqua) === nestedIcon)
+        #expect(cache.icon(for: sibling, scale: 2, appearance: .aqua) === siblingIcon)
+    }
+
+    @Test func forgettingNamesInTheRootFolder() async {
+        let cache = IconCache(center: center)
+        let (top, nested) = (app(at: "/Tool.app"), app(at: "/tmp/Tool.app"))
+        _ = await loaded(cache, top)
+        let nestedIcon = await loaded(cache, nested)
+        cache.forget(["Tool.app"], in: URL(fileURLWithPath: "/"))
+        #expect(cache.icon(for: top, scale: 2, appearance: .aqua) == nil)
+        #expect(cache.icon(for: nested, scale: 2, appearance: .aqua) === nestedIcon)
+    }
+
     /// A visible cell gets the icon for the table's appearance when it changes.
     @Test func cellsFollowTheTablesAppearance() async throws {
         let root = FileManager.default.temporaryDirectory

@@ -224,24 +224,45 @@ final class IconCache {
         announce()
     }
 
-    /// These entries of `folder` changed (a new icon pasted in Get Info, say). Walks the
-    /// few cached app/custom icons, not `names`: a live update while a big folder lists
-    /// can name tens of thousands of entries, and building a path for each one took
-    /// 20-50 ms of the main thread (docs/plans/M4.md, performance pass).
+    /// These entries of `folder` changed (a new icon pasted in Get Info, say). The app
+    /// icons (at most `pathLimit`) are walked; the custom-icon probes (up to 1024 in a big
+    /// folder) are walked only when `names` outnumber them, else each name is looked up:
+    /// a live update while a big folder lists can name tens of thousands of entries, and
+    /// a burst of small updates, 78 in one turn, would walk the probes each time
+    /// (docs/plans/M4.md, performance pass; PLAN.md §9, "From M5").
     func forget(_ names: Set<String>, in folder: URL) {
-        let parent = folder.path
-        func changedPath(_ pathString: String) -> Bool {
-            let path = pathString as NSString
-            return path.deletingLastPathComponent == parent
-                && names.contains(path.lastPathComponent)
+        let parent = folder.path.hasSuffix("/") ? folder.path : folder.path + "/"
+        let nameStart = parent.utf8.count
+        // `hasPrefix` and a set lookup, not `NSString` path methods or `utf8.starts(with:)`:
+        // those cost 3-6 µs a path in the Debug build, 12 ms per update over 1024 probes.
+        // Entry paths are the folder's path, "/" and the name, so the name starts at
+        // `nameStart`.
+        func changedPath(_ path: String) -> Bool {
+            guard path.hasPrefix(parent), path.utf8.count > nameStart else { return false }
+            return names.contains(
+                String(path[path.utf8.index(path.startIndex, offsetBy: nameStart)...]))
         }
         func changed(_ key: Key) -> Bool { key.isPath && changedPath(key.id) }
         for key in pathOrder where changed(key) { icons[key] = nil }
         pathOrder.removeAll(where: changed)
         for key in loading.keys where changed(key) { loading[key] = nil }
-        for path in customIcons.keys where changedPath(path) { customIcons[path] = nil }
-        customIconOrder.removeAll(where: changedPath)
-        for path in probingCustomIcons where changedPath(path) { probingCustomIcons.remove(path) }
+        if names.count < customIcons.count + probingCustomIcons.count {
+            forgetCustomIcons(atPaths: Set(names.map { parent + $0 }))
+        } else {
+            forgetCustomIcons(atPaths: Set(customIcons.keys.filter(changedPath)))
+            for path in probingCustomIcons where changedPath(path) {
+                probingCustomIcons.remove(path)
+            }
+        }
+    }
+
+    private func forgetCustomIcons(atPaths paths: Set<String>) {
+        var forgotten = Set<String>()
+        for path in paths {
+            probingCustomIcons.remove(path)
+            if customIcons.removeValue(forKey: path) != nil { forgotten.insert(path) }
+        }
+        if !forgotten.isEmpty { customIconOrder.removeAll(where: forgotten.contains) }
     }
 
     /// The icon for `entry`, or nil until it's been drawn.

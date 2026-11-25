@@ -7,7 +7,7 @@ import AppKit
 /// model but aren't drawn yet.
 @MainActor
 public final class MainFrameViewController: NSViewController, WorkspaceHost,
-    CommandScopeProviding, NSMenuItemValidation, NSSplitViewDelegate
+    CommandScopeProviding, NSMenuItemValidation, NSToolbarItemValidation, NSSplitViewDelegate
 {
     public let layout: MainFrameLayout
     private let closeCoordinator: CloseCoordinator
@@ -15,9 +15,25 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     private var slotControllers: [SlotID: SlotViewController] = [:]
     private let zoomHost = ItemHostViewController()
     private let split = NSSplitView()
-    /// The sidebar beside the panels.
-    private let sidebarSplit = NSSplitView()
-    private let sidebarHost = NSView()
+    /// The split controller hosting the sidebar and the panel area so AppKit gives the
+    /// sidebar full-height system material and toolbar tracking.
+    private let splitViewController = NSSplitViewController()
+    private let sidebarHostController = NSViewController()
+    private let contentController = NSViewController()
+    private lazy var sidebarItem: NSSplitViewItem = {
+        let item = NSSplitViewItem(sidebarWithViewController: sidebarHostController)
+        item.canCollapse = true
+        item.isCollapsed = true
+        item.minimumThickness = 120
+        item.maximumThickness = 400
+        item.holdingPriority = .init(260)
+        return item
+    }()
+    private lazy var contentItem: NSSplitViewItem = {
+        let item = NSSplitViewItem(viewController: contentController)
+        item.holdingPriority = .defaultLow
+        return item
+    }()
     private static let defaultSidebarWidth: CGFloat = 180
     /// The width to show the sidebar at: restored, or its last width before hiding.
     private var sidebarWidth = MainFrameViewController.defaultSidebarWidth
@@ -67,32 +83,35 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.setAccessibilityIdentifier("statusLine")
 
-        sidebarSplit.isVertical = true
-        sidebarSplit.dividerStyle = .thin
-        sidebarSplit.delegate = self
-        sidebarSplit.translatesAutoresizingMaskIntoConstraints = false
-        sidebarHost.isHidden = true
-        // NSSplitView leaves hidden views out; a shown sidebar is never squeezed to nothing.
-        sidebarHost.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
-        sidebarSplit.addArrangedSubview(sidebarHost)
-        sidebarSplit.addArrangedSubview(split)
-        // A wider window widens the panels; the sidebar keeps its width. Both stay
-        // under the priority NSSplitView places a divider at, or setPosition loses.
-        sidebarSplit.setHoldingPriority(.init(260), forSubviewAt: 0)
-        sidebarSplit.setHoldingPriority(.defaultLow, forSubviewAt: 1)
-
-        root.addSubview(sidebarSplit)
-        root.addSubview(zoomHost.view)
-        root.addSubview(statusLabel)
+        let contentView = NSView()
+        contentView.addSubview(split)
+        contentView.addSubview(zoomHost.view)
         NSLayoutConstraint.activate([
-            sidebarSplit.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            sidebarSplit.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            sidebarSplit.topAnchor.constraint(equalTo: root.topAnchor),
-            sidebarSplit.bottomAnchor.constraint(equalTo: statusLabel.topAnchor, constant: -4),
+            split.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            split.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            split.topAnchor.constraint(equalTo: contentView.safeAreaLayoutGuide.topAnchor),
+            split.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             zoomHost.view.leadingAnchor.constraint(equalTo: split.leadingAnchor),
             zoomHost.view.trailingAnchor.constraint(equalTo: split.trailingAnchor),
             zoomHost.view.topAnchor.constraint(equalTo: split.topAnchor),
             zoomHost.view.bottomAnchor.constraint(equalTo: split.bottomAnchor),
+        ])
+        contentController.view = contentView
+        sidebarHostController.view = NSView()
+
+        splitViewController.splitView.dividerStyle = .thin
+        splitViewController.addSplitViewItem(sidebarItem)
+        splitViewController.addSplitViewItem(contentItem)
+        addChild(splitViewController)
+        splitViewController.view.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(splitViewController.view)
+        root.addSubview(statusLabel)
+        NSLayoutConstraint.activate([
+            splitViewController.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            splitViewController.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            splitViewController.view.topAnchor.constraint(equalTo: root.topAnchor),
+            splitViewController.view.bottomAnchor.constraint(
+                equalTo: statusLabel.topAnchor, constant: -4),
             statusLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
             statusLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
             statusLabel.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -4),
@@ -183,7 +202,8 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         if sidebar != nil {
             state.sidebarShown = isSidebarShown
             state.sidebarWidth = Double(
-                isSidebarShown && hasPlacedDivider ? sidebarHost.frame.width : sidebarWidth)
+                isSidebarShown && hasPlacedDivider
+                    ? sidebarHostController.view.frame.width : sidebarWidth)
         }
         return state
     }
@@ -210,7 +230,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         // Saved state is data from disk: a width the window can show.
         if let width = state.sidebarWidth { sidebarWidth = min(max(CGFloat(width), 120), 400) }
         if let shown = state.sidebarShown, sidebar != nil {
-            sidebarHost.isHidden = !shown
+            sidebarItem.isCollapsed = !shown
             placeSidebar()
         }
     }
@@ -224,24 +244,26 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
             oldValue?.view.removeFromSuperview()
             oldValue?.removeFromParent()
             guard let sidebar else {
-                sidebarHost.isHidden = true
+                sidebarItem.isCollapsed = true
                 return
             }
             _ = view
-            addChild(sidebar)
-            sidebar.view.frame = sidebarHost.bounds
+            sidebarHostController.addChild(sidebar)
+            sidebar.view.frame = sidebarHostController.view.bounds
             sidebar.view.autoresizingMask = [.width, .height]
-            sidebarHost.addSubview(sidebar.view)
-            sidebarHost.isHidden = false
+            sidebarHostController.view.addSubview(sidebar.view)
+            sidebarItem.isCollapsed = false
             placeSidebar()
         }
     }
 
-    public var isSidebarShown: Bool { sidebar != nil && !sidebarHost.isHidden }
+    public var isSidebarShown: Bool { sidebar != nil && !sidebarItem.isCollapsed }
 
     private func placeSidebar() {
-        sidebarSplit.adjustSubviews()
-        if isSidebarShown { sidebarSplit.setPosition(sidebarWidth, ofDividerAt: 0) }
+        splitViewController.splitView.adjustSubviews()
+        if isSidebarShown {
+            splitViewController.splitView.setPosition(sidebarWidth, ofDividerAt: 0)
+        }
     }
 
     /// Called after every redraw of the layout: a tab, the selection, or an item's title
@@ -252,8 +274,8 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     /// NSSplitViews answer that one, and they come first in the responder chain.
     @objc public func toggleSidebarShown(_ sender: Any?) {
         guard sidebar != nil else { return }
-        if isSidebarShown { sidebarWidth = sidebarHost.frame.width }
-        sidebarHost.isHidden.toggle()
+        if isSidebarShown { sidebarWidth = sidebarHostController.view.frame.width }
+        sidebarItem.isCollapsed.toggle()
         placeSidebar()
         view.window?.invalidateRestorableState()
     }
@@ -374,6 +396,14 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         default:
             return true
         }
+    }
+
+    public func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        if item.action == #selector(toggleSidebarShown(_:)) {
+            item.toolTip = isSidebarShown ? "Hide Sidebar" : "Show Sidebar"
+            return sidebar != nil
+        }
+        return true
     }
 }
 

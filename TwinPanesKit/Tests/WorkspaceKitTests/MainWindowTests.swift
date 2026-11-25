@@ -190,4 +190,20 @@ private final class ScopedResponderView: NSView, CommandScopeProviding, NSMenuIt
         window.sendEvent(event)
         #expect(view.innerCount == 0)
     }
+
+    @Test func mainWindowUsesUnifiedHeaderAndToolbar() throws {
+        let layout = MainFrameLayout(filler: .testBrowsers)
+        layout.fillEmptyPanels()
+        let controller = MainWindowController(
+            layout: layout, workspace: WorkspaceRegistry(),
+            dispatcher: CommandDispatcher(registry: CommandRegistry()),
+            closeCoordinator: CloseCoordinator(openItems: { [] }) { _ in .discard })
+        let window = try #require(controller.window)
+        #expect(window.styleMask.contains(.fullSizeContentView))
+        #expect(window.titleVisibility == .hidden)
+        #expect(window.toolbarStyle == .unified)
+        let toolbar = try #require(window.toolbar)
+        let ids = toolbar.items.map(\.itemIdentifier)
+        #expect(ids == [.toggleSidebar])
+    }
 }

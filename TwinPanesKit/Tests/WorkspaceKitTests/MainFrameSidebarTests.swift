@@ -74,4 +74,21 @@ import Testing
         layout.insert(TestItem("a"))
         #expect(updates >= 1)
     }
+
+    @Test func toolbarToggleReflectsSidebarAvailabilityAndTogglesSidebar() {
+        let windowController = controller()
+        let frame = windowController.frameController
+        let item = NSToolbarItem(itemIdentifier: .toggleSidebar)
+        item.action = #selector(MainFrameViewController.toggleSidebarShown(_:))
+        #expect(!frame.validateToolbarItem(item))
+
+        frame.sidebar = content
+        #expect(frame.validateToolbarItem(item))
+        #expect(frame.isSidebarShown)
+
+        frame.toggleSidebarShown(item)
+        #expect(!frame.isSidebarShown)
+        frame.toggleSidebarShown(item)
+        #expect(frame.isSidebarShown)
+    }
 }

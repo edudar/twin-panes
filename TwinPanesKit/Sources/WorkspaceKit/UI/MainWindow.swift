@@ -93,9 +93,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
             layout: layout, closeCoordinator: closeCoordinator)
         let window = MainWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
         window.title = "Twin Panes"
+        window.titleVisibility = .hidden
+        window.toolbarStyle = .unified
+        window.toolbar = MainToolbar()
         window.tabbingMode = .disallowed  // per-panel tabs, not system window tabs (§4.9)
         window.dispatcher = dispatcher
         window.contentViewController = frameController
@@ -148,5 +151,41 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
             item.onChange = nil
         }
         onClose?(self)
+    }
+}
+
+/// The main window's unified toolbar. Uses standard system identifiers so AppKit adapts
+/// its appearance (including Liquid Glass on macOS 26+) automatically.
+@MainActor
+private final class MainToolbar: NSToolbar, NSToolbarDelegate {
+    init() {
+        super.init(identifier: "MainToolbar")
+        delegate = self
+        displayMode = .iconOnly
+        allowsUserCustomization = false
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.toggleSidebar]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.toggleSidebar]
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard itemIdentifier == .toggleSidebar else { return nil }
+        let item = NSToolbarItem(itemIdentifier: .toggleSidebar)
+        item.label = "Sidebar"
+        item.paletteLabel = "Toggle Sidebar"
+        item.toolTip = "Show or hide the sidebar"
+        item.image = NSImage(
+            systemSymbolName: "sidebar.leading", accessibilityDescription: "Toggle Sidebar")
+        item.target = nil
+        item.action = #selector(MainFrameViewController.toggleSidebarShown(_:))
+        return item
     }
 }
