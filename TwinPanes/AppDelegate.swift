@@ -35,6 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Small view choices kept for every window, such as hiding the function keys:
     /// isolated in smoke and bench runs.
     let preferences: UserDefaults
+    /// Every file operation and its undo history, for all windows (docs/plans/M6.md).
+    lazy var fileOperations = FileOperationCommands(grants: folderGrants) { [unowned self] in
+        self.windowControllers
+    }
 
     override init() {
         let child = SmokeChild(arguments: CommandLine.arguments)
@@ -106,9 +110,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     lazy var itemRestorer: ItemRestorer = {
         var restorer = ItemRestorer()
         restorer.register(.browser, newestVersion: BrowserItem.stateVersion) { state in
-            BrowserItem.restored(from: state, grants: self.folderGrants) { url, scope in
+            let browser = BrowserItem.restored(from: state, grants: self.folderGrants) {
+                url, scope in
                 self.openFile(url, scope: scope)
             }
+            browser?.fileCommands = self.fileOperations
+            return browser
         }
         restorer.register(.editor, newestVersion: HexEditorItem.stateVersion) { state in
             self.restoredEditor(from: state)
@@ -234,6 +241,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Quitting waits for saves that are running, then runs the same close workflow as
     /// closing a tab or window: one sheet per dirty session, then quit (PLAN.md §4).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if fileOperations.hasRunningOperations {
+            Task {
+                guard await fileOperations.stopForQuit() else {
+                    return NSApp.reply(toApplicationShouldTerminate: false)
+                }
+                // Asked again with nothing running: unsaved edits come next, and their
+                // flow replies itself when it can't answer at once.
+                if applicationShouldTerminate(sender) == .terminateNow {
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                }
+            }
+            return .terminateLater
+        }
         let items = workspace.allItems
         let saving = sessions.sessions.filter(\.isSaving)
         if saving.isEmpty, closeCoordinator.dirtySessions(closing: items).isEmpty {
@@ -335,6 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         controller.frameController.sidebar = sidebar
         controller.frameController.isFunctionKeyBarShown = isFunctionKeyBarShown
+        controller.frameController.bottomAccessory = fileOperations.makeStrip(for: controller)
         sidebar.show(volumes: volumes)
         volumeWatcher.start()
     }
@@ -391,12 +412,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// A browser tab at `folder`, or the active browser's folder, or the real home.
     func makeBrowser(at folder: URL? = nil) -> BrowserItem {
         let current = activeController?.layout.focusedPanelItem as? BrowserItem
-        return BrowserItem(
+        let browser = BrowserItem(
             folder: folder ?? current?.folder ?? DirectoryReader.realHomeDirectory,
             grants: folderGrants
         ) { [weak self] url, scope in
             self?.openFile(url, scope: scope)
         }
+        browser.fileCommands = fileOperations
+        return browser
     }
 
     func makeEditorSession() -> PlaceholderEditorSession {
