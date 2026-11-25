@@ -71,6 +71,7 @@ extension BrowserViewController: NSTextFieldDelegate {
     func editPath() {
         guard let item else { return }
         if !isEditingPath {
+            completionNames = CompletionNames(grants: item.grants)
             pathField.stringValue = item.folder.path
             pathField.isHidden = false
             pathControl.isHidden = true
@@ -82,6 +83,9 @@ extension BrowserViewController: NSTextFieldDelegate {
     }
 
     func showPathBar() {
+        completionNames = nil
+        pendingCompletion?.cancel()
+        pendingCompletion = nil
         pathField.isHidden = true
         pathControl.isHidden = false
     }
@@ -91,6 +95,7 @@ extension BrowserViewController: NSTextFieldDelegate {
     func control(
         _ control: NSControl, textView: NSTextView, doCommandBy selector: Selector
     ) -> Bool {
+        if selector == #selector(insertTab(_:)) { return completePath(in: textView) }
         guard selector == #selector(cancelOperation(_:)) else { return false }
         view.window?.makeFirstResponder(tableView)
         showPathBar()

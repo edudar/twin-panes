@@ -13,6 +13,12 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     let pathControl = NSPathControl()
     /// The folder each of the bar's items stands for.
     var pathURLs: [URL] = []
+    /// The names path completion offers, kept while the path field is open (D-e).
+    var completionNames: CompletionNames?
+    /// The completion waiting for a folder's names; for tests.
+    var pendingCompletion: Task<Void, Never>?
+    /// Opens AppKit's completion list; tests stand in for it.
+    var showCompletionList: (NSTextView) -> Void = { $0.complete(nil) }
     private let scrollView = NSScrollView()
     private let accessPrompt = NSStackView()
     private let accessLabel = NSTextField(wrappingLabelWithString: "")
