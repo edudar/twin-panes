@@ -211,7 +211,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
             state.sidebarShown = isSidebarShown
             state.sidebarWidth = Double(
                 isSidebarShown && hasPlacedDivider
-                    ? sidebarHostController.view.frame.width : sidebarWidth)
+                    ? displayedSidebarWidth : sidebarWidth)
         }
         return state
     }
@@ -229,10 +229,15 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         if hasPlacedDivider { view.window?.invalidateRestorableState() }
     }
 
+    private var displayedSidebarWidth: CGFloat {
+        splitViewController.splitView.arrangedSubviews.first?.frame.width
+            ?? sidebarHostController.view.frame.width
+    }
+
     private func sidebarDidResize() {
         guard hasPlacedDivider else { return }
         if !sidebarItem.isCollapsed {
-            let width = sidebarHostController.view.frame.width
+            let width = displayedSidebarWidth
             if width >= 120 { sidebarWidth = min(width, 400) }
         }
         view.window?.invalidateRestorableState()
@@ -306,7 +311,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     @objc public func toggleSidebarShown(_ sender: Any?) {
         guard sidebar != nil else { return }
         if isSidebarShown, hasPlacedDivider {
-            let width = sidebarHostController.view.frame.width
+            let width = displayedSidebarWidth
             if width >= 120 { sidebarWidth = min(width, 400) }
         }
         wantsSidebarShown = !isSidebarShown

@@ -16,7 +16,13 @@ extension SmokeTest {
             let outline = Self.view(in: content, id: "sidebar") as? NSOutlineView,
             let browser = controller.layout.focusedPanelItem as? BrowserItem
         else { return check(false, "the window shows the sidebar beside a browser") }
-        let width = outline.enclosingScrollView?.superview?.frame.width ?? 0
+        // macOS 26's sidebar split item wraps and insets the child view by 4 pt per side,
+        // so measure the split view's arranged subview rather than the scroll view.
+        var sidebarPane: NSView? = outline
+        while let superview = sidebarPane?.superview, !(superview is NSSplitView) {
+            sidebarPane = superview
+        }
+        let width = sidebarPane?.frame.width ?? 0
         check(
             frame.isSidebarShown && abs(width - 180) < 2,
             "the sidebar is shown, \(Int(width)) pt wide")
