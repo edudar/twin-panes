@@ -36,6 +36,22 @@ public protocol FileOperationSystem: Sendable {
     func contents(of folder: URL) throws(FileSystemError) -> [String]
     /// Whether this process may create items in `folder`.
     func canWrite(into folder: URL) -> Bool
+
+    /// Copies one file or symlink (not followed) with its metadata, as a clone where the
+    /// volume can. Never replaces: `EEXIST` if `destination` is taken. `progress` is
+    /// called with the bytes copied so far while data is copied (a clone has none);
+    /// returning false stops the copy, which then throws `ECANCELED` and leaves the
+    /// partial copy for the caller to remove.
+    func copyFile(
+        _ source: URL, to destination: URL, progress: (UInt64) -> Bool
+    ) throws(FileSystemError)
+    /// A new, empty folder; `EEXIST` if the name is taken.
+    func makeFolder(at url: URL) throws(FileSystemError)
+    /// Gives `destination` the dates, permissions and extended attributes of `source`,
+    /// for a folder once its contents are in.
+    func copyMetadata(from source: URL, to destination: URL) throws(FileSystemError)
+    /// Removes one file, symlink or empty folder.
+    func remove(_ url: URL) throws(FileSystemError)
 }
 
 public struct RealFileOperationSystem: FileOperationSystem {
@@ -74,4 +90,70 @@ public struct RealFileOperationSystem: FileOperationSystem {
     }
 
     public func canWrite(into folder: URL) -> Bool { access(folder.path, W_OK) == 0 }
+
+    public func copyFile(
+        _ source: URL, to destination: URL, progress: (UInt64) -> Bool
+    ) throws(FileSystemError) {
+        try copy(source, to: destination, flags: COPYFILE_CLONE, progress: progress)
+    }
+
+    /// `copyFile` as it runs across volumes, where there's no clone; for tests.
+    func copyFileWithoutCloning(
+        _ source: URL, to destination: URL, progress: (UInt64) -> Bool
+    ) throws(FileSystemError) {
+        try copy(source, to: destination, flags: 0, progress: progress)
+    }
+
+    /// `copyfile(3)` with everything (`COPYFILE_ALL`), never following a symlink or
+    /// replacing what's there, plus `extraFlags`.
+    private func copy(
+        _ source: URL, to destination: URL, flags extraFlags: Int32,
+        progress: (UInt64) -> Bool
+    ) throws(FileSystemError) {
+        let failure: Int32? = withoutActuallyEscaping(progress) { progress in
+            let box = ProgressBox(report: progress)
+            guard let state = copyfile_state_alloc() else { return errno }
+            defer { copyfile_state_free(state) }
+            let context = Unmanaged.passUnretained(box).toOpaque()
+            copyfile_state_set(state, UInt32(COPYFILE_STATE_STATUS_CTX), context)
+            let callback: copyfile_callback_t = { what, stage, state, _, _, context in
+                guard what == COPYFILE_COPY_DATA, stage == COPYFILE_PROGRESS, let context
+                else { return COPYFILE_CONTINUE }
+                var copied: off_t = 0
+                copyfile_state_get(state, UInt32(COPYFILE_STATE_COPIED), &copied)
+                let box = Unmanaged<ProgressBox>.fromOpaque(context).takeUnretainedValue()
+                return box.report(UInt64(max(copied, 0))) ? COPYFILE_CONTINUE : COPYFILE_QUIT
+            }
+            copyfile_state_set(
+                state, UInt32(COPYFILE_STATE_STATUS_CB),
+                unsafeBitCast(callback, to: UnsafeRawPointer.self))
+            let flags = copyfile_flags_t(
+                COPYFILE_ALL | COPYFILE_NOFOLLOW | COPYFILE_EXCL | extraFlags)
+            return copyfile(source.path, destination.path, state, flags) == 0 ? nil : errno
+        }
+        if let failure { throw FileSystemError("copy", source.path, errno: failure) }
+    }
+
+    public func makeFolder(at url: URL) throws(FileSystemError) {
+        guard mkdir(url.path, 0o777) == 0 else {
+            throw FileSystemError("make folder", url.path, errno: errno)
+        }
+    }
+
+    public func copyMetadata(from source: URL, to destination: URL) throws(FileSystemError) {
+        guard copyfile(source.path, destination.path, nil, copyfile_flags_t(COPYFILE_METADATA)) == 0
+        else { throw FileSystemError("copy metadata to", destination.path, errno: errno) }
+    }
+
+    public func remove(_ url: URL) throws(FileSystemError) {
+        guard Darwin.remove(url.path) == 0 else {
+            throw FileSystemError("remove", url.path, errno: errno)
+        }
+    }
+}
+
+/// Carries a copy's progress closure through `copyfile`'s C callback context.
+private final class ProgressBox {
+    let report: (UInt64) -> Bool
+    init(report: @escaping (UInt64) -> Bool) { self.report = report }
 }
