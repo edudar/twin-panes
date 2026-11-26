@@ -42,10 +42,15 @@ import TwinPanesCore
         #expect(OperationTexts.title(of: waiting) == "Copying “a.txt” to “dest”")
         #expect(OperationTexts.detail(of: waiting) == "Waiting for your answer")
         #expect(OperationTexts.detail(of: queued) == "Queued")
+        queued.pause()
+        #expect(OperationTexts.detail(of: queued) == "Paused")
+        queued.resume()
+        #expect(OperationTexts.detail(of: queued) == "Queued")
         queued.cancel()
         held.answer(ConflictAnswer(.skip))
         _ = await queued.finished()
         #expect(OperationTexts.title(of: queued) == "Stopped copying “b.txt”")
+        #expect(OperationTexts.detail(of: queued) == "Stopped")
     }
 
     @Test func aFinishedCopySaysDone() async {
@@ -63,5 +68,15 @@ import TwinPanesCore
         _ = await operation.finished()
         #expect(OperationTexts.title(of: operation) == "Couldn't move 2 items to the Trash")
         #expect(OperationTexts.detail(of: operation) == "2 items failed")
+    }
+
+    @Test func refusedNameShowsRefusedInsteadOfRenamed() async {
+        defer { cleanUp() }
+        let operation = queue.add(
+            .rename(source.appendingPathComponent("a.txt"), to: "b.txt"), scopes: []
+        ) { _, _ in ConflictAnswer(.stop) }
+        _ = await operation.finished()
+        #expect(OperationTexts.title(of: operation) == "Couldn't rename “a.txt” to “b.txt”")
+        #expect(OperationTexts.detail(of: operation) == "Refused")
     }
 }

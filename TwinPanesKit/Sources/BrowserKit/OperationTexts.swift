@@ -13,6 +13,7 @@ enum OperationTexts {
         if failed > 0 {
             return "Couldn't \(lowercasedVerb(did)) \(count(failed))\(trashSuffix(operation))"
         }
+        if result.refusal != nil { return "Couldn't \(lowercasedVerb(did)) \(what)" }
         if result.wasCancelled { return "Stopped \(doing.lowercased()) \(what)" }
         return "\(did) \(what)\(place)"
     }
@@ -20,14 +21,14 @@ enum OperationTexts {
     /// "Queued", "Waiting for your answer", "1.2 MB of 5 MB · 30 of 120 items".
     static func detail(of operation: QueuedOperation) -> String {
         if let result = operation.result {
-            return result.failures.isEmpty ? "Done" : "\(count(result.failures.count)) failed"
+            if !result.failures.isEmpty { return "\(count(result.failures.count)) failed" }
+            if result.refusal != nil { return "Refused" }
+            if result.wasCancelled { return "Stopped" }
+            return "Done"
         }
-        switch operation.state {
-        case .queued: return "Queued"
-        case .waitingForAnswer: return "Waiting for your answer"
-        case .running, .finished: break
-        }
+        if case .waitingForAnswer = operation.state { return "Waiting for your answer" }
         if operation.isPaused { return "Paused" }
+        if case .queued = operation.state { return "Queued" }
         let progress = operation.progress
         if progress.isDownloading, let item = progress.currentItem {
             return "Downloading “\((item as NSString).lastPathComponent)” from iCloud"

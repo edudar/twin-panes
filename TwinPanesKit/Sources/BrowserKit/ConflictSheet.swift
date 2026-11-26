@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import TwinPanesCore
 
 /// Asks what to do with an item whose name is taken (docs/plans/M6.md, D-d): both items
@@ -23,7 +24,10 @@ public final class ConflictSheet {
                 + "Existing: \(Self.describe(conflict.existing, conflict.existingMetadata))"
         }
         alert.alertStyle = .warning
-        for choice in choices { alert.addButton(withTitle: Self.title(of: choice)) }
+        for choice in choices {
+            let button = alert.addButton(withTitle: Self.title(of: choice))
+            if choice == .stop { button.keyEquivalent = "\u{1b}" }
+        }
         alert.accessoryView = applyToAll
     }
 
@@ -66,10 +70,13 @@ public final class ConflictSheet {
                 ByteCountFormatter.string(fromByteCount: Int64(metadata.size), countStyle: .file))
         }
         // Two dates read on the main actor while the operation waits on this sheet:
-        // too small to move off it. A date that can't be read is left out.
-        let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-            .contentModificationDate
-        if let modified {
+        // too small to move off it. lstat reads a symlink's own date instead of
+        // following a dangling or slow target; a date that can't be read is left out.
+        var info = stat()
+        if lstat(url.path, &info) == 0 {
+            let modified = Date(
+                timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)
+                    + TimeInterval(info.st_mtimespec.tv_nsec) / 1_000_000_000)
             parts.append("modified \(modified.formatted(date: .abbreviated, time: .shortened))")
         }
         return parts.joined(separator: ", ")

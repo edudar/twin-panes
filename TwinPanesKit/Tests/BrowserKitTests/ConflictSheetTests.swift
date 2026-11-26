@@ -38,9 +38,21 @@ import Testing
         defer { cleanUp() }
         let sheet = ConflictSheet(try conflict("src/a.txt", "dest/a.txt"))
         #expect(sheet.alert.buttons.map(\.title) == ["Replace", "Skip", "Keep Both", "Stop"])
+        #expect(sheet.alert.buttons.last?.keyEquivalent == "\u{1b}")
         #expect(sheet.alert.messageText == "An item named “a.txt” already exists in “dest”.")
         #expect(sheet.alert.informativeText.contains("2 KB"))
         #expect(sheet.alert.informativeText.contains("10 bytes"))
+    }
+
+    @Test func aDanglingSymlinkReportsAliasAndItsOwnDate() throws {
+        defer { cleanUp() }
+        let fm = FileManager.default
+        let sourceLink = root.appendingPathComponent("src/link")
+        let destLink = root.appendingPathComponent("dest/link")
+        try fm.createSymbolicLink(atPath: sourceLink.path, withDestinationPath: "/nonexistent/one")
+        try fm.createSymbolicLink(atPath: destLink.path, withDestinationPath: "/nonexistent/two")
+        let sheet = ConflictSheet(try conflict("src/link", "dest/link"))
+        #expect(sheet.alert.informativeText.contains("alias, modified "))
     }
 
     @Test func aFolderOffersMergeFirst() throws {

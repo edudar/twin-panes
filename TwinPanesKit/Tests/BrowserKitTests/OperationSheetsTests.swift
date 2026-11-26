@@ -32,13 +32,19 @@ import Testing
     @Test func renameSelectsTheNameWithoutItsExtension() {
         let window = window()
         defer { window.close() }
-        let sheet = TextSheet(
-            message: "Rename", text: "report.final.pdf", selecting: .nameWithoutExtension,
-            confirm: "Rename")
-        sheet.begin(on: window) { _ in }
-        let editor = sheet.field.currentEditor()
-        #expect(editor?.selectedRange == NSRange(location: 0, length: 12))
-        NSApp.endSheet(sheet.alert.window)
+        for (name, expectedLength) in [
+            ("report.final.pdf", 12),
+            (".profile", 8),
+            (".gitignore", 10),
+        ] {
+            let sheet = TextSheet(
+                message: "Rename", text: name, selecting: .nameWithoutExtension,
+                confirm: "Rename")
+            sheet.begin(on: window) { _ in }
+            let editor = sheet.field.currentEditor()
+            #expect(editor?.selectedRange == NSRange(location: 0, length: expectedLength))
+            window.endSheet(sheet.alert.window)
+        }
     }
 
     @Test func confirmingHandsBackTheTextAndCancellingNothing() async {

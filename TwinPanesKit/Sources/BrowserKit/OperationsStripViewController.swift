@@ -1,4 +1,5 @@
 import AppKit
+import Synchronization
 import TwinPanesCore
 
 /// The file operations' progress strip (docs/plans/M6.md, D-e): one row per operation
@@ -10,25 +11,39 @@ public final class OperationsStripViewController: NSViewController {
     private let queue: FileOperationQueue
     private let linger: Duration
     private let shows: (QueuedOperation) -> Bool
+    private let onDismiss: ((QueuedOperation.ID) -> Void)?
     private let stack = NSStackView()
     private var rows: [QueuedOperation.ID: OperationRow] = [:]
     /// Rows the user or the linger time dismissed; their operations stay in the queue.
     private var dismissed: Set<QueuedOperation.ID> = []
+    private let dismissTasks = Mutex<[QueuedOperation.ID: Task<Void, Never>]>([:])
     private var token: ObservationToken?
 
-    /// `shows` picks this window's operations; `linger` is how long a finished row stays.
+    /// `shows` picks this window's operations; `linger` is how long a finished row stays;
+    /// `onDismiss` runs when a row is dismissed.
     public init(
         queue: FileOperationQueue, linger: Duration = .seconds(3),
-        shows: @escaping (QueuedOperation) -> Bool
+        shows: @escaping (QueuedOperation) -> Bool,
+        onDismiss: ((QueuedOperation.ID) -> Void)? = nil
     ) {
         self.queue = queue
         self.linger = linger
         self.shows = shows
+        self.onDismiss = onDismiss
         super.init(nibName: nil, bundle: nil)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    deinit {
+        let tasks = dismissTasks.withLock { tasks in
+            let pending = Array(tasks.values)
+            tasks.removeAll()
+            return pending
+        }
+        for task in tasks { task.cancel() }
+    }
 
     public override func loadView() {
         stack.orientation = .vertical
@@ -52,21 +67,34 @@ public final class OperationsStripViewController: NSViewController {
         rows[operation.id].map { ($0.title.stringValue, $0.detail.stringValue) }
     }
 
+    var scheduledDismissCount: Int { dismissTasks.withLock(\.count) }
+
     func clickPause(of operation: QueuedOperation) { rows[operation.id]?.pause.performClick(nil) }
     func clickCancel(of operation: QueuedOperation) { rows[operation.id]?.cancel.performClick(nil) }
+    func clickShow(of operation: QueuedOperation) {
+        rows[operation.id]?.showFailures.performClick(nil)
+    }
 
     func failureList(of operation: QueuedOperation) -> String? {
         guard let failures = operation.result?.failures, !failures.isEmpty else { return nil }
-        return failures.map(\.description).joined(separator: "\n")
+        let limit = 20
+        let lines = failures.prefix(limit).map(\.description).joined(separator: "\n")
+        let remaining = failures.count - limit
+        return remaining > 0 ? "\(lines)\n…and \(remaining) more" : lines
     }
 
-    private func refresh() {
+    public func refresh() {
         let wanted = queue.operations.filter { shows($0) && !dismissed.contains($0.id) }
         for (id, row) in rows where !wanted.contains(where: { $0.id == id }) {
+            dismissTasks.withLock { $0.removeValue(forKey: id) }?.cancel()
             row.removeFromSuperview()
             rows[id] = nil
         }
         for operation in wanted {
+            if operation.result?.refusal != nil {
+                dismiss(operation.id)
+                continue
+            }
             let row = rows[operation.id] ?? makeRow(for: operation)
             row.show(operation)
             if let result = operation.result, result.failures.isEmpty { dismissLater(operation) }
@@ -75,8 +103,8 @@ public final class OperationsStripViewController: NSViewController {
 
     private func makeRow(for operation: QueuedOperation) -> OperationRow {
         let row = OperationRow()
-        row.onPause = { [weak operation] in
-            guard let operation else { return }
+        row.onPause = { [weak operation, weak row] in
+            guard let operation, let row else { return }
             if operation.isPaused { operation.resume() } else { operation.pause() }
             row.show(operation)
         }
@@ -94,25 +122,32 @@ public final class OperationsStripViewController: NSViewController {
     private func dismissLater(_ operation: QueuedOperation) {
         let id = operation.id
         guard linger > .zero else { return dismiss(id) }
-        Task { [weak self] in
-            try? await Task.sleep(for: self?.linger ?? .zero)
+        let alreadyScheduled = dismissTasks.withLock { $0[id] != nil }
+        guard !alreadyScheduled else { return }
+        let delay = linger
+        let task = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
             self?.dismiss(id)
         }
+        dismissTasks.withLock { $0[id] = task }
     }
 
     private func dismiss(_ id: QueuedOperation.ID) {
-        dismissed.insert(id)
+        dismissTasks.withLock { $0.removeValue(forKey: id) }?.cancel()
+        let isNewDismissal = dismissed.insert(id).inserted
         rows[id]?.removeFromSuperview()
         rows[id] = nil
+        if isNewDismissal { onDismiss?(id) }
     }
 
     private func showFailures(of operation: QueuedOperation) {
+        guard let window = view.window else { return }
         let alert = NSAlert()
         alert.messageText = OperationTexts.title(of: operation)
         alert.informativeText = failureList(of: operation) ?? ""
         alert.addButton(withTitle: "OK")
         let id = operation.id
-        guard let window = view.window else { return dismiss(id) }
         alert.beginSheetModal(for: window) { [weak self] _ in self?.dismiss(id) }
     }
 }

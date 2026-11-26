@@ -84,4 +84,126 @@ import TwinPanesCore
         let result = await second.finished()
         #expect(result.wasCancelled)
     }
+
+    @Test func dismissedRowDeallocates() async {
+        defer { cleanUp() }
+        weak var rowView: NSView?
+        do {
+            let operation = await heldCopy()
+            rowView = strip.view.subviews.first
+            #expect(rowView != nil)
+            held.answer(ConflictAnswer(.skip))
+            _ = await operation.finished()
+        }
+        #expect(rowView == nil)
+    }
+
+    @Test func lingeringDismissesOnceWithoutDuplicateTasks() async {
+        defer { cleanUp() }
+        var dismissedIDs: [QueuedOperation.ID] = []
+        var onDismissContinuation: CheckedContinuation<Void, Never>?
+        let lingeringStrip = OperationsStripViewController(
+            queue: queue, linger: .milliseconds(30),
+            shows: { _ in true },
+            onDismiss: { id in
+                dismissedIDs.append(id)
+                onDismissContinuation?.resume()
+                onDismissContinuation = nil
+            })
+        _ = lingeringStrip.view
+
+        let operation = queue.add(
+            .copy([source.appendingPathComponent("b.txt")], into: destination), scopes: []
+        ) { _, _ in ConflictAnswer(.stop) }
+        _ = await operation.finished()
+        #expect(lingeringStrip.shownOperations.map(\.id) == [operation.id])
+        for _ in 0..<5 { lingeringStrip.refresh() }
+        #expect(lingeringStrip.scheduledDismissCount == 1)
+
+        await withCheckedContinuation { continuation in
+            if !dismissedIDs.isEmpty {
+                continuation.resume()
+            } else {
+                onDismissContinuation = continuation
+            }
+        }
+        #expect(dismissedIDs == [operation.id])
+        #expect(lingeringStrip.shownOperations.isEmpty)
+        #expect(lingeringStrip.scheduledDismissCount == 0)
+    }
+
+    @Test func refusedNameDismissesImmediatelyWithoutLingering() async {
+        defer { cleanUp() }
+        var dismissedIDs: [QueuedOperation.ID] = []
+        let lingeringStrip = OperationsStripViewController(
+            queue: queue, linger: .seconds(5),
+            shows: { _ in true },
+            onDismiss: { dismissedIDs.append($0) })
+        _ = lingeringStrip.view
+
+        let operation = queue.add(
+            .rename(source.appendingPathComponent("a.txt"), to: "b.txt"), scopes: []
+        ) { _, _ in ConflictAnswer(.stop) }
+        let result = await operation.finished()
+        #expect(result.refusal != nil)
+        #expect(lingeringStrip.shownOperations.isEmpty)
+        #expect(lingeringStrip.scheduledDismissCount == 0)
+        #expect(dismissedIDs == [operation.id])
+    }
+
+    @Test func refreshShowsTransferredOperationsAndOnDismissFires() async {
+        defer { cleanUp() }
+        var accepts = false
+        var dismissedIDs: [QueuedOperation.ID] = []
+        let targetStrip = OperationsStripViewController(
+            queue: queue, linger: .zero,
+            shows: { _ in accepts },
+            onDismiss: { dismissedIDs.append($0) })
+        _ = targetStrip.view
+
+        let operation = await heldCopy()
+        #expect(targetStrip.shownOperations.isEmpty)
+        accepts = true
+        targetStrip.refresh()
+        #expect(targetStrip.shownOperations.map(\.id) == [operation.id])
+
+        held.answer(ConflictAnswer(.skip))
+        _ = await operation.finished()
+        #expect(dismissedIDs == [operation.id])
+    }
+
+    @Test func manyFailuresAreCappedAndShowWithoutWindowKeepsRow() async {
+        defer { cleanUp() }
+        let missing = (1...25).map { source.appendingPathComponent("missing-\($0).txt") }
+        let operation = queue.add(.trash(missing), scopes: []) { _, _ in ConflictAnswer(.stop) }
+        _ = await operation.finished()
+        let list = strip.failureList(of: operation)
+        let lines = list?.split(separator: "\n") ?? []
+        #expect(lines.count == 21)
+        #expect(lines.last == "…and 5 more")
+        #expect(strip.view.window == nil)
+        strip.clickShow(of: operation)
+        #expect(strip.shownOperations.map(\.id) == [operation.id])
+    }
+
+    @Test func deinitCancelsPendingDismissTask() async {
+        defer { cleanUp() }
+        var dismissedIDs: [QueuedOperation.ID] = []
+        weak var weakStrip: OperationsStripViewController?
+        do {
+            let lingeringStrip = OperationsStripViewController(
+                queue: queue, linger: .seconds(60),
+                shows: { _ in true },
+                onDismiss: { dismissedIDs.append($0) })
+            weakStrip = lingeringStrip
+            _ = lingeringStrip.view
+            let operation = queue.add(
+                .copy([source.appendingPathComponent("b.txt")], into: destination), scopes: []
+            ) { _, _ in ConflictAnswer(.stop) }
+            _ = await operation.finished()
+            #expect(lingeringStrip.scheduledDismissCount == 1)
+        }
+        #expect(weakStrip == nil)
+        #expect(dismissedIDs.isEmpty)
+    }
 }
