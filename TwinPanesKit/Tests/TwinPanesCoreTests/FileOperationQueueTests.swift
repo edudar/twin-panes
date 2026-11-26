@@ -140,4 +140,151 @@ import Testing
             !FileManager.default.fileExists(
                 atPath: destination.appendingPathComponent("b.txt").path))
     }
+
+    private func wait(_ semaphore: DispatchSemaphore) async {
+        await withCheckedContinuation { ready in
+            DispatchQueue.global().async {
+                semaphore.wait()
+                ready.resume()
+            }
+        }
+    }
+
+    private func addScoped(
+        _ queue: FileOperationQueue, _ request: OperationRequest,
+        ask: @escaping FileOperationQueue.Asker = Self.never
+    ) -> (QueuedOperation, () -> Bool) {
+        weak var held: SecurityScope?
+        let op: QueuedOperation = {
+            let scope = SecurityScope(url: source)
+            held = scope
+            return queue.add(request, scopes: [scope], ask: ask)
+        }()
+        return (op, { held != nil })
+    }
+
+    @Test func droppingObservationTokenOffMainDoesNotCrashAndUnregisters() async {
+        defer { cleanUp() }
+        let queue = FileOperationQueue(fileSystem: system)
+        var calls = 0
+        final class TokenBox: @unchecked Sendable {
+            var token: ObservationToken?
+            init(_ token: ObservationToken) { self.token = token }
+        }
+        let box = TokenBox(queue.observe { calls += 1 })
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                box.token = nil
+                continuation.resume()
+            }
+        }
+        for _ in 0..<100 where queue.observerCount > 0 { await Task.yield() }
+        #expect(queue.observerCount == 0)
+        let before = calls
+        _ = await queue.add(.trash([src("a.txt")]), scopes: [], ask: Self.never).finished()
+        #expect(calls == before)
+    }
+
+    @Test func cancellingWhileWaitingForAnswerUnblocksAndStartsNext() async throws {
+        defer { cleanUp() }
+        try Data("old".utf8).write(to: destination.appendingPathComponent("a.txt"))
+        let queue = FileOperationQueue(fileSystem: system)
+        let asked = DispatchSemaphore(value: 0)
+        var uiCancelled = false
+        var pendingAsk: CheckedContinuation<ConflictAnswer, Never>?
+        let (first, hasScope) = addScoped(queue, .copy([src("a.txt")], into: destination)) {
+            op, _ in
+            op.onCancelWhileWaiting = { uiCancelled = true }
+            asked.signal()
+            return await withCheckedContinuation { pendingAsk = $0 }
+        }
+        let second = queue.add(
+            .copy([src("b.txt")], into: destination), scopes: [], ask: Self.never)
+        await wait(asked)
+        first.cancel()
+        #expect(uiCancelled && first.onCancelWhileWaiting == nil)
+        #expect(await first.finished().wasCancelled && !hasScope())
+        let secondResult = await second.finished()
+        #expect(secondResult.failures.isEmpty && !secondResult.wasCancelled)
+        #expect(
+            FileManager.default.fileExists(
+                atPath: destination.appendingPathComponent("b.txt").path))
+        pendingAsk?.resume(returning: ConflictAnswer(.stop))
+    }
+
+    @Test func cancellingWhileQueuedFinishesImmediatelyAndReleasesScopes() async {
+        defer { cleanUp() }
+        let gate = DispatchSemaphore(value: 0)
+        system.reportChunks(1) { path, _ in if path.hasSuffix("a.txt") { gate.wait() } }
+        let queue = FileOperationQueue(fileSystem: system)
+        let first = queue.add(.copy([src("a.txt")], into: destination), scopes: [], ask: Self.never)
+        let (second, hasScope) = addScoped(queue, .copy([src("b.txt")], into: destination))
+        guard case .queued = second.state else {
+            Issue.record("expected queued: \(second.state)")
+            gate.signal()
+            return
+        }
+        second.cancel()
+        #expect(await second.finished().wasCancelled && !hasScope())
+        gate.signal()
+        _ = await first.finished()
+    }
+
+    @Test func cancellingWhilePausedFinishesCleanlyAndReleasesScopes() async {
+        defer { cleanUp() }
+        let atChunk = DispatchSemaphore(value: 0)
+        let releaseChunk = DispatchSemaphore(value: 0)
+        system.reportChunks(2) { path, chunk in
+            guard path.hasSuffix("a.txt"), chunk == 0 else { return }
+            atChunk.signal()
+            releaseChunk.wait()
+        }
+        let queue = FileOperationQueue(fileSystem: system)
+        let (operation, hasScope) = addScoped(queue, .copy([src("a.txt")], into: destination))
+        await wait(atChunk)
+        operation.pause()
+        #expect(operation.isPaused)
+        releaseChunk.signal()
+        operation.cancel()
+        #expect(!operation.isPaused)
+        #expect(await operation.finished().wasCancelled && !hasScope())
+    }
+
+    @Test func copyResultClearsTransientFinishedAndMergedBookkeeping() async throws {
+        defer { cleanUp() }
+        try FileManager.default.createDirectory(
+            at: source.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: source.appendingPathComponent("sub/x.txt"))
+        try FileManager.default.createDirectory(
+            at: destination.appendingPathComponent("src"), withIntermediateDirectories: true)
+        let op = FileOperationQueue(fileSystem: system)
+            .add(.copy([source], into: destination), scopes: []) { _, _ in ConflictAnswer(.merge) }
+        guard case .copied(let outcome) = await op.finished() else {
+            Issue.record("expected copied outcome")
+            return
+        }
+        #expect(outcome.finished.isEmpty && outcome.merged.isEmpty)
+    }
+
+    @Test func removeFinishedPrunesOnlyFinishedOperations() async {
+        defer { cleanUp() }
+        let gate = DispatchSemaphore(value: 0)
+        system.reportChunks(1) { path, _ in if path.hasSuffix("a.txt") { gate.wait() } }
+        let queue = FileOperationQueue(fileSystem: system)
+        let running = queue.add(
+            .copy([src("a.txt")], into: destination), scopes: [], ask: Self.never)
+        let finished = queue.add(.trash([src("b.txt")]), scopes: [], ask: Self.never)
+        _ = await finished.finished()
+        var observerCalls = 0
+        let token = queue.observe { observerCalls += 1 }
+        defer { withExtendedLifetime(token) {} }
+        queue.removeFinished(running.id)
+        #expect(queue.operations.count == 2 && observerCalls == 0)
+        queue.removeFinished(finished.id)
+        #expect(queue.operations.map(\.id) == [running.id] && observerCalls == 1)
+        queue.removeFinished(UUID())
+        #expect(observerCalls == 1)
+        gate.signal()
+        _ = await running.finished()
+    }
 }

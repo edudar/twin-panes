@@ -77,6 +77,10 @@ public final class QueuedOperation: Identifiable {
     /// Held until the operation ends, whatever happens to the tab that asked (§5).
     var scopes: [SecurityScope]
     var waiters: [CheckedContinuation<OperationResult, Never>] = []
+    /// Called and cleared on `@MainActor` when `cancel()` runs while waiting on a
+    /// conflict UI, so the caller can dismiss its sheet.
+    public var onCancelWhileWaiting: (() -> Void)?
+    var onCancel: (() -> Void)?
 
     init(request: OperationRequest, scopes: [SecurityScope]) {
         self.request = request
@@ -86,7 +90,15 @@ public final class QueuedOperation: Identifiable {
     public var isPaused: Bool { control.isPaused }
     public func pause() { control.pause() }
     public func resume() { control.resume() }
-    public func cancel() { control.cancel() }
+    public func cancel() {
+        control.cancel()
+        let cancelUI = onCancelWhileWaiting
+        onCancelWhileWaiting = nil
+        cancelUI?()
+        let cancelOp = onCancel
+        onCancel = nil
+        cancelOp?()
+    }
 
     public var result: OperationResult? {
         if case .finished(let result) = state { return result }

@@ -1,8 +1,8 @@
 import Foundation
 
 /// Every file operation the app runs (docs/plans/M6.md, D-e). Lives on the main actor;
-/// each operation's work runs on its own dispatch queue, since it blocks while paused
-/// or waiting for a conflict's answer.
+/// work runs off-main on a serial queue (for turn-taking ops) or a bounded pool (for
+/// immediate ops), since operations block while paused or waiting for a conflict's answer.
 @MainActor
 public final class FileOperationQueue {
     /// Asks the user about a conflict; the operation waits for the answer.
@@ -11,8 +11,17 @@ public final class FileOperationQueue {
     private let fileSystem: any FileOperationSystem
     public private(set) var operations: [QueuedOperation] = []
     private var observers: [UUID: () -> Void] = [:]
+    var observerCount: Int { observers.count }
     /// How often progress may reach the main actor.
     private let progressInterval: Duration
+    private let serialQueue = DispatchQueue(label: "FileOperationQueue.serial", qos: .userInitiated)
+    private let immediatePool: OperationQueue = {
+        let pool = OperationQueue()
+        pool.name = "FileOperationQueue.immediate"
+        pool.qualityOfService = .userInitiated
+        pool.maxConcurrentOperationCount = 4
+        return pool
+    }()
 
     public init(
         fileSystem: any FileOperationSystem, progressInterval: Duration = .milliseconds(100)
@@ -27,7 +36,7 @@ public final class FileOperationQueue {
         let id = UUID()
         observers[id] = handler
         return ObservationToken { [weak self] in
-            MainActor.assumeIsolated { _ = self?.observers.removeValue(forKey: id) }
+            Task { @MainActor [weak self] in _ = self?.observers.removeValue(forKey: id) }
         }
     }
 
@@ -45,6 +54,10 @@ public final class FileOperationQueue {
             turnHolder = operation
             start(operation, ask: ask)
         } else {
+            operation.onCancel = { [weak self, weak operation] in
+                guard let self, let operation else { return }
+                self.cancelQueued(operation)
+            }
             waiting.append((operation, ask))
         }
         return operation
@@ -53,6 +66,25 @@ public final class FileOperationQueue {
     /// The copy or move running now; the others wait in `waiting`, in order.
     private var turnHolder: QueuedOperation?
     private var waiting: [(QueuedOperation, Asker)] = []
+
+    private func cancelQueued(_ operation: QueuedOperation) {
+        guard case .queued = operation.state else { return }
+        waiting.removeAll { $0.0 === operation }
+        let result: OperationResult
+        switch operation.request {
+        case .copy:
+            var outcome = CopyOutcome()
+            outcome.wasCancelled = true
+            result = .copied(outcome)
+        case .move, .putBack:
+            var outcome = MoveOutcome()
+            outcome.wasCancelled = true
+            result = .moved(outcome)
+        default:
+            return
+        }
+        finish(operation, with: result)
+    }
 
     private func start(_ operation: QueuedOperation, ask: @escaping Asker) {
         operation.state = .running
@@ -65,16 +97,22 @@ public final class FileOperationQueue {
             operation.progress = $0
             self?.changed()
         }
-        let resolve = ConflictBridge { [weak operation] conflict in
-            guard let operation else { return ConflictAnswer(.stop) }
+        let resolve = ConflictBridge(control: control) { [weak self, weak operation] conflict in
+            guard let self, let operation, !operation.control.isCancelled else {
+                return ConflictAnswer(.stop)
+            }
             operation.state = .waitingForAnswer
             self.changed()
             let answer = await ask(operation, conflict)
-            operation.state = .running
-            self.changed()
+            operation.onCancelWhileWaiting = nil
+            if case .waitingForAnswer = operation.state {
+                operation.state = .running
+                self.changed()
+            }
             return answer
         }
-        DispatchQueue(label: "FileOperationQueue.operation", qos: .userInitiated).async {
+        operation.onCancel = { [weak resolve] in resolve?.cancel() }
+        let work: @Sendable () -> Void = {
             let result = Self.run(
                 request, fileSystem: fileSystem, control: control,
                 resolve: resolve.answer(for:), progress: reporter.report)
@@ -82,6 +120,11 @@ public final class FileOperationQueue {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self.finish(operation, with: result) }
             }
+        }
+        if request.waitsItsTurn {
+            serialQueue.async(execute: work)
+        } else {
+            immediatePool.addOperation(work)
         }
     }
 
@@ -95,10 +138,13 @@ public final class FileOperationQueue {
         case .copy(let sources, let destination):
             let planner = OperationPlanner(fileSystem: fileSystem)
             let walks = sources.map { planner.walk($0, isCancelled: { control.isCancelled }) }
-            return .copied(
-                TreeCopier(fileSystem: fileSystem).copy(
-                    walks, into: destination, control: control, resolve: resolve,
-                    progress: progress))
+            var outcome = TreeCopier(fileSystem: fileSystem).copy(
+                walks, into: destination, control: control, resolve: resolve,
+                progress: progress)
+            // Transient move-bookkeeping; clearing avoids retaining 100k URLs in history.
+            outcome.finished = [:]
+            outcome.merged = []
+            return .copied(outcome)
         case .move(let sources, let destination):
             return .moved(
                 TreeMover(fileSystem: fileSystem).move(
@@ -131,6 +177,8 @@ public final class FileOperationQueue {
     private func finish(_ operation: QueuedOperation, with result: OperationResult) {
         operation.state = .finished(result)
         operation.scopes = []
+        operation.onCancel = nil
+        operation.onCancelWhileWaiting = nil
         for waiter in operation.waiters { waiter.resume(returning: result) }
         operation.waiters = []
         changed()
@@ -145,6 +193,15 @@ public final class FileOperationQueue {
 
     private func changed() {
         for observer in observers.values { observer() }
+    }
+
+    /// Removes `id` from `operations` once it has finished; no-op if still running.
+    public func removeFinished(_ id: QueuedOperation.ID) {
+        guard let index = operations.firstIndex(where: { $0.id == id && $0.result != nil }) else {
+            return
+        }
+        operations.remove(at: index)
+        changed()
     }
 }
 
@@ -192,27 +249,60 @@ private final class ProgressReporter: @unchecked Sendable {
 }
 
 /// Lets an operation's thread wait for the user's answer to a conflict, asked on the
-/// main actor.
-private final class ConflictBridge: Sendable {
+/// main actor, or wake immediately if the operation is cancelled.
+private final class ConflictBridge: @unchecked Sendable {
+    // Unchecked: `pending` is only touched under `lock`; `control` and `ask` are Sendable.
+    private let lock = NSLock()
+    private let control: OperationControl
     private let ask: @MainActor (Conflict) async -> ConflictAnswer
+    private var pending: (ready: DispatchSemaphore, answer: ConflictAnswer, resolved: Bool)?
 
-    init(ask: @escaping @MainActor (Conflict) async -> ConflictAnswer) { self.ask = ask }
+    init(control: OperationControl, ask: @escaping @MainActor (Conflict) async -> ConflictAnswer) {
+        self.control = control
+        self.ask = ask
+    }
 
-    /// Blocks the operation's thread until the main actor has the answer.
+    /// Blocks the operation's thread until the main actor has the answer or cancels.
     func answer(for conflict: Conflict) -> ConflictAnswer {
         let ready = DispatchSemaphore(value: 0)
-        let box = AnswerBox()
+        lock.lock()
+        if control.isCancelled {
+            lock.unlock()
+            return ConflictAnswer(.stop)
+        }
+        pending = (ready, ConflictAnswer(.stop), false)
+        lock.unlock()
         Task { @MainActor in
-            box.answer = await ask(conflict)
-            ready.signal()
+            let result = control.isCancelled ? ConflictAnswer(.stop) : await ask(conflict)
+            self.resolve(ready: ready, with: result)
         }
         ready.wait()
-        return box.answer
+        lock.lock()
+        let answer = pending?.answer ?? ConflictAnswer(.stop)
+        pending = nil
+        lock.unlock()
+        return answer
     }
-}
 
-private final class AnswerBox: @unchecked Sendable {
-    // Unchecked: written on the main actor before the semaphore is signalled, read on
-    // the operation's thread after it's waited for.
-    var answer = ConflictAnswer(.stop)
+    func cancel() {
+        lock.lock()
+        guard let current = pending, !current.resolved else {
+            lock.unlock()
+            return
+        }
+        pending = (current.ready, ConflictAnswer(.stop), true)
+        lock.unlock()
+        current.ready.signal()
+    }
+
+    private func resolve(ready: DispatchSemaphore, with answer: ConflictAnswer) {
+        lock.lock()
+        guard let current = pending, current.ready === ready, !current.resolved else {
+            lock.unlock()
+            return
+        }
+        pending = (ready, answer, true)
+        lock.unlock()
+        ready.signal()
+    }
 }
