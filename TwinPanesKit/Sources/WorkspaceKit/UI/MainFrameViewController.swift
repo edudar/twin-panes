@@ -543,8 +543,14 @@ final class SlotViewController: NSViewController, CommandScopeProviding {
 
     var commandScopes: [BindingScope] { [.slot(slot)] }
 
+    /// The narrowest a panel gets.
+    private static let minimumWidth: CGFloat = 240
+
     override func loadView() {
-        let root = NSView()
+        // The split view sizes its panels by frame, through autoresizing constraints; a
+        // panel that started at zero size would contradict its own minimums until then.
+        let root = NSView(
+            frame: NSRect(x: 0, y: 0, width: Self.minimumWidth, height: TabBarView.height))
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         addChild(host)
         host.view.translatesAutoresizingMaskIntoConstraints = false
@@ -558,7 +564,7 @@ final class SlotViewController: NSViewController, CommandScopeProviding {
             host.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             host.view.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
             host.view.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            root.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            root.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.minimumWidth),
         ])
         root.setAccessibilityIdentifier(slot.rawValue)
         tabBar.onSelect = { [weak self] id in self?.frame?.layout.select(id) }
