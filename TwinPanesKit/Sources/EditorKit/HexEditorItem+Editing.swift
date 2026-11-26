@@ -32,6 +32,18 @@ extension HexEditorItem {
     /// Starts a new undo step on the next keystroke (after a cursor move or column switch).
     func breakTypingBurst() { lastTyping = nil }
 
+    /// Checks readiness before an edit reads uncached bytes, surfacing the same status
+    /// messages as `overwrite` and returning false if the edit must wait or fail.
+    func prepareForEdit() -> Bool {
+        do {
+            try session.prepareForFirstEdit()
+            return true
+        } catch {
+            reportEditError(error, at: nil)
+            return false
+        }
+    }
+
     /// Overwrites `bytes` at `offset` and records the undo step, from `selectionBefore` to
     /// a cursor at `cursorAfter`. Returns false (and shows why) if the write failed or the
     /// file is read-only.
@@ -49,22 +61,28 @@ extension HexEditorItem {
             try session.overwrite(
                 bytes, at: offset, selectionBefore: selectionBefore,
                 selectionAfter: cursorAfter..<(cursorAfter + 1), coalescing: continues)
-        } catch EditorSessionError.readOnly(let reason) {
-            host?.showStatus("“\(title)” is read-only: \(reason)")
-            return false
-        } catch EditorSessionError.reloadedBeforeEdit {
-            controller.bytesChanged()
-            host?.showStatus("“\(title)” changed on disk and was reloaded")
-            return false
-        } catch EditorSessionError.downloadingBeforeEdit {
-            host?.showStatus("“\(title)” is downloading from iCloud. Edit again once it’s here.")
-            return false
         } catch {
-            host?.showStatus("Can't change the byte at \(Self.hex(offset)): \(error)")
+            reportEditError(error, at: offset)
             return false
         }
         lastTyping = Typing(column: column, cursorAfter: cursorAfter, time: now)
         return true
+    }
+
+    private func reportEditError(_ error: Error, at offset: UInt64?) {
+        switch error {
+        case EditorSessionError.readOnly(let reason):
+            host?.showStatus("“\(title)” is read-only: \(reason)")
+        case EditorSessionError.reloadedBeforeEdit:
+            controller.bytesChanged()
+            host?.showStatus("“\(title)” changed on disk and was reloaded")
+        case EditorSessionError.downloadingBeforeEdit:
+            host?.showStatus("“\(title)” is downloading from iCloud. Edit again once it’s here.")
+        default:
+            let action =
+                offset.map { "Can't change the byte at \(Self.hex($0))" } ?? "Can't edit “\(title)”"
+            host?.showStatus("\(action): \(error)")
+        }
     }
 
     /// Goes back one undo step; returns the state to show, or nil if there's none.

@@ -184,6 +184,8 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         updateInspector()
     }
 
+    func hexViewWillBeginEdit(_ view: HexView) -> Bool { item?.prepareForEdit() ?? false }
+
     /// Shows the bytes at the cursor; waits for the page if it isn't cached yet without
     /// cancelling the hex view's own viewport prefetch.
     func updateInspector() {

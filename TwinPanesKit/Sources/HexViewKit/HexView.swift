@@ -37,6 +37,10 @@ public protocol HexViewDelegate: AnyObject {
     func hexView(_ view: HexView, didFailToRead error: Error)
     /// A background prefetch landed and the view is about to redraw with the new bytes.
     func hexViewDidLoadBytes(_ view: HexView)
+    /// Called before an edit reads uncached bytes from `dataSource`, so the delegate can
+    /// refuse (for example, starting an iCloud download before a synchronous read would
+    /// block). Return false to refuse (the view beeps).
+    func hexViewWillBeginEdit(_ view: HexView) -> Bool
     /// Typing asks to overwrite `bytes` at `offset` from `column`; the cursor then moves
     /// to `cursorAfter`. Return false to refuse (the view beeps). By default views are
     /// read-only.
@@ -55,6 +59,7 @@ public protocol HexViewDelegate: AnyObject {
 extension HexViewDelegate {
     public func hexView(_ view: HexView, didFailToRead error: Error) {}
     public func hexViewDidLoadBytes(_ view: HexView) {}
+    public func hexViewWillBeginEdit(_ view: HexView) -> Bool { true }
     public func hexView(
         _ view: HexView, overwrite bytes: Data, at offset: UInt64, column: HexLayout.Column,
         cursorAfter: UInt64

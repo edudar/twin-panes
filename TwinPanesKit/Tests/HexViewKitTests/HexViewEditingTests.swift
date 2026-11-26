@@ -140,6 +140,18 @@ import Testing
         #expect(spy.errors == 1)
     }
 
+    @Test func hexTypingChecksWillBeginEditBeforeUncachedRead() {
+        source.cached = false
+        spy.willBeginEdit = false
+        view.go(to: 5)
+        view.insertText("A")
+        #expect(spy.willBeginEditCalls == 1)
+        #expect(source.reads.isEmpty)
+        #expect(spy.writes.isEmpty)
+        #expect(view.pendingNibble == nil && view.selection.cursor == 5)
+        #expect(byte(5) == 5)
+    }
+
     @Test func textColumnRejectsControlCharacters() {
         view.go(to: 10)
         view.insertTab(nil)

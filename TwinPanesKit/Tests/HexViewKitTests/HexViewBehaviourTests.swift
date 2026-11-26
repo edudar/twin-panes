@@ -20,6 +20,7 @@ final class FakeHexSource: HexViewDataSource {
     /// When true, `prefetch` records the request without completing until `flushPrefetches()`.
     var deferPrefetch = false
     private(set) var prefetches: [Range<UInt64>] = []
+    private(set) var reads: [Range<UInt64>] = []
     private var pending: [@MainActor () -> Void] = []
 
     init(count: Int) { data = Data((0..<count).map { UInt8(truncatingIfNeeded: $0) }) }
@@ -48,6 +49,7 @@ final class FakeHexSource: HexViewDataSource {
     }
 
     func read(_ range: Range<UInt64>) throws -> Data {
+        reads.append(range)
         if let readError { throw readError }
         return data[Int(range.lowerBound)..<Int(range.upperBound)]
     }
@@ -71,9 +73,15 @@ final class DelegateSpy: HexViewDelegate {
 
     /// Applies writes to `source` unless `readOnly`.
     weak var source: FakeHexSource?
+    var willBeginEdit = true
+    var willBeginEditCalls = 0
     var readOnly = false
     var writes: [(offset: UInt64, bytes: Data, column: HexLayout.Column, cursorAfter: UInt64)] = []
     var unencodable: [Character] = []
+    func hexViewWillBeginEdit(_ view: HexView) -> Bool {
+        willBeginEditCalls += 1
+        return willBeginEdit
+    }
     func hexView(
         _ view: HexView, overwrite bytes: Data, at offset: UInt64, column: HexLayout.Column,
         cursorAfter: UInt64

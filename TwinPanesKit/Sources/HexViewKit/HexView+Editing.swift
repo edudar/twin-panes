@@ -35,6 +35,7 @@ extension HexView {
             if let cached = dataSource.cachedBytes(offset..<(offset + 1))?.first {
                 current = cached
             } else {
+                guard delegate?.hexViewWillBeginEdit(self) != false else { return false }
                 do {
                     guard let loaded = try dataSource.read(offset..<(offset + 1)).first else {
                         return false

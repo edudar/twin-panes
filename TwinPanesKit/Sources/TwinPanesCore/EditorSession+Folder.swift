@@ -2,15 +2,13 @@ import Foundation
 
 /// The session folder and the clone made at the first edit (docs/plans/M3c.md, D-a).
 extension EditorSession {
-    /// Before the first edit: if the file changed since it was opened, reload it and throw
-    /// `EditorSessionError.reloadedBeforeEdit` so the stale edit is dropped; otherwise make
-    /// the folder, clone the file into it and switch the original pieces to the clone, so
-    /// nothing another app does to the file can change the bytes under the edits. A clone
-    /// that fails leaves the session narrowed. A file whose bytes are only in iCloud
-    /// starts downloading and throws `.downloadingBeforeEdit`; the next edit after it has
-    /// arrived goes ahead (docs/plans/M6.md, D-h).
-    func protectBeforeFirstEdit() throws {
-        guard folder == nil, let root = sessionsRoot else { return }
+    /// Checks that the session is ready for an edit before reading uncached bytes or
+    /// making the session folder: refuses read-only files, reloads if changed on disk
+    /// (throwing `.reloadedBeforeEdit`), and starts downloading evicted iCloud files
+    /// (throwing `.downloadingBeforeEdit`).
+    public func prepareForFirstEdit() throws {
+        if case .readOnly(let reason) = access { throw EditorSessionError.readOnly(reason) }
+        guard folder == nil, sessionsRoot != nil else { return }
         if try !FileIdentity(url: url).isUnchanged(from: identity) {
             try reloadFromDisk()
             fileState = .unchanged
@@ -23,6 +21,18 @@ extension EditorSession {
             try cloudDownloads.startDownload(url)
             throw EditorSessionError.downloadingBeforeEdit
         }
+    }
+
+    /// Before the first edit: if the file changed since it was opened, reload it and throw
+    /// `EditorSessionError.reloadedBeforeEdit` so the stale edit is dropped; otherwise make
+    /// the folder, clone the file into it and switch the original pieces to the clone, so
+    /// nothing another app does to the file can change the bytes under the edits. A clone
+    /// that fails leaves the session narrowed. A file whose bytes are only in iCloud
+    /// starts downloading and throws `.downloadingBeforeEdit`; the next edit after it has
+    /// arrived goes ahead (docs/plans/M6.md, D-h).
+    func protectBeforeFirstEdit() throws {
+        try prepareForFirstEdit()
+        guard folder == nil, let root = sessionsRoot else { return }
         let bookmark = try? url.bookmarkData(
             options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
         let made = try SessionFolder.create(

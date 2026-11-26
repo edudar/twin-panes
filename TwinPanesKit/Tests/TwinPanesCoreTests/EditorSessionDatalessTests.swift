@@ -64,6 +64,26 @@ import Testing
         #expect(throws: FakeCloud.Unreachable.self) { try edit(session) }
         #expect(!session.isDirty && session.folder == nil)
     }
+
+    @Test func prepareForFirstEditChecksReadinessWithoutCreatingFolder() throws {
+        defer { cleanUp() }
+        let cloud = FakeCloud(dataless: true)
+        let session = try session(cloud)
+        #expect(throws: EditorSessionError.downloadingBeforeEdit) {
+            try session.prepareForFirstEdit()
+        }
+        #expect(cloud.started == 1 && session.folder == nil)
+
+        cloud.finish()
+        try session.prepareForFirstEdit()
+        #expect(!session.isDirty && session.folder == nil)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
+        let readOnly = try EditorSession(url: url, sessionsRoot: sessions)
+        #expect(throws: EditorSessionError.readOnly(.noWritePermission)) {
+            try readOnly.prepareForFirstEdit()
+        }
+    }
 }
 
 final class FakeCloud: CloudDownloads {

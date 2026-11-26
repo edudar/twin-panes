@@ -23,6 +23,29 @@ private final class FakeHexCloudDownloads: CloudDownloads {
 }
 
 @MainActor
+private final class UncachedHexSourceSpy: HexViewDataSource {
+    let inner: HexEditorItem
+    var cacheEvicted = true
+    var reads: [Range<UInt64>] = []
+    init(_ inner: HexEditorItem) { self.inner = inner }
+    var length: UInt64 { inner.length }
+    func cachedBytes(_ range: Range<UInt64>) -> Data? {
+        cacheEvicted ? nil : inner.cachedBytes(range)
+    }
+    func prefetch(_ range: Range<UInt64>, completion: @escaping @MainActor (Error?) -> Void) {
+        inner.prefetch(range, completion: completion)
+    }
+    func read(_ range: Range<UInt64>) throws -> Data {
+        reads.append(range)
+        cacheEvicted = false
+        return try inner.read(range)
+    }
+    func modifiedRanges(in range: Range<UInt64>) -> [Range<UInt64>] {
+        inner.modifiedRanges(in: range)
+    }
+}
+
+@MainActor
 @Suite(.serialized) struct HexEditorDatalessTests {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("HexEditorDatalessTests-\(UUID().uuidString)", isDirectory: true)
@@ -55,6 +78,34 @@ private final class FakeHexCloudDownloads: CloudDownloads {
 
         cloud.finish()
         item.hexView.insertText("AB")
+        #expect(try item.read(0..<1) == Data([0xAB]))
+        #expect(item.isDirty && item.canUndo && item.session.folder != nil)
+        #expect(item.hexView.pendingNibble == nil && item.hexView.selection.cursor == 1)
+    }
+
+    @Test func uncachedHexTypingDownloadsWithoutSynchronousRead() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cloud = FakeHexCloudDownloads()
+        let session = try EditorSession(url: url, sessionsRoot: sessions)
+        session.cloudDownloads = cloud
+        let item = HexEditorItem(session: session)
+        let host = DatalessStatusSpy()
+        item.host = host
+        _ = item.controller.view
+        let sourceSpy = UncachedHexSourceSpy(item)
+        item.hexView.dataSource = sourceSpy
+
+        item.hexView.insertText("A")
+        #expect(sourceSpy.reads.isEmpty)
+        #expect(sourceSpy.cacheEvicted)
+        #expect(cloud.started == 1 && !item.isDirty && !item.canUndo && item.session.folder == nil)
+        #expect(host.messages.last?.contains("downloading from iCloud") == true)
+        #expect(!item.controller.applyingTypingEdit && item.lastTyping == nil)
+        #expect(item.hexView.pendingNibble == nil && item.hexView.selection.cursor == 0)
+
+        cloud.finish()
+        item.hexView.insertText("AB")
+        #expect(sourceSpy.reads == [0..<1])
         #expect(try item.read(0..<1) == Data([0xAB]))
         #expect(item.isDirty && item.canUndo && item.session.folder != nil)
         #expect(item.hexView.pendingNibble == nil && item.hexView.selection.cursor == 1)
