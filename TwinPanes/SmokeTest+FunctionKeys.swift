@@ -29,9 +29,14 @@ extension SmokeTest {
             !table.selectedRowIndexes.contains(0) && browser.selectedEntries.count == 2,
             "⌘A selects every entry but \"..\": rows \(Array(table.selectedRowIndexes))")
 
+        let hiddenHeight = browserHeight(browser, in: window)
+        check(bar.isHidden, "the function-key bar starts hidden")
+        showFunctionKeys(check, browser: browser, bar: bar, window: window)
         window.update()
         check(button(3, of: bar)?.title == "F3 View", "the bar's F3 reads View in a browser")
-        check(button(10, of: bar)?.title == "F10 Quit Twin Panes", "and F10 quits")
+        check(
+            button(10, of: bar)?.isHidden == true && button(1, of: bar)?.isHidden == true,
+            "keys that run nothing, F1 and F10 among them, are left off the bar")
         table.selectRowIndexes([2], byExtendingSelection: false)
         window.update()
         button(3, of: bar)?.performClick(nil)
@@ -53,29 +58,31 @@ extension SmokeTest {
         controller.layout.select(browser.id)
         window.makeFirstResponder(table)
 
-        await hideFunctionKeys(check, browser: browser, bar: bar, window: window)
+        NSApp.sendAction(Selector(("toggleFunctionKeys:")), to: nil, from: nil)
+        check(
+            bar.isHidden && browserHeight(browser, in: window) == hiddenHeight,
+            "View › Hide Function Keys gives the panels their room back")
     }
 
-    /// View › Hide Function Keys gives the panels the bar's room, in every window.
-    private func hideFunctionKeys(
+    /// View › Show Function Keys takes room from the panels, in every window.
+    private func showFunctionKeys(
         _ check: (Bool, String) -> Void, browser: BrowserItem, bar: FunctionKeyBar,
         window: NSWindow
-    ) async {
-        func browserHeight() -> CGFloat {
-            window.contentView?.layoutSubtreeIfNeeded()
-            return browser.viewController.view.frame.height
-        }
-        let shown = browserHeight()
+    ) {
+        let hidden = browserHeight(browser, in: window)
         NSApp.sendAction(Selector(("toggleFunctionKeys:")), to: nil, from: nil)
-        let hidden = browserHeight()
+        let shown = browserHeight(browser, in: window)
         check(
-            bar.isHidden && hidden >= shown + 20
+            !bar.isHidden && shown + 20 <= hidden
                 && app.windowControllers.allSatisfy {
-                    $0.frameController.functionKeyBar?.isHidden == true
+                    $0.frameController.functionKeyBar?.isHidden == false
                 },
-            "hiding the function keys gives the panels the room: \(Int(shown)) → \(Int(hidden)) pt")
-        NSApp.sendAction(Selector(("toggleFunctionKeys:")), to: nil, from: nil)
-        check(!bar.isHidden && browserHeight() == shown, "and showing them takes it back")
+            "View › Show Function Keys shows the bar: \(Int(hidden)) → \(Int(shown)) pt")
+    }
+
+    private func browserHeight(_ browser: BrowserItem, in window: NSWindow) -> CGFloat {
+        window.contentView?.layoutSubtreeIfNeeded()
+        return browser.viewController.view.frame.height
     }
 
     private func button(_ number: Int, of bar: FunctionKeyBar) -> NSButton? {

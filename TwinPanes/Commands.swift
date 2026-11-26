@@ -118,7 +118,7 @@ enum DefaultCommands {
             .toggleSidebar, "Show Sidebar",
             #selector(MainFrameViewController.toggleSidebarShown(_:)))
         add(
-            .toggleFunctionKeys, "Hide Function Keys",
+            .toggleFunctionKeys, "Show Function Keys",
             #selector(AppActions.toggleFunctionKeys(_:)))
         add(.switchPanel, "Switch Panel", #selector(MainFrameViewController.switchPanel(_:)))
         add(
@@ -182,7 +182,6 @@ enum DefaultCommands {
         let findBar = BindingScope.item(.editor, part: "findBar")
 
         registry.bind(KeyChord("q", .command), to: .quit)
-        registry.bind(.function(10), to: .quit)  // as in Norton Commander (§4.7)
         registry.bind(KeyChord("n", .command), to: .newWindow)
         registry.bind(KeyChord("o", .command), to: .openFile)
         // ⌘L is Finder's "Make Alias"; the conflict is deferred to M10 (§9).

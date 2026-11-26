@@ -64,7 +64,7 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D48 | **The sidebar** (M5) | Favorites as paths in user defaults (access from folder grants, D42) and Locations: Home, the mounted volumes (kept current by NSWorkspace's notifications) and the Trash, greyed out unless the app can list `~/.Trash` (Full Disk Access), checked again whenever the app becomes active; ejectable volumes get an eject button, which the sandbox allows. ⌃⌘S toggles it; edits show in every window. See docs/plans/M5.md, D-d. |
 | D49 | **Path completion** (M5) | Tab in the path field completes as a shell does (§4.7). Names are read and matched off the main actor and cached while the field is open; a second Tab lists the matches in AppKit's suggestions menu (`NSTextSuggestionsDelegate`), not `NSTextView.complete(_:)`, whose list can't take the field's font or line up with its text. See docs/plans/M5.md, D-e, and §4.7. |
 | D50 | **Several rows selected** (M6) | The file list selects as macOS does (⇧, ⌘, ⌘A); ".." never joins other rows. The selection is `ListingSelection`, rows of the listing they were made in, found again by name off the main actor when the rows change (D39). See docs/plans/M6.md, D-a. |
-| D51 | **The function-key bar** (M6) | F1–F10 under the panels, labelled from the command registry for what has focus and validated like the menu; View › Hide Function Keys for every window. See docs/plans/M6.md, D-b. |
+| D51 | **The function-key bar** (M6) | Under the panels, the F-keys that run something for what has focus, labelled from the command registry and validated like the menu. Drawn borderless (key name, then title) so it reads as a toolbar, not a row of buttons; hidden until View › Show Function Keys, for every window. Quit is ⌘Q only. See docs/plans/M6.md, D-b. |
 | D52 | **File operations through a seam** (M6) | Copy (`copyfile` with clones, metadata, no symlink following), move (a rename on one volume; elsewhere a copy, then each source removed once its copy is whole), trash, permanent delete, rename and new folder, all through `FileOperationSystem` so tests fail any step. Name conflicts ask Replace (the old item to the Trash), Skip, Keep Both, Merge for folders, with Apply to All per kind. See docs/plans/M6.md, D-c, D-d. |
 | D53 | **One app-wide queue, progress in the window** (M6) | Copies and moves run one at a time, trash, delete, rename and new folder at once; each holds its folders' grants until it ends. Progress reaches the main actor at most every 100 ms and shows in a strip under the panels of the window that started it. See docs/plans/M6.md, D-e. |
 | D54 | **Undo and redo of file operations** (M6) | One app-wide history, as Finder's: each finished operation's undo is worked out from its result (copies trashed, items put back to their exact place), redo runs the request again, and a permanent delete is a barrier. Not kept across launches. See docs/plans/M6.md, D-g. |
@@ -577,8 +577,9 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
 - **Norton Commander-style keys + bottom function bar:**
   F3 View (quick view, §4.8), F4 Edit (editor tab; hex only until M9a, then mode by
   file type per §4.10), F5 Copy to other panel, F6 Move/Rename, F7 New folder, F8
-  Delete (to Trash; ⇧F8 permanent, with confirmation), F2 Rename, F10/⌘Q quit. Bar
-  is clickable and can be hidden.
+  Delete (to Trash; ⇧F8 permanent, with confirmation), F2 Rename. Quit stays ⌘Q
+  alone: F10 Quit was dropped after M6 as against the Mac's grain. The bar is
+  clickable and off by default (D51).
   - Caveat: by default macOS maps F-keys to media/system functions (brightness,
     Mission Control…), so users need fn+F-key or the system setting "Use F1, F2, etc.
     keys as standard function keys". Every F-key action also gets a ⌘ shortcut and a
@@ -993,8 +994,10 @@ scope only) and `panel.moveTab` (Window › Move Tab to Other Panel, no default 
 Dropping a file on a window opens a hex tab in that window; dropping a folder opens a
 browser tab there and saves its grant.
 M6 added the file commands in the browser's scope, each with an F-key and a ⌘ shortcut
-(F2 ⌘R, F5 ⇧⌘C, F6 ⇧⌘M, F7 ⇧⌘N, F8 ⌘⌫, ⇧F8 ⌥⌘⌫) and a File menu item, F10 for Quit,
-and the function-key bar, whose labels are those commands' titles (D51).
+(F2 ⌘R, F5 ⇧⌘C, F6 ⇧⌘M, F7 ⇧⌘N, F8 ⌘⌫, ⇧F8 ⌥⌘⌫) and a File menu item,
+and the function-key bar, whose labels are those commands' titles (D51). After M6 the
+bar was restyled borderless, left off keys with no command, hidden by default, and F10
+no longer quits.
 
 ### 4.12 App icon (D24)
 

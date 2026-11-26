@@ -60,12 +60,13 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
 
     public let functionKeyBar: FunctionKeyBar?
 
-    /// Whether the function-key bar shows; the app keeps the choice for every window.
-    public var isFunctionKeyBarShown = true {
+    /// Whether the function-key bar shows; it starts hidden (D51), and the app keeps the
+    /// choice for every window.
+    public var isFunctionKeyBarShown = false {
         didSet { showFunctionKeyBar() }
     }
     private var functionKeyBarHeight: NSLayoutConstraint?
-    private static let functionKeyBarShownHeight: CGFloat = 22
+    private static let functionKeyBarShownHeight: CGFloat = 24
 
     private func showFunctionKeyBar() {
         guard let functionKeyBar else { return }

@@ -39,10 +39,39 @@ import Testing
         bar.update(for: window)
         #expect(bar.title(ofKey: 3) == "View")
         #expect(bar.title(ofKey: 10) == "Quit")
-        #expect(bar.title(ofKey: 5) == "" && !bar.isEnabled(key: 5))
         _ = window.makeFirstResponder(editor)
         bar.update(for: window)
         #expect(bar.title(ofKey: 3) == "Find Next")
+    }
+
+    /// Only keys that run something from the focus take room on the bar.
+    @Test func aKeyWithNoCommandIsLeftOff() {
+        let browser = KeyTarget(scopes: [browserScope])
+        let editor = KeyTarget(scopes: [editorScope])
+        let window = makeWindow([browser, editor])
+        let bar = FunctionKeyBar(dispatcher: CommandDispatcher(registry: registry))
+        _ = window.makeFirstResponder(browser)
+        bar.update(for: window)
+        #expect(bar.title(ofKey: 5) == "" && !bar.isShown(key: 5))
+        #expect(bar.isShown(key: 3) && bar.isShown(key: 10))
+        registry.unbind(.function(3), in: editorScope)
+        _ = window.makeFirstResponder(editor)
+        bar.update(for: window)
+        #expect(!bar.isShown(key: 3))
+    }
+
+    /// A key the focus can't use now stays on the bar, dimmed, so the bar doesn't
+    /// jump as the selection changes.
+    @Test func aDisabledKeyStaysOnTheBarDimmed() {
+        let browser = KeyTarget(scopes: [browserScope])
+        browser.disabled = [#selector(KeyTarget.view(_:))]
+        let window = makeWindow([browser])
+        let bar = FunctionKeyBar(dispatcher: CommandDispatcher(registry: registry))
+        _ = window.makeFirstResponder(browser)
+        bar.update(for: window)
+        #expect(bar.isShown(key: 3) && !bar.isEnabled(key: 3))
+        #expect(bar.labelColor(ofKey: 3) == .tertiaryLabelColor)
+        #expect(bar.labelColor(ofKey: 10) == .labelColor)
     }
 
     @Test func aKeySendsItsCommandToTheFocusedResponder() {
@@ -68,6 +97,7 @@ import Testing
         #expect(browser.calls.isEmpty)
     }
 
+    /// The bar is off until View › Show Function Keys turns it on.
     @Test func theFrameShowsAndHidesTheBar() {
         let layout = MainFrameLayout(filler: .testBrowsers)
         layout.fillEmptyPanels()
@@ -75,10 +105,10 @@ import Testing
             layout: layout, closeCoordinator: CloseCoordinator(openItems: { [] }) { _ in .discard },
             dispatcher: CommandDispatcher(registry: registry))
         _ = frame.view
-        #expect(frame.isFunctionKeyBarShown)
-        #expect(frame.functionKeyBar?.isHidden == false)
-        frame.isFunctionKeyBarShown = false
+        #expect(!frame.isFunctionKeyBarShown)
         #expect(frame.functionKeyBar?.isHidden == true)
+        frame.isFunctionKeyBarShown = true
+        #expect(frame.functionKeyBar?.isHidden == false)
     }
 }
 

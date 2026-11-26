@@ -1,9 +1,11 @@
 import AppKit
 
-/// The function-key bar along the bottom of the main window (docs/plans/M6.md, D-b): F1
-/// to F10, each labelled with the command that key runs for what has focus. Labels come
-/// from the command registry; a key's button sends that command through the responder
-/// chain and is enabled by the same validation as the menu (PLAN.md §4.11).
+/// The function-key bar along the bottom of the main window (docs/plans/M6.md, D-b, as
+/// restyled in D51): the F-keys that run something for what has focus, each drawn as its
+/// key name and the command's title, with no button bezel, so it reads like a toolbar
+/// rather than a row of buttons. Labels come from the command registry; a key sends that
+/// command through the responder chain and is enabled by the same validation as the
+/// menu (PLAN.md §4.11).
 @MainActor
 public final class FunctionKeyBar: NSView {
     public static let keyCount = 10
@@ -17,24 +19,33 @@ public final class FunctionKeyBar: NSView {
         self.dispatcher = dispatcher
         buttons = (1...Self.keyCount).map { number in
             let button = NSButton(title: "", target: nil, action: nil)
-            button.bezelStyle = .accessoryBarAction
-            button.controlSize = .small
-            button.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            button.isBordered = false
+            button.setButtonType(.momentaryChange)
             button.tag = number
+            button.isHidden = true
             button.setAccessibilityIdentifier("functionKey\(number)")
             return button
         }
         super.init(frame: .zero)
+        let separator = NSBox()
+        separator.boxType = .separator
         let stack = NSStackView(views: buttons)
-        stack.distribution = .fillEqually
-        stack.spacing = 2
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 18
+        // A hidden key takes no room, so the keys shown sit together on the left.
+        stack.detachesHiddenViews = true
+        for view in [separator, stack] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            separator.topAnchor.constraint(equalTo: topAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 1),
         ])
         for button in buttons {
             button.target = self
@@ -64,7 +75,7 @@ public final class FunctionKeyBar: NSView {
         update(for: notification.object as? NSWindow)
     }
 
-    /// Labels and enables each key for what has focus in `window`.
+    /// Labels, enables and shows each key for what has focus in `window`.
     public func update(for window: NSWindow?) {
         let chain = FocusChain.scopes(in: window)
         for (index, button) in buttons.enumerated() {
@@ -74,16 +85,40 @@ public final class FunctionKeyBar: NSView {
                 CommandDispatcher.target(for: $0.action, in: window) != nil
             }
             commands[index] = handled
-            let title = handled.map { "F\(index + 1) \($0.title)" } ?? "F\(index + 1)"
-            if button.title != title { button.title = title }
+            if button.isHidden != (handled == nil) { button.isHidden = handled == nil }
+            guard let handled else { continue }
             let enabled =
-                handled.flatMap { command in
-                    CommandDispatcher.target(for: command.action, in: window).map {
-                        CommandDispatcher.isEnabled(command.action, target: $0)
-                    }
+                CommandDispatcher.target(for: handled.action, in: window).map {
+                    CommandDispatcher.isEnabled(handled.action, target: $0)
                 } ?? false
             if button.isEnabled != enabled { button.isEnabled = enabled }
+            let title = Self.title(key: index + 1, command: handled.title, isEnabled: enabled)
+            if button.attributedTitle != title { button.attributedTitle = title }
         }
+    }
+
+    /// "F5 Copy…": the key name in the secondary colour and semibold, then the title.
+    /// A borderless button doesn't dim its title when disabled, so the colours do.
+    private static func title(
+        key number: Int, command: String, isEnabled: Bool
+    )
+        -> NSAttributedString
+    {
+        let size = NSFont.smallSystemFontSize
+        let title = NSMutableAttributedString(
+            string: "F\(number) ",
+            attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold),
+                .foregroundColor: isEnabled ? NSColor.secondaryLabelColor : .tertiaryLabelColor,
+            ])
+        title.append(
+            NSAttributedString(
+                string: command,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: size),
+                    .foregroundColor: isEnabled ? NSColor.labelColor : .tertiaryLabelColor,
+                ]))
+        return title
     }
 
     /// The label shown for F`number`: its command's title, or "" when it runs nothing
@@ -91,6 +126,16 @@ public final class FunctionKeyBar: NSView {
     func title(ofKey number: Int) -> String { commands[number - 1]?.title ?? "" }
 
     func isEnabled(key number: Int) -> Bool { buttons[number - 1].isEnabled }
+
+    func isShown(key number: Int) -> Bool { !buttons[number - 1].isHidden }
+
+    /// The colour of F`number`'s command title.
+    func labelColor(ofKey number: Int) -> NSColor? {
+        let title = buttons[number - 1].attributedTitle
+        guard title.length > 0 else { return nil }
+        return title.attribute(.foregroundColor, at: title.length - 1, effectiveRange: nil)
+            as? NSColor
+    }
 
     /// Clicks F`number`'s button.
     func press(key number: Int) { buttons[number - 1].performClick(nil) }

@@ -605,15 +605,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: Function keys
 
-    private static let functionKeyBarHiddenKey = "FunctionKeyBarHidden"
+    /// Off unless turned on (D51); the earlier "FunctionKeyBarHidden" key, from when the
+    /// bar started shown, is no longer read.
+    private static let functionKeyBarShownKey = "FunctionKeyBarShown"
 
     private var isFunctionKeyBarShown: Bool {
-        !preferences.bool(forKey: Self.functionKeyBarHiddenKey)
+        preferences.bool(forKey: Self.functionKeyBarShownKey)
     }
 
-    /// View › Hide/Show Function Keys, for every window (docs/plans/M6.md, D-b).
+    /// View › Show/Hide Function Keys, for every window (D51).
     @objc func toggleFunctionKeys(_ sender: Any?) {
-        preferences.set(isFunctionKeyBarShown, forKey: Self.functionKeyBarHiddenKey)
+        preferences.set(!isFunctionKeyBarShown, forKey: Self.functionKeyBarShownKey)
         for controller in windowControllers {
             controller.frameController.isFunctionKeyBarShown = isFunctionKeyBarShown
         }
