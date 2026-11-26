@@ -30,13 +30,14 @@ extension SmokeTest {
         await right.listed()
         let queue = app.fileOperations.queue
         let stalls = StallGate(smoke: self)
+        defer { stalls.close() }
 
         await stalls.check("copying 10,000 files, cancelled halfway", check) {
             let operation = queue.add(.copy([tree], into: destination), scopes: []) { _, _ in
                 ConflictAnswer(.stop)
             }
-            for _ in 0..<1_000 where operation.result == nil && operation.progress.itemsDone < 5_000
-            {
+            for _ in 0..<1_000 {
+                if operation.result != nil || operation.progress.itemsDone > 0 { break }
                 await settle(milliseconds: 10)
             }
             operation.cancel()

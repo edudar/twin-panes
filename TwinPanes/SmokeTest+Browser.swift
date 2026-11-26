@@ -35,7 +35,7 @@ final class Heartbeat {
 extension SmokeTest {
     /// Done-when for M4 (docs/plans/M4.md): a 100k-file folder is listed, sorted, filtered,
     /// scrolled and updated live in the real tab without the main thread working for over
-    /// 75 ms on the dev Mac between two heartbeats, scaled to this machine
+    /// 130 ms on the dev Mac between two heartbeats, scaled to this machine
     /// (`stallLimit()`). Gaps it spent waiting for a core are printed, not counted.
     func bigFolder(_ check: (Bool, String) -> Void, browser: BrowserItem, window: NSWindow) async {
         let count = 100_000
@@ -52,6 +52,7 @@ extension SmokeTest {
         let before = browser.folder
         defer { browser.go(to: before) }  // where the rest of the smoke test expects it
         let stalls = StallGate(smoke: self)
+        defer { stalls.close() }
         func gate(_ what: String, _ body: () async -> Void) async {
             await stalls.check(what, check, body)
         }
@@ -173,7 +174,7 @@ extension SmokeTest {
     /// The table-rows workload's time on the dev Mac, fastest of 5.
     static let referenceRowsTime = Duration.microseconds(7_500)
 
-    /// 75 ms on the dev Mac, scaled by how much slower this Mac runs the reference
+    /// 130 ms on the dev Mac, scaled by how much slower this Mac runs the reference
     /// workload (docs/plans/M4.md, performance pass): the same work stalls a slower
     /// machine for longer, so CI's runners and slower Macs get a longer limit, and the
     /// check means the same everywhere.

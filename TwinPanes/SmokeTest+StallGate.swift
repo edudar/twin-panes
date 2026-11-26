@@ -20,14 +20,11 @@ final class StallGate {
     init(smoke: SmokeTest) {
         self.smoke = smoke
         referenceWindow.isReleasedWhenClosed = false
-        StepTiming.recorder = recorder
     }
 
-    deinit {
-        MainActor.assumeIsolated {
-            StepTiming.recorder = nil
-            referenceWindow.close()
-        }
+    func close() {
+        StepTiming.recorder = nil
+        referenceWindow.close()
     }
 
     func check(
@@ -41,6 +38,8 @@ final class StallGate {
         let limit = SmokeTest.milliseconds(stall.limit)
         let limitText = String(format: "%.0f", limit)
         recorder.reset()
+        StepTiming.recorder = recorder
+        defer { StepTiming.recorder = nil }
         heart.start()
         await body()
         let meter = heart.stop()

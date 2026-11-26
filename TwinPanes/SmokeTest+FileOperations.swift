@@ -25,9 +25,15 @@ extension SmokeTest {
         do {
             try fm.createDirectory(
                 at: source.appendingPathComponent("docs"), withIntermediateDirectories: true)
-            try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+            try fm.createDirectory(
+                at: source.appendingPathComponent("merge"), withIntermediateDirectories: true)
+            try fm.createDirectory(
+                at: destination.appendingPathComponent("merge"), withIntermediateDirectories: true)
             try Data("alpha".utf8).write(to: source.appendingPathComponent("a.txt"))
+            try Data("beta".utf8).write(to: source.appendingPathComponent("b.txt"))
             try Data("x".utf8).write(to: source.appendingPathComponent("docs/x.txt"))
+            try Data("y".utf8).write(to: source.appendingPathComponent("merge/y.txt"))
+            try Data("x".utf8).write(to: destination.appendingPathComponent("merge/x.txt"))
         } catch {
             return check(false, "make the file operations' folders: \(error)")
         }
@@ -45,6 +51,7 @@ extension SmokeTest {
         await right.listed()
         await runFileOperations(
             check, left: left, source: source, destination: destination, window: window, base: base)
+        await finishAndCleanTrash(on: window)
         // The checks after these expect the window as it was, and the progress strip empty
         // again (finished rows linger a few seconds).
         left.go(to: leftFolder)
@@ -94,10 +101,11 @@ extension SmokeTest {
         // Apply to All covers one kind: the file and the folder each ask once.
         var asked = 0
         while asked < 2, await sheetTitled("already exists", on: window) {
+            let sheet = window.attachedSheet
             clickCheckbox("Apply to All", inSheetOf: window)
             clickButton("Keep Both", inSheetOf: window)
             asked += 1
-            await settle(milliseconds: 50)
+            await waitForSheetChange(from: sheet, on: window)
         }
         check(asked == 2, "taken names bring up the conflict sheet, once per kind: \(asked)")
         await operationsFinished(count: base + 2)
@@ -110,16 +118,46 @@ extension SmokeTest {
         _ = dispatch(.function(6), in: window)
         confirm("Move", inSheetOf: window)
         if await sheetTitled("already exists", on: window) {
+            let sheet = window.attachedSheet
             clickButton("Replace", inSheetOf: window)
+            await waitForSheetChange(from: sheet, on: window)
         }
         await operationsFinished(count: base + 3)
         check(
             !exists(source, "a.txt") && exists(destination, "a.txt"),
             "F6 with Replace moves the file over the old one")
 
-        await renameAndNewFolder(check, left: left, source: source, window: window, base: base)
+        // F5 with Merge: copying a folder over an existing folder keeps existing files too.
+        select(["merge"])
+        _ = dispatch(.function(5), in: window)
+        confirm("Copy", inSheetOf: window)
+        if await sheetTitled("already exists", on: window) {
+            let sheet = window.attachedSheet
+            clickButton("Merge", inSheetOf: window)
+            await waitForSheetChange(from: sheet, on: window)
+        }
+        await operationsFinished(count: base + 4)
+        check(
+            exists(destination, "merge/x.txt") && exists(destination, "merge/y.txt"),
+            "Merge keeps existing files and copies new ones")
+
+        // F5 copy followed by ⌘Z moves the copied item to the Trash.
+        select(["b.txt"])
+        _ = dispatch(.function(5), in: window)
+        confirm("Copy", inSheetOf: window)
+        guard await sheetClosed(on: window) else {
+            return check(false, "Return confirms F5's sheet for copy-undo")
+        }
+        await operationsFinished(count: base + 5)
+        check(exists(destination, "b.txt"), "F5 copies b.txt to the other panel")
+        await undo(
+            check, expectingTitle: "Undo Copy of “b.txt”", operationCount: base + 6, in: window)
+        check(!exists(destination, "b.txt"), "⌘Z after a copy moves the copied item to the Trash")
+
+        await renameAndNewFolder(
+            check, left: left, source: source, window: window, base: base + 6)
         await trashAndDelete(
-            check, left: left, source: source, window: window, base: base, select: select)
+            check, left: left, source: source, window: window, base: base + 8, select: select)
     }
 
     /// F2 renames "docs"; F7 makes a folder, which ends up selected.
@@ -132,15 +170,23 @@ extension SmokeTest {
         _ = dispatch(.function(2), in: window)
         sheetField(of: window)?.stringValue = "renamed"
         confirm("Rename", inSheetOf: window)
-        await operationsFinished(count: base + 4)
+        await operationsFinished(count: base + 1)
+        for _ in 0..<100 {
+            if left.selectedName == "renamed" { break }
+            await settle(milliseconds: 20)
+        }
         check(
-            fm.fileExists(atPath: source.appendingPathComponent("renamed/x.txt").path),
-            "F2 renames")
+            fm.fileExists(atPath: source.appendingPathComponent("renamed/x.txt").path)
+                && left.selectedName == "renamed",
+            "F2 renames and selects the new name (selected: \(left.selectedName ?? "nil"))")
         _ = dispatch(.function(7), in: window)
         sheetField(of: window)?.stringValue = "made"
         confirm("Create", inSheetOf: window)
-        await operationsFinished(count: base + 5)
-        for _ in 0..<100 where left.selectedName != "made" { await settle(milliseconds: 20) }
+        await operationsFinished(count: base + 2)
+        for _ in 0..<100 {
+            if left.selectedName == "made" { break }
+            await settle(milliseconds: 20)
+        }
         check(
             fm.fileExists(atPath: source.appendingPathComponent("made").path)
                 && left.selectedName == "made",
@@ -156,26 +202,17 @@ extension SmokeTest {
         let fm = FileManager.default
         select(["made"])
         _ = dispatch(.function(8), in: window)
-        await operationsFinished(count: base + 6)
+        await operationsFinished(count: base + 1)
         check(!fm.fileExists(atPath: made.path), "F8 moves the folder to the Trash")
-        // Edit › Undo as the menu reaches it: the first responder's chain.
-        let undoAction = Selector(("undo:"))
-        let undo = NSMenuItem(title: "Undo", action: undoAction, keyEquivalent: "")
-        let handler = CommandDispatcher.target(for: undoAction, in: window)
-        let canUndo = (handler as? NSMenuItemValidation)?.validateMenuItem(undo) ?? false
-        check(canUndo && undo.title == "Undo Move to Trash", "Edit › Undo reads \(undo.title)")
-        NSApp.sendAction(undoAction, to: handler, from: nil)
-        for _ in 0..<200 where app.fileOperations.history.nextRedo == nil {
-            await settle(milliseconds: 20)
-        }
-        await operationsFinished(count: base + 7)
+        await undo(
+            check, expectingTitle: "Undo Move to Trash", operationCount: base + 2, in: window)
         check(fm.fileExists(atPath: made.path), "⌘Z puts it back from the Trash")
 
         select(["renamed"])
         check(dispatch(KeyChord.function(8, .shift), in: window), "⇧F8 dispatched")
         let confirm = window.attachedSheet
         pressKey("d", modifiers: .command, inSheetOf: window)
-        await operationsFinished(count: base + 8)
+        await operationsFinished(count: base + 3)
         check(
             confirm != nil && !fm.fileExists(atPath: source.appendingPathComponent("renamed").path),
             "⇧F8 deletes after its confirmation")
@@ -279,9 +316,47 @@ extension SmokeTest {
         return true
     }
 
+    /// Waits until `sheet` is no longer `window.attachedSheet` (dismissed or replaced).
+    private func waitForSheetChange(from sheet: NSWindow?, on window: NSWindow) async {
+        guard let sheet else { return }
+        for _ in 0..<100 {
+            if window.attachedSheet !== sheet { break }
+            await settle(milliseconds: 20)
+        }
+    }
+
+    /// Triggers Edit › Undo through the responder chain and waits for the undo operation.
+    private func undo(
+        _ check: (Bool, String) -> Void, expectingTitle title: String, operationCount: Int,
+        in window: NSWindow
+    ) async {
+        let undoAction = Selector(("undo:"))
+        let item = NSMenuItem(title: "Undo", action: undoAction, keyEquivalent: "")
+        let handler = CommandDispatcher.target(for: undoAction, in: window)
+        let canUndo = (handler as? NSMenuItemValidation)?.validateMenuItem(item) ?? false
+        check(canUndo && item.title == title, "Edit › Undo reads \(item.title)")
+        guard canUndo else { return }
+        NSApp.sendAction(undoAction, to: handler, from: nil)
+        for _ in 0..<200 {
+            if app.fileOperations.history.nextRedo != nil { break }
+            await settle(milliseconds: 20)
+        }
+        await operationsFinished(count: operationCount)
+    }
+
     /// Closes a sheet a failed check left open, so the checks after it aren't blocked.
     private func closeLeftoverSheet(on window: NSWindow) {
         if let sheet = window.attachedSheet { window.endSheet(sheet) }
+    }
+
+    /// Cancels any still-running or waiting operations and awaits their finish before
+    /// cleaning the Trash, so failed or early-return paths leave nothing in-flight.
+    private func finishAndCleanTrash(on window: NSWindow) async {
+        closeLeftoverSheet(on: window)
+        let pending = app.fileOperations.queue.operations.filter { $0.result == nil }
+        for operation in pending { operation.cancel() }
+        for operation in pending { _ = await operation.finished() }
+        removeWhatWentToTheTrash()
     }
 
     /// The smoke test never leaves anything in the user's Trash: everything its
