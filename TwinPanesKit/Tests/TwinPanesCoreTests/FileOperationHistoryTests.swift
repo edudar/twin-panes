@@ -39,29 +39,41 @@ import Testing
         return result
     }
 
-    /// Runs `request` to the end; conflicts are answered with Keep Both.
-    func run(_ request: OperationRequest) -> OperationResult {
+    /// Runs `request` to the end; conflicts use `resolve` (Keep Both by default).
+    func run(
+        _ request: OperationRequest,
+        resolve: (Conflict) -> ConflictAnswer = { _ in ConflictAnswer(.keepBoth) }
+    ) -> OperationResult {
         FileOperationQueue.run(
             request, fileSystem: system, control: OperationControl(),
-            resolve: { _ in ConflictAnswer(.keepBoth) }, progress: { _ in })
+            resolve: resolve, progress: { _ in })
     }
 
-    func runAndRecord(_ request: OperationRequest, in history: FileOperationHistory) {
-        if let change = FileChange(request: request, result: run(request)) {
+    func runAndRecord(
+        _ request: OperationRequest, in history: FileOperationHistory,
+        resolve: (Conflict) -> ConflictAnswer = { _ in ConflictAnswer(.keepBoth) }
+    ) {
+        if let change = FileChange(request: request, result: run(request, resolve: resolve)) {
             history.record(change)
         }
     }
 
-    func undo(_ history: FileOperationHistory) {
+    func undo(
+        _ history: FileOperationHistory,
+        resolve: (Conflict) -> ConflictAnswer = { _ in ConflictAnswer(.keepBoth) }
+    ) {
         guard let change = history.takeUndo() else { return }
-        for request in change.undoRequests ?? [] { _ = run(request) }
+        for request in change.undoRequests ?? [] { _ = run(request, resolve: resolve) }
         history.didUndo(change)
     }
 
-    func redo(_ history: FileOperationHistory) {
+    func redo(
+        _ history: FileOperationHistory,
+        resolve: (Conflict) -> ConflictAnswer = { _ in ConflictAnswer(.keepBoth) }
+    ) {
         guard let change = history.takeRedo() else { return }
         let request = change.request
-        if let again = FileChange(request: request, result: run(request)) {
+        if let again = FileChange(request: request, result: run(request, resolve: resolve)) {
             history.didRedo(again)
         }
     }
@@ -129,5 +141,102 @@ import Testing
         #expect(snapshot() == initial, "seed \(seed)")
         while history.nextRedo != nil { redo(history) }
         #expect(snapshot() == done, "seed \(seed)")
+    }
+
+    @Test func emptyOrZeroRemovalDeletesDoNotBlockUndo() throws {
+        defer { cleanUp() }
+        let history = FileOperationHistory()
+        runAndRecord(.makeFolder(named: "x", in: tree), in: history)
+        #expect(FileChange(request: .delete([]), result: .removed(RemoveOutcome())) == nil)
+
+        let cancelled = OperationControl()
+        cancelled.cancel()
+        let cancelledResult = OperationResult.removed(
+            TreeRemover(fileSystem: system).remove([url("a.txt")], control: cancelled) { _ in })
+        #expect(FileChange(request: .delete([url("a.txt")]), result: cancelledResult) == nil)
+
+        system.failRemove(endingWith: "a.txt", errno: EPERM)
+        runAndRecord(.delete([url("a.txt")]), in: history)
+        #expect(!history.isBlockedByDelete && history.nextUndo?.title == "New Folder")
+
+        // Partial folder delete removes one child before failing: must still act as a barrier.
+        try Data("keep".utf8).write(to: url("one/locked.txt"))
+        system.failRemove(endingWith: "one/locked.txt", errno: EPERM)
+        runAndRecord(.delete([url("one")]), in: history)
+        #expect(history.isBlockedByDelete && history.nextUndo == nil)
+    }
+
+    @Test func interleavedRecordInvalidatesStaleUndoAndRedoAndLimitPreservesBarriers() throws {
+        defer { cleanUp() }
+        let history = FileOperationHistory(limit: 3)
+        runAndRecord(.makeFolder(named: "f1", in: tree), in: history)
+        let first = try #require(history.takeUndoWithToken())
+        runAndRecord(.makeFolder(named: "f2", in: tree), in: history)
+        history.didUndo(first.change, epoch: first.epoch)
+        history.restoreUndo(first.change, epoch: first.epoch)
+        #expect(history.nextRedo == nil && history.nextUndo?.title == "New Folder")
+        let taken = try #require(history.takeUndo())
+        runAndRecord(.makeFolder(named: "f3", in: tree), in: history)
+        history.didUndo(taken)
+        #expect(history.nextRedo == nil)
+
+        runAndRecord(.makeFolder(named: "f4", in: tree), in: history)
+        let current = try #require(history.takeUndoWithToken())
+        history.restoreUndo(current.change, epoch: current.epoch)
+        for _ in 0..<2 {
+            let undid = try #require(history.takeUndoWithToken())
+            history.didUndo(undid.change, epoch: undid.epoch)
+        }
+        let redid = try #require(history.takeRedoWithToken())
+        history.didRedo(redid.change, epoch: redid.epoch)
+        #expect(history.nextRedo != nil && history.nextUndo != nil)
+
+        let bounded = FileOperationHistory(limit: 3)
+        for name in ["b1", "b2"] { runAndRecord(.makeFolder(named: name, in: tree), in: bounded) }
+        runAndRecord(.delete([url("a.txt")]), in: bounded)
+        for name in ["b3", "b4"] { runAndRecord(.makeFolder(named: name, in: tree), in: bounded) }
+        #expect(bounded.takeUndo() != nil && bounded.takeUndo() != nil)
+        #expect(bounded.isBlockedByDelete && bounded.takeUndo() == nil)
+    }
+
+    @Test func modelWithExdevReplaceMergeMultiItemAndDeleteBarrier() throws {
+        defer { cleanUp() }
+        try FileManager.default.createDirectory(
+            at: url("two/one"), withIntermediateDirectories: true)
+        for (path, body) in [
+            ("two/a.txt", "old-a"), ("two/one/existing.txt", "existing"),
+            ("xdev.txt", "xdev"), ("one/xdev.txt", "one-xdev"),
+        ] {
+            try Data(body.utf8).write(to: url(path))
+        }
+        system.failRename(endingWith: "xdev.txt", errno: EXDEV)
+        let resolve: (Conflict) -> ConflictAnswer = { conflict in
+            if conflict.choices.contains(.merge) { return ConflictAnswer(.merge) }
+            if conflict.choices.contains(.replace) { return ConflictAnswer(.replace) }
+            return ConflictAnswer(.keepBoth)
+        }
+
+        let history = FileOperationHistory()
+        let initial = snapshot()
+        runAndRecord(
+            .copy([url("a.txt"), url("b.txt")], into: url("two")), in: history, resolve: resolve)
+        runAndRecord(
+            .move([url("xdev.txt"), url("one")], into: url("two")), in: history, resolve: resolve)
+        let beforeBarrier = snapshot()
+        while history.nextUndo != nil { undo(history, resolve: resolve) }
+        #expect(snapshot() == initial)
+        while history.nextRedo != nil { redo(history, resolve: resolve) }
+        #expect(snapshot() == beforeBarrier)
+
+        runAndRecord(.delete([url("two/b.txt")]), in: history, resolve: resolve)
+        let afterBarrier = snapshot()
+        runAndRecord(
+            .trash([url("two/a.txt"), url("two/xdev.txt")]), in: history, resolve: resolve)
+        runAndRecord(.rename(url("a.txt"), to: "renamed.txt"), in: history, resolve: resolve)
+        let done = snapshot()
+        while history.nextUndo != nil { undo(history, resolve: resolve) }
+        #expect(history.isBlockedByDelete && snapshot() == afterBarrier)
+        while history.nextRedo != nil { redo(history, resolve: resolve) }
+        #expect(snapshot() == done)
     }
 }

@@ -41,6 +41,9 @@ public struct Trasher: Sendable {
 /// What a permanent delete did.
 public struct RemoveOutcome: Sendable {
     public var removed: [URL] = []
+    /// True when at least one item (file or subfolder) was deleted, even if a parent
+    /// folder stayed behind because another child failed.
+    public var removedAny = false
     public var failures: [FileSystemError] = []
     public var wasCancelled = false
 }
@@ -79,6 +82,7 @@ public struct TreeRemover: Sendable {
                 } else {
                     do {
                         try fileSystem.remove(entry.source)
+                        outcome.removedAny = true
                     } catch {
                         outcome.failures.append(error)
                         kept.append(entry.relativePath + "/")

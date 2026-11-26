@@ -45,6 +45,18 @@ import Testing
         #expect(session.isDirty && session.folder != nil && cloud.started == 1)
     }
 
+    @Test func repeatedEditAttemptsWhileDownloadIsInProgressStayBlocked() throws {
+        defer { cleanUp() }
+        let cloud = FakeCloud(dataless: true)
+        let session = try session(cloud)
+        #expect(throws: EditorSessionError.downloadingBeforeEdit) { try edit(session) }
+        #expect(throws: EditorSessionError.downloadingBeforeEdit) { try edit(session) }
+        #expect(cloud.started == 2 && !session.isDirty && session.folder == nil)
+        cloud.finish()
+        try edit(session)
+        #expect(session.isDirty && session.folder != nil)
+    }
+
     @Test func aDownloadThatCantStartIsTheEditsError() throws {
         defer { cleanUp() }
         let cloud = FakeCloud(dataless: true, failsToStart: true)

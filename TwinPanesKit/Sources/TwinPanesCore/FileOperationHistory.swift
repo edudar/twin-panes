@@ -13,9 +13,8 @@ public struct FileChange: Sendable {
             case .copied(let outcome): !outcome.created.isEmpty || !outcome.replaced.isEmpty
             case .moved(let outcome): !outcome.moved.isEmpty || !outcome.replaced.isEmpty
             case .trashed(let outcome): !outcome.trashed.isEmpty
-            // Even a delete that failed partway may have removed something: always a
-            // barrier.
-            case .removed: true
+            // Only a delete that actually removed at least one item blocks undo.
+            case .removed(let outcome): !outcome.removed.isEmpty || outcome.removedAny
             case .renamed(let outcome): (try? outcome.get()) != nil
             case .madeFolder(let outcome): (try? outcome.get()) != nil
             }
@@ -77,14 +76,20 @@ public struct FileChange: Sendable {
 /// A permanent delete is a barrier: undo stops there. Not kept across launches.
 @MainActor
 public final class FileOperationHistory {
+    public let limit: Int
     private var undoable: [FileChange] = []
     private var redoable: [FileChange] = []
+    private var epoch: UInt64 = 0
+    private var lastTakenEpoch: UInt64?
 
-    public init() {}
+    /// Creates a history keeping at most `limit` undoable changes (newest kept).
+    public init(limit: Int = 100) { self.limit = max(1, limit) }
 
     /// Records a finished operation; anything to redo is forgotten.
     public func record(_ change: FileChange) {
-        undoable.append(change)
+        epoch &+= 1
+        lastTakenEpoch = nil
+        appendUndoable(change)
         redoable = []
     }
 
@@ -98,14 +103,64 @@ public final class FileOperationHistory {
 
     /// Takes the change to undo; once its undo requests have run, `didUndo` files it
     /// for redo.
-    public func takeUndo() -> FileChange? {
+    public func takeUndo() -> FileChange? { takeUndoWithToken()?.change }
+
+    /// Takes the change to undo along with the current history epoch.
+    public func takeUndoWithToken() -> (change: FileChange, epoch: UInt64)? {
         guard nextUndo != nil else { return nil }
-        return undoable.removeLast()
+        lastTakenEpoch = epoch
+        return (undoable.removeLast(), epoch)
     }
 
-    public func didUndo(_ change: FileChange) { redoable.append(change) }
+    public func didUndo(_ change: FileChange) {
+        guard let epoch = lastTakenEpoch else { return }
+        didUndo(change, epoch: epoch)
+    }
+
+    /// Files `change` for redo only if no new operation was recorded since `epoch`.
+    public func didUndo(_ change: FileChange, epoch: UInt64) {
+        guard self.epoch == epoch else { return }
+        redoable.append(change)
+    }
+
+    /// Returns an un-applied `change` to the undo stack if the epoch still matches.
+    public func restoreUndo(_ change: FileChange, epoch: UInt64) {
+        guard self.epoch == epoch else { return }
+        appendUndoable(change)
+    }
+
     /// Takes the change to redo; its request runs again and `didRedo` records the new
     /// change, keeping what's left to redo.
-    public func takeRedo() -> FileChange? { redoable.popLast() }
-    public func didRedo(_ change: FileChange) { undoable.append(change) }
+    public func takeRedo() -> FileChange? { takeRedoWithToken()?.change }
+
+    /// Takes the change to redo along with the current history epoch.
+    public func takeRedoWithToken() -> (change: FileChange, epoch: UInt64)? {
+        guard let change = redoable.popLast() else { return nil }
+        lastTakenEpoch = epoch
+        return (change, epoch)
+    }
+
+    public func didRedo(_ change: FileChange) {
+        guard let epoch = lastTakenEpoch else {
+            record(change)
+            return
+        }
+        didRedo(change, epoch: epoch)
+    }
+
+    /// Records a redone `change`, preserving remaining redo entries if `epoch` still matches.
+    public func didRedo(_ change: FileChange, epoch: UInt64) {
+        if self.epoch == epoch {
+            appendUndoable(change)
+        } else {
+            record(change)
+        }
+    }
+
+    private func appendUndoable(_ change: FileChange) {
+        undoable.append(change)
+        if undoable.count > limit {
+            undoable.removeFirst(undoable.count - limit)
+        }
+    }
 }
