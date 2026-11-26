@@ -578,7 +578,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             return !isEditingPath && !item.needsAccess
                 && (selectedEntry != nil || isParentRowSelected)
         case #selector(browserView(_:)), #selector(browserEdit(_:)):
-            return selectedEntry != nil
+            return !isEditingPath && !item.needsAccess && selectedEntry != nil
         case #selector(browserParent(_:)):
             return !isEditingPath && item.folder.path != "/"
         case #selector(browserShowPackageContents(_:)):
