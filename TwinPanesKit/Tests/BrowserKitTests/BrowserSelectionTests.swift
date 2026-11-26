@@ -166,6 +166,44 @@ import WorkspaceKit
         #expect(item.selectedName == "b.bin")
     }
 
+    @Test func applyRowChangesPreservesWantedSelectionWhenSelectedRowIsRemoved() async throws {
+        defer { cleanUp() }
+        try FileManager.default.createDirectory(
+            at: folder.appendingPathComponent("docs"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: folder.appendingPathComponent("merge"), withIntermediateDirectories: true)
+        let item = await browser(at: folder)
+        defer { item.willClose() }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.contentView = item.viewController.view
+        window.layoutIfNeeded()
+        window.makeFirstResponder(item.controller.tableView)
+        try select(["docs"], in: item)
+        item.selectWhenListed("renamed")
+        let renamed = DirectoryEntry(
+            url: folder.appendingPathComponent("renamed"), name: "renamed", isDirectory: true,
+            isPackage: false, isSymbolicLink: false, isHidden: false, size: nil, modified: nil,
+            type: .folder)
+        let previous = item.listing
+        let withoutDocs = previous.removing(names: ["docs"])
+        item.replaceListing(with: withoutDocs)
+        let removeChanges = try #require(
+            withoutDocs.rowChanges(from: previous, touching: ["docs"], limit: 100))
+        #expect(item.controller.applyRowChanges(removeChanges))
+        #expect(item.controller.wantedSelection == "renamed")
+
+        let withRenamed = withoutDocs.merging([renamed])
+        item.replaceListing(with: withRenamed)
+        let insertChanges = try #require(
+            withRenamed.rowChanges(from: withoutDocs, touching: ["renamed"], limit: 100))
+        #expect(item.controller.applyRowChanges(insertChanges))
+        #expect(item.selectedName == "renamed")
+        #expect(selected(item) == ["renamed"])
+        #expect(item.controller.wantedSelection == nil)
+    }
+
     @Test func reloadWithUnchangedIndexesRefreshesSelectionListing() async throws {
         defer { cleanUp() }
         let item = await browser(at: folder)

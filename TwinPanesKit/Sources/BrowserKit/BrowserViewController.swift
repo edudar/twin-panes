@@ -274,10 +274,14 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         let priorSelection = selection
         let priorName = selectedName
         let priorTableSelected = tableView.selectedRowIndexes
+        // Removing a selected row fires tableViewSelectionDidChange synchronously; keep
+        // `wantedSelection` intact until lines below restore or fulfill it.
+        isRestoringSelection = true
         tableView.beginUpdates()
         tableView.removeRows(at: removed, withAnimation: [])
         tableView.insertRows(at: inserted, withAnimation: [])
         tableView.endUpdates()
+        isRestoringSelection = false
         tableView.reloadData(
             forRowIndexes: changed, columnIndexes: IndexSet(0..<tableView.numberOfColumns))
         restripe()
