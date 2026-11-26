@@ -1,5 +1,6 @@
 import AppKit
 import BrowserKit
+import EditorKit
 import TwinPanesCore
 import WorkspaceKit
 
@@ -330,7 +331,7 @@ extension SmokeTest {
         _ check: (Bool, String) -> Void, expectingTitle title: String, operationCount: Int,
         in window: NSWindow
     ) async {
-        let undoAction = Selector(("undo:"))
+        let undoAction = #selector(HexEditorActions.undo(_:))
         let item = NSMenuItem(title: "Undo", action: undoAction, keyEquivalent: "")
         let handler = CommandDispatcher.target(for: undoAction, in: window)
         let canUndo = (handler as? NSMenuItemValidation)?.validateMenuItem(item) ?? false

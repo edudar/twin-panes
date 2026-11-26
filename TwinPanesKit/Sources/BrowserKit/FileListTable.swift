@@ -338,7 +338,7 @@ final class IconCache {
         )
         loading[key] = (wanted, requestID)
         queue.async {
-            nonisolated(unsafe) let image = render(key)
+            let image = render(key)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     box.cache?.loaded(key, image, generation: wanted, requestID: requestID)

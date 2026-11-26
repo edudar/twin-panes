@@ -318,9 +318,10 @@ final class FileOperationCommands: FileCommandHandling {
         sheet.begin(on: window) { [weak self, weak browser, weak controller, weak window] typed in
             guard let self, let browser, let typed else { return }
             let again: (String) -> Void = { reason in
-                DispatchQueue.main.async {
-                    [weak self, weak browser, weak controller, weak window] in
-                    guard let self, let browser, let controller, let window, window.isVisible,
+                // self and browser are already held for this sheet's answer; one more
+                // main-queue turn adds nothing. The window and controller may close.
+                DispatchQueue.main.async { [weak controller, weak window] in
+                    guard let controller, let window, window.isVisible,
                         self.windows().contains(where: { $0 === controller })
                     else { return }
                     self.askDestination(
