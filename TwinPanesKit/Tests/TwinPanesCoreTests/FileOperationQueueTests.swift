@@ -287,4 +287,22 @@ import Testing
         gate.signal()
         _ = await running.finished()
     }
+
+    @Test func firstProgressTickIsDeliveredImmediately() async {
+        defer { cleanUp() }
+        let atChunk1 = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        system.reportChunks(2) { path, chunk in
+            guard path.hasSuffix("a.txt"), chunk == 1 else { return }
+            atChunk1.signal()
+            release.wait()
+        }
+        let queue = FileOperationQueue(fileSystem: system, progressInterval: .seconds(60))
+        let op = queue.add(.copy([src("a.txt")], into: destination), scopes: [], ask: Self.never)
+        await wait(atChunk1)
+        await withCheckedContinuation { c in DispatchQueue.main.async { c.resume() } }
+        #expect(op.progress.bytesDone > 0 && op.result == nil)
+        release.signal()
+        _ = await op.finished()
+    }
 }

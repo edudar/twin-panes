@@ -14,8 +14,8 @@ public final class OperationControl: @unchecked Sendable {
     public func resume() { locked { paused = false } }
     /// Also ends a pause.
     public func cancel() { locked { cancelled = true } }
-    public var isCancelled: Bool { locked { cancelled } }
-    public var isPaused: Bool { locked { paused && !cancelled } }
+    public var isCancelled: Bool { read { cancelled } }
+    public var isPaused: Bool { read { paused && !cancelled } }
 
     /// Blocks while paused; false once cancelled, true to go on.
     public func checkpoint() -> Bool {
@@ -23,6 +23,12 @@ public final class OperationControl: @unchecked Sendable {
         defer { condition.unlock() }
         while paused && !cancelled { condition.wait() }
         return !cancelled
+    }
+
+    private func read<T>(_ body: () -> T) -> T {
+        condition.lock()
+        defer { condition.unlock() }
+        return body()
     }
 
     /// Runs `body` under the lock and wakes a paused `checkpoint` to look again.

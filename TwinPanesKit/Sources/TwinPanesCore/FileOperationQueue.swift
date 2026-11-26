@@ -205,13 +205,15 @@ public final class FileOperationQueue {
     }
 }
 
-/// Hands an operation's progress to the main actor at most once per `interval`, the
-/// latest value each time, never one call per file (docs/plans/M6.md, D-e).
+/// Hands an operation's progress to the main actor at most once per `interval`, delivering
+/// the first tick immediately and the latest value thereafter (docs/plans/M6.md, D-e).
 private final class ProgressReporter: @unchecked Sendable {
-    // Unchecked: `latest` and `isScheduled` are only touched under `lock`.
+    // Unchecked: `latest`, `isScheduled`, and `lastDelivered` are only touched under `lock`.
     private let lock = NSLock()
     private var latest: OperationProgress?
     private var isScheduled = false
+    private var lastDelivered: ContinuousClock.Instant?
+    private let clock = ContinuousClock()
     private let interval: Duration
     private let deliver: @MainActor (OperationProgress) -> Void
 
@@ -223,12 +225,21 @@ private final class ProgressReporter: @unchecked Sendable {
     func report(_ progress: OperationProgress) {
         lock.lock()
         latest = progress
-        let schedule = !isScheduled
+        guard !isScheduled else {
+            lock.unlock()
+            return
+        }
         isScheduled = true
+        let now = clock.now
+        let delay = lastDelivered.flatMap { now - $0 < interval ? interval - (now - $0) : nil }
+        if delay == nil { lastDelivered = now }
         lock.unlock()
-        guard schedule else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + interval / .seconds(1)) {
-            self.deliverLatest()
+        if let delay {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay / .seconds(1)) {
+                self.deliverLatest()
+            }
+        } else {
+            DispatchQueue.main.async { self.deliverLatest() }
         }
     }
 
@@ -242,6 +253,7 @@ private final class ProgressReporter: @unchecked Sendable {
         let progress = latest
         latest = nil
         isScheduled = false
+        if progress != nil { lastDelivered = clock.now }
         lock.unlock()
         guard let progress else { return }
         MainActor.assumeIsolated { deliver(progress) }

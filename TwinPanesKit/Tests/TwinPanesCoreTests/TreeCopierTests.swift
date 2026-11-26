@@ -117,7 +117,7 @@ import Testing
     }
 
     /// A pause inside a file holds the copy there until it's resumed.
-    @Test func aPauseHoldsTheCopy() async {
+    @Test func aPauseHoldsTheCopy() async throws {
         defer { cleanUp() }
         let control = OperationControl()
         let paused = DispatchSemaphore(value: 0)
@@ -129,10 +129,13 @@ import Testing
         let copier = TreeCopier(fileSystem: system)
         let walk = OperationPlanner(fileSystem: system).walk(tree)
         let destination = destination
-        let task = Task.detached {
-            copier.copy(
+        let (stream, continuation) = AsyncStream.makeStream(of: CopyOutcome.self)
+        DispatchQueue.global().async {
+            let outcome = copier.copy(
                 [walk], into: destination, control: control, resolve: { _ in ConflictAnswer(.stop) }
             ) { _ in }
+            continuation.yield(outcome)
+            continuation.finish()
         }
         await withCheckedContinuation { continuation in
             DispatchQueue.global().async {
@@ -142,7 +145,8 @@ import Testing
         }
         #expect(control.isPaused && !exists("sub/c.bin"))
         control.resume()
-        let outcome = await task.value
+        var iterator = stream.makeAsyncIterator()
+        let outcome = try #require(await iterator.next())
         #expect(outcome.failures.isEmpty && exists("sub/c.bin"))
     }
 }
