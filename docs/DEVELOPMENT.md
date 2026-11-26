@@ -45,24 +45,27 @@ swift build --package-path TwinPanesKit --triple x86_64-apple-macosx15.0
 
 The smoke test drives the built app. It opens two windows, browses a real
 folder, and opens a 4 GiB sparse file to check open time, frame time and memory.
-It clicks, tabs and moves tabs between both panels, uses the sidebar and Tab completion in
-the path field with real key events, and starts the app again as a sandboxed child
-process to check that a window comes back after a relaunch and that edits come back
-after a crash (`--smoke-child`; on macOS 26 and later, since macOS 15 can't start a
-sandboxed child).
+It clicks, tabs and moves tabs between both panels, uses the sidebar and Tab
+completion in the path field with real key events, tests multi-selection and the
+function-key bar, runs file operations with real keys, sheets, conflicts and
+undo, tests a 10,000-file copy with cancel, and starts the app again as a
+sandboxed child process to check that a window comes back after a relaunch and
+that edits come back after a crash (`--smoke-child`; on macOS 26 and later, since
+macOS 15 can't start a sandboxed child).
 
 It also creates a 100,000-file folder and fails if listing, sorting, filtering,
-scrolling, live-updating or completing a name in it ever keeps the main thread busy
-for longer than its limit between two 5 ms heartbeats. It counts the main thread's
-CPU time in each gap, not the gap itself: on a shared CI machine the thread can wait
-for a core for longer than any stall the app causes. Each step prints its longest
-gap and its busiest one, and what ran during a busiest gap over the limit. The limit
-is 75 ms on the dev Mac (50 ms until M5; see PLAN.md §9, "From M5"), scaled to the
-machine: before each check the smoke test times two fixed workloads in main-thread
-CPU time, drawing and sorting names, and building a screenful of table rows. A Mac
-that runs either slower gets a proportionally longer limit, set by the slower of the
-two, up to 4 times (300 ms). It prints the times and the limit for each check. The
-run takes one to two and a half minutes:
+scrolling, live-updating, completing a name or permanently deleting a shown
+100,000-file folder ever keeps the main thread busy for longer than its limit
+between two 5 ms heartbeats. It counts the main thread's CPU time in each gap,
+not the gap itself: on a shared CI machine the thread can wait for a core for
+longer than any stall the app causes. Each step prints its longest gap and its
+busiest one, and what ran during a busiest gap over the limit. The limit is
+130 ms on the dev Mac (50 ms until M5; see PLAN.md §9), scaled to the machine:
+before each check the smoke test times two fixed workloads in main-thread CPU
+time, drawing and sorting names, and building a screenful of table rows. A Mac
+that runs either slower gets a proportionally longer limit, set by the slower of
+the two, up to 4 times (520 ms). It prints the times and the limit for each
+check. The run takes one to two and a half minutes:
 
 ```bash
 build/DerivedData/Build/Products/Debug/Twin\ Panes.app/Contents/MacOS/Twin\ Panes --smoke-test
