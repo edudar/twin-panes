@@ -86,6 +86,8 @@ import Testing
         let namer = ItemNamer(fileSystem: system)
         #expect(throws: NameRefusal.empty) { try namer.rename(url("a.txt"), to: "") }
         #expect(throws: NameRefusal.notAName) { try namer.rename(url("a.txt"), to: "x/y") }
+        #expect(throws: NameRefusal.notAName) { try namer.rename(url("a.txt"), to: "a\0b") }
+        #expect(throws: NameRefusal.notAName) { try namer.rename(url("a.txt"), to: ".") }
         #expect(throws: NameRefusal.notAName) { try namer.rename(url("a.txt"), to: "..") }
         #expect(throws: NameRefusal.tooLong) {
             try namer.rename(url("a.txt"), to: String(repeating: "é", count: 128))
@@ -93,7 +95,19 @@ import Testing
         #expect(throws: NameRefusal.taken(url("b.txt"))) {
             try namer.rename(url("a.txt"), to: "b.txt")
         }
+        #expect(throws: NameRefusal.taken(url("a.txt"))) {
+            try namer.rename(url("a.txt"), to: "a.txt")
+        }
         #expect(exists("a.txt") && exists("b.txt"))
+    }
+
+    @Test func caseOnlyRenameSucceedsOnCaseInsensitiveVolume() throws {
+        defer { cleanUp() }
+        let namer = ItemNamer(fileSystem: system)
+        let moved = try namer.rename(url("a.txt"), to: "A.txt")
+        #expect(moved.to.lastPathComponent == "A.txt")
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        #expect(names.contains("A.txt") && !names.contains("a.txt"))
     }
 
     @Test func aNewFolderIsMadeOnlyUnderAFreeName() throws {

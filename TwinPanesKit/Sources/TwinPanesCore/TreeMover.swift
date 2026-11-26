@@ -43,9 +43,7 @@ public struct TreeMover: Sendable {
             let target = destination.appendingPathComponent(source.lastPathComponent)
             state.currentItem = source.lastPathComponent
             // Already there: nothing to move, and nothing for undo to move back.
-            if source.deletingLastPathComponent().standardizedFileURL.path
-                == destination.standardizedFileURL.path
-            {
+            if BookmarkStore.pathsEqual(source.deletingLastPathComponent(), destination) {
                 state.itemsDone += 1
                 progress(state)
                 continue

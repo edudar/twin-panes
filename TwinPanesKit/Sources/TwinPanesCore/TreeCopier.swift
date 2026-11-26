@@ -100,9 +100,15 @@ public struct TreeCopier: Sendable {
         let isFolder = item.metadata.kind == .folder
         if let existing = try? fileSystem.metadata(of: target) {
             let conflict = Conflict(item: item, existing: target, existingMetadata: existing)
-            let answer = run.remembered[isFolder] ?? resolve(conflict)
-            if answer.applyToAll { run.remembered[isFolder] = answer }
-            // An answer remembered for all may not fit this conflict (Merge for a file).
+            let answer: ConflictAnswer
+            if let remembered = run.remembered[isFolder],
+                conflict.choices.contains(remembered.choice)
+            {
+                answer = remembered
+            } else {
+                answer = resolve(conflict)
+                if answer.applyToAll { run.remembered[isFolder] = answer }
+            }
             let choice = conflict.choices.contains(answer.choice) ? answer.choice : .skip
             switch choice {
             case .stop: return false
@@ -121,6 +127,10 @@ public struct TreeCopier: Sendable {
                 target = target.deletingLastPathComponent().appendingPathComponent(name)
                 run.rename(item, to: target)
             case .replace:
+                guard !conflict.isSameItem else {
+                    run.leaveOut(item)
+                    return true
+                }
                 do {
                     let trashed = try fileSystem.trash(target)
                     run.outcome.replaced.append(TrashedItem(original: target, trashed: trashed))

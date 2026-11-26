@@ -119,4 +119,34 @@ import Testing
         }
         #expect(error?.errno == ECANCELED && calls == 1)
     }
+
+    @Test func copyMetadataDoesNotFollowSymlinks() throws {
+        defer { cleanUp() }
+        let target = url("target")
+        try Data("keep".utf8).write(to: target)
+        let targetBefore = try FileManager.default.attributesOfItem(atPath: target.path)
+
+        let source = url("source")
+        try Data("src".utf8).write(to: source)
+        setXattr("com.example.tag", "blue", on: source)
+        try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: source.path)
+
+        let link = url("link")
+        try FileManager.default.createSymbolicLink(
+            atPath: link.path, withDestinationPath: target.path)
+        _ = try? system.copyMetadata(from: source, to: link)
+        let targetAfter = try FileManager.default.attributesOfItem(atPath: target.path)
+        #expect(
+            targetAfter[.modificationDate] as? Date
+                == targetBefore[.modificationDate] as? Date)
+        #expect(xattr("com.example.tag", of: target) == nil)
+    }
+
+    @Test func trashingMissingItemThrowsENOENT() {
+        defer { cleanUp() }
+        let error = #expect(throws: FileSystemError.self) {
+            _ = try system.trash(url("missing.txt"))
+        }
+        #expect(error?.errno == ENOENT)
+    }
 }

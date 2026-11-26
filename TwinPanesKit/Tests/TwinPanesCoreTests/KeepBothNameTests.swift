@@ -10,5 +10,9 @@ import Testing
         #expect(KeepBothName.next(for: "docs") { taken.contains($0) } == "docs 2")
         #expect(KeepBothName.next(for: "v 3") { taken.contains($0) } == "v 4")
         #expect(KeepBothName.next(for: ".profile") { _ in false } == ".profile 2")
+        #expect(KeepBothName.next(for: ".config.json") { _ in false } == ".config 2.json")
+        #expect(KeepBothName.next(for: "a -1.txt") { _ in false } == "a -1 2.txt")
+        #expect(
+            KeepBothName.next(for: "a \(Int.max).txt") { _ in false } == "a \(Int.max) 2.txt")
     }
 }

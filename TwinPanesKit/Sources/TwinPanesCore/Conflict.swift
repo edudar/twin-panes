@@ -21,7 +21,7 @@ public struct Conflict: Sendable {
 
     /// The item would land on itself: both panels show the same folder.
     public var isSameItem: Bool {
-        item.source.standardizedFileURL.path == existing.standardizedFileURL.path
+        BookmarkStore.sameEntry(item.source, existing)
     }
 
     /// The choices that make sense here, in the order the sheet shows them.
@@ -58,19 +58,28 @@ public enum KeepBothName {
     public static func next(for name: String, isTaken: (String) -> Bool) -> String {
         let ns = name as NSString
         // A leading dot is a hidden name, not an extension (".profile").
-        let isDotName = name.hasPrefix(".") && ns.deletingPathExtension.isEmpty
+        let isDotName = name.hasPrefix(".") && !name.dropFirst().contains(".")
         let ext = isDotName ? "" : ns.pathExtension
         var base = ext.isEmpty ? name : ns.deletingPathExtension
         var number = 2
-        if let space = base.lastIndex(of: " "), let counted = Int(base[base.index(after: space)...])
-        {
-            base = String(base[..<space])
-            number = counted + 1
+        if let space = base.lastIndex(of: " ") {
+            let suffix = base[base.index(after: space)...]
+            if !suffix.isEmpty, suffix.allSatisfy(\.isASCII), suffix.allSatisfy(\.isNumber),
+                let counted = Int(suffix), counted < Int.max
+            {
+                base = String(base[..<space])
+                number = counted + 1
+            }
         }
         while true {
             let candidate = "\(base) \(number)" + (ext.isEmpty ? "" : ".\(ext)")
             if !isTaken(candidate) { return candidate }
-            number += 1
+            if number == Int.max {
+                base = "\(base) \(number)"
+                number = 2
+            } else {
+                number += 1
+            }
         }
     }
 }

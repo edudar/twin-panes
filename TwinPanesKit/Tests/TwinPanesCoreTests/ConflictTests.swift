@@ -135,4 +135,69 @@ import Testing
         #expect(asked.first?.choices == [.keepBoth, .skip, .stop])
         #expect(read("src/a 2.txt") == "new")
     }
+
+    @Test func symlinkedParentAndCaseVariantsAreSameItemButSymlinkTargetIsNot() throws {
+        defer { cleanUp() }
+        let fm = FileManager.default
+        let symSource = root.appendingPathComponent("src-link", isDirectory: true)
+        try fm.createSymbolicLink(atPath: symSource.path, withDestinationPath: source.path)
+        let (_, asked) = copy(["a.txt"], into: symSource, answers: [ConflictAnswer(.keepBoth)])
+        #expect(asked.first?.isSameItem == true)
+        #expect(asked.first?.choices == [.keepBoth, .skip, .stop])
+        #expect(read("src/a 2.txt") == "new")
+
+        // A symlink pointing at dest/a.txt from another folder is not the same directory entry.
+        try fm.createSymbolicLink(
+            atPath: source.appendingPathComponent("alias.txt").path,
+            withDestinationPath: destination.appendingPathComponent("a.txt").path)
+        try fm.createSymbolicLink(
+            atPath: destination.appendingPathComponent("alias.txt").path,
+            withDestinationPath: source.appendingPathComponent("a.txt").path)
+        let (_, aliasAsked) = copy(["alias.txt"], answers: [ConflictAnswer(.skip)])
+        #expect(aliasAsked.first?.isSameItem == false)
+        #expect(aliasAsked.first?.choices == [.replace, .skip, .keepBoth, .stop])
+    }
+
+    @Test func replaceIsRefusedWhenCopyingOntoSameItem() {
+        defer { cleanUp() }
+        let (outcome, _) = copy(["a.txt"], into: source, answers: [ConflictAnswer(.replace)])
+        #expect(outcome.replaced.isEmpty)
+        #expect(read("src/a.txt") == "new")
+    }
+
+    @Test func rememberedMergeAsksWhenHittingFolderVsFileConflict() throws {
+        defer { cleanUp() }
+        try FileManager.default.createDirectory(
+            at: source.appendingPathComponent("fileAsFolder"), withIntermediateDirectories: true)
+        try write("inside", "src/fileAsFolder/inner.txt")
+        try write("not a folder", "dest/fileAsFolder")
+
+        let (outcome, asked) = copy(
+            ["docs", "fileAsFolder"],
+            answers: [
+                ConflictAnswer(.merge, applyToAll: true),
+                ConflictAnswer(.skip),
+                ConflictAnswer(.keepBoth),
+            ])
+        #expect(asked.map(\.item.relativePath) == ["docs", "docs/x.txt", "fileAsFolder"])
+        #expect(asked.last?.choices == [.replace, .skip, .keepBoth, .stop])
+        #expect(read("dest/fileAsFolder") == "not a folder")
+        #expect(read("dest/fileAsFolder 2/inner.txt") == "inside")
+        #expect(outcome.failures.isEmpty)
+    }
+
+    @Test func mismatchedFolderAndFileOfferReplaceNotMerge() throws {
+        defer { cleanUp() }
+        try write("not a folder", "dest/mix")
+        try FileManager.default.createDirectory(
+            at: source.appendingPathComponent("mix"), withIntermediateDirectories: true)
+        let (_, folderVsFile) = copy(["mix"], answers: [ConflictAnswer(.skip)])
+        #expect(folderVsFile.first?.choices == [.replace, .skip, .keepBoth, .stop])
+
+        try FileManager.default.createDirectory(
+            at: destination.appendingPathComponent("docsFile"), withIntermediateDirectories: true)
+        try write("file", "src/docsFile")
+        let (_, fileVsFolder) = copy(["docsFile"], answers: [ConflictAnswer(.skip)])
+        #expect(fileVsFolder.first?.choices == [.replace, .skip, .keepBoth, .stop])
+    }
 }

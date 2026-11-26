@@ -20,7 +20,12 @@ public struct ItemNamer: Sendable {
 
     /// Renames `item` within its folder; returns where it is now.
     public func rename(_ item: URL, to name: String) throws(NameRefusal) -> MovedItem {
-        let target = try place(name, in: item.deletingLastPathComponent())
+        let target = try validate(name, in: item.deletingLastPathComponent())
+        if (try? fileSystem.metadata(of: target)) != nil {
+            let isCaseOnly =
+                BookmarkStore.sameEntry(item, target) && name != item.lastPathComponent
+            if !isCaseOnly { throw .taken(target) }
+        }
         do {
             try fileSystem.rename(item, to: target)
         } catch {
@@ -31,7 +36,8 @@ public struct ItemNamer: Sendable {
 
     /// Makes an empty folder called `name` in `folder`.
     public func makeFolder(named name: String, in folder: URL) throws(NameRefusal) -> URL {
-        let target = try place(name, in: folder)
+        let target = try validate(name, in: folder)
+        if (try? fileSystem.metadata(of: target)) != nil { throw .taken(target) }
         do {
             try fileSystem.makeFolder(at: target)
         } catch {
@@ -40,13 +46,13 @@ public struct ItemNamer: Sendable {
         return target
     }
 
-    /// Where an item called `name` goes in `folder`, if that's a usable, free name.
-    private func place(_ name: String, in folder: URL) throws(NameRefusal) -> URL {
+    /// Where an item called `name` goes in `folder`, if that's a usable name.
+    private func validate(_ name: String, in folder: URL) throws(NameRefusal) -> URL {
         guard !name.isEmpty else { throw .empty }
-        guard !name.contains("/"), name != ".", name != ".." else { throw .notAName }
+        guard !name.contains("/"), !name.contains("\0"), name != ".", name != ".." else {
+            throw .notAName
+        }
         guard name.utf8.count <= Int(NAME_MAX) else { throw .tooLong }
-        let target = folder.appendingPathComponent(name)
-        if (try? fileSystem.metadata(of: target)) != nil { throw .taken(target) }
-        return target
+        return folder.appendingPathComponent(name)
     }
 }

@@ -180,4 +180,24 @@ public final class BookmarkStore {
         }
         return a == b
     }
+
+    /// Whether two file URLs name the same directory entry: same canonical parent
+    /// folder and canonically equal leaf name (respecting volume case sensitivity),
+    /// without resolving a symlink at the leaf itself.
+    static func sameEntry(_ lhs: URL, _ rhs: URL) -> Bool {
+        let a = lhs.standardizedFileURL
+        let b = rhs.standardizedFileURL
+        let aParent = a.deletingLastPathComponent()
+        let bParent = b.deletingLastPathComponent()
+        if aParent.path == a.path || bParent.path == b.path {
+            return pathsEqual(a, b)
+        }
+        guard pathsEqual(aParent, bParent) else { return false }
+        let aLeaf = a.lastPathComponent.precomposedStringWithCanonicalMapping
+        let bLeaf = b.lastPathComponent.precomposedStringWithCanonicalMapping
+        if !isCaseSensitive(aParent) || !isCaseSensitive(bParent) {
+            return aLeaf.caseInsensitiveCompare(bLeaf) == .orderedSame
+        }
+        return aLeaf == bLeaf
+    }
 }

@@ -130,4 +130,31 @@ import Testing
             try planner.check(sources: [tree], destination: destination)
         }
     }
+
+    @Test func symlinkedDestinationAndIntoItselfChecksWorkCanonically() throws {
+        defer { cleanUp() }
+        let fm = FileManager.default
+        let symDest = root.appendingPathComponent("dest-link", isDirectory: true)
+        try fm.createSymbolicLink(atPath: symDest.path, withDestinationPath: destination.path)
+        try planner.check(sources: [tree], destination: symDest)
+
+        let symRoot = root.appendingPathComponent("root-link", isDirectory: true)
+        try fm.createSymbolicLink(atPath: symRoot.path, withDestinationPath: root.path)
+        #expect(throws: PlanningRefusal.intoItself(tree)) {
+            try planner.check(
+                sources: [tree], destination: symRoot.appendingPathComponent("tree/sub"))
+        }
+
+        if !BookmarkStore.isCaseSensitive(root) {
+            #expect(throws: PlanningRefusal.intoItself(tree)) {
+                try planner.check(
+                    sources: [tree], destination: root.appendingPathComponent("TREE/sub"))
+            }
+        }
+
+        // Copying a symlink whose target happens to be `destination` is not intoItself.
+        let linkToDest = root.appendingPathComponent("link-to-dest")
+        try fm.createSymbolicLink(atPath: linkToDest.path, withDestinationPath: destination.path)
+        try planner.check(sources: [linkToDest], destination: destination)
+    }
 }

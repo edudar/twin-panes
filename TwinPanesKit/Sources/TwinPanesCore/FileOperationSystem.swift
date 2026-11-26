@@ -88,7 +88,12 @@ public struct RealFileOperationSystem: FileOperationSystem {
         }
         defer { closedir(directory) }
         var names: [String] = []
-        while let entry = readdir(directory) {
+        while true {
+            errno = 0
+            guard let entry = readdir(directory) else {
+                if errno != 0 { throw FileSystemError("list", folder.path, errno: errno) }
+                break
+            }
             let name = withUnsafeBytes(of: entry.pointee.d_name) { raw in
                 String(decoding: raw.prefix(Int(entry.pointee.d_namlen)), as: UTF8.self)
             }
@@ -149,8 +154,10 @@ public struct RealFileOperationSystem: FileOperationSystem {
     }
 
     public func copyMetadata(from source: URL, to destination: URL) throws(FileSystemError) {
-        guard copyfile(source.path, destination.path, nil, copyfile_flags_t(COPYFILE_METADATA)) == 0
-        else { throw FileSystemError("copy metadata to", destination.path, errno: errno) }
+        let flags = copyfile_flags_t(COPYFILE_METADATA | COPYFILE_NOFOLLOW)
+        guard copyfile(source.path, destination.path, nil, flags) == 0 else {
+            throw FileSystemError("copy metadata to", destination.path, errno: errno)
+        }
     }
 
     /// Asks iCloud for the file and checks every 100 ms until its bytes are here: a
@@ -164,21 +171,57 @@ public struct RealFileOperationSystem: FileOperationSystem {
         }
         while try metadata(of: url).isDataless {
             if isCancelled() { throw FileSystemError("download", url.path, errno: ECANCELED) }
+            var probe = URL(fileURLWithPath: url.path)
+            probe.removeCachedResourceValue(forKey: .ubiquitousItemDownloadingErrorKey)
+            probe.removeCachedResourceValue(forKey: .ubiquitousItemDownloadingStatusKey)
+            if let values = try? probe.resourceValues(forKeys: [
+                .ubiquitousItemDownloadingErrorKey,
+                .ubiquitousItemDownloadingStatusKey,
+            ]),
+                let downloadError = values.ubiquitousItemDownloadingError
+            {
+                throw FileSystemError(
+                    "download", url.path,
+                    errno: Self.posixCode(of: downloadError, otherwise: EIO))
+            }
             usleep(100_000)
         }
     }
 
     /// The POSIX error Foundation wraps in `error`, or `otherwise` when it has none.
     private static func posixCode(of error: any Error, otherwise: Int32) -> Int32 {
-        let underlying = (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError
-        guard let underlying, underlying.domain == NSPOSIXErrorDomain else { return otherwise }
-        return Int32(underlying.code)
+        let nsError = error as NSError
+        if nsError.domain == NSPOSIXErrorDomain { return Int32(nsError.code) }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError,
+            underlying.domain == NSPOSIXErrorDomain
+        {
+            return Int32(underlying.code)
+        }
+        if nsError.domain == NSCocoaErrorDomain {
+            switch nsError.code {
+            case NSFileNoSuchFileError, NSFileReadNoSuchFileError: return ENOENT
+            case NSFileWriteNoPermissionError, NSFileReadNoPermissionError: return EACCES
+            default: break
+            }
+        }
+        return otherwise
     }
 
     public func rename(_ source: URL, to destination: URL) throws(FileSystemError) {
-        guard renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 else {
+        if renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 {
+            return
+        }
+        let code = errno
+        // Case-only renames on case-insensitive volumes hit EEXIST under RENAME_EXCL
+        // even though source and destination are the same directory entry.
+        if code == EEXIST,
+            BookmarkStore.sameEntry(source, destination),
+            source.lastPathComponent != destination.lastPathComponent
+        {
+            if Darwin.rename(source.path, destination.path) == 0 { return }
             throw FileSystemError("move", source.path, errno: errno)
         }
+        throw FileSystemError("move", source.path, errno: code)
     }
 
     public func trash(_ url: URL) throws(FileSystemError) -> URL {

@@ -40,25 +40,33 @@ public struct OperationPlanner: Sendable {
 
     /// Refuses what can't work before anything is touched.
     public func check(sources: [URL], destination: URL) throws(PlanningRefusal) {
-        guard (try? fileSystem.metadata(of: destination))?.kind == .folder else {
+        let resolvedDest = destination.resolvingSymlinksInPath()
+        guard (try? fileSystem.metadata(of: resolvedDest))?.kind == .folder else {
             throw .destinationMissing(destination)
         }
-        let target = Self.folderPath(destination)
+        let caseSensitive = BookmarkStore.isCaseSensitive(resolvedDest)
+        let target = Self.folderPath(resolvedDest)
+        let matchOptions: String.CompareOptions =
+            caseSensitive ? [.anchored] : [.anchored, .caseInsensitive]
         for source in sources {
-            guard (try? fileSystem.metadata(of: source)) != nil else {
+            guard let metadata = try? fileSystem.metadata(of: source) else {
                 throw .sourceMissing(source)
             }
-            if target.hasPrefix(Self.folderPath(source)) { throw .intoItself(source) }
+            if metadata.kind == .folder,
+                target.range(of: Self.folderPath(source), options: matchOptions) != nil
+            {
+                throw .intoItself(source)
+            }
         }
-        guard fileSystem.canWrite(into: destination) else {
+        guard fileSystem.canWrite(into: resolvedDest) else {
             throw .destinationNotWritable(destination)
         }
     }
 
-    /// `url`'s path with one trailing "/", so a prefix test can't match a sibling whose
-    /// name starts the same ("tree2" isn't inside "tree").
+    /// `url`'s canonical path with one trailing "/", so a prefix test can't match a
+    /// sibling whose name starts the same ("tree2" isn't inside "tree").
     private static func folderPath(_ url: URL) -> String {
-        let path = url.standardizedFileURL.path
+        let path = BookmarkStore.canonicalPath(url)
         return path.hasSuffix("/") ? path : path + "/"
     }
 
