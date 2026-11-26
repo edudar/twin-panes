@@ -39,7 +39,7 @@ extension SmokeTest {
             return check(false, "make the file operations' folders: \(error)")
         }
         let layout = controller.layout
-        let base = app.fileOperations.queue.operations.count
+        let base = operationTally.count
         guard let window = controller.window,
             let left = layout.selectedItem(in: .leftPanel) as? BrowserItem,
             let right = layout.selectedItem(in: .rightPanel) as? BrowserItem
@@ -239,14 +239,14 @@ extension SmokeTest {
     }
 
     /// Waits for every queued operation, and for the sheets they were asked on to close.
-    /// Waits until the queue has held `count` operations (a confirmed sheet queues its
+    /// Waits until the queue has held `count` operations in all (a confirmed sheet queues its
     /// operation a moment later), then for all of them to finish.
     /// Gives up after about 10 s, so an operation stuck on an unanswered sheet fails its
     /// check instead of the whole run.
     func operationsFinished(count: Int) async {
         let queue = app.fileOperations.queue
         for _ in 0..<500 {
-            if queue.operations.count >= count, queue.operations.allSatisfy({ $0.result != nil }) {
+            if operationTally.count >= count, queue.operations.allSatisfy({ $0.result != nil }) {
                 break
             }
             await settle(milliseconds: 20)
@@ -373,5 +373,41 @@ extension SmokeTest {
                 }
             for item in trashed { try? FileManager.default.removeItem(at: item.trashed) }
         }
+    }
+}
+
+/// How many operations the queue has held since the smoke test started counting. A
+/// finished operation leaves the queue once its strip row is dismissed, so the queue's
+/// own count can't say how many have run.
+@MainActor
+final class OperationTally {
+    private var seen: Set<QueuedOperation.ID> = []
+    /// Keeps the observation alive. Two modules name their token type ObservationToken.
+    private var token: AnyObject?
+
+    init(queue: FileOperationQueue) {
+        note(queue)
+        token = queue.observe { [weak self, weak queue] in
+            guard let queue else { return }
+            self?.note(queue)
+        }
+    }
+
+    var count: Int { seen.count }
+
+    private func note(_ queue: FileOperationQueue) {
+        seen.formUnion(queue.operations.map(\.id))
+    }
+}
+
+extension SmokeTest {
+    /// One tally for the whole run, started on first use.
+    @MainActor private static var tally: OperationTally?
+
+    var operationTally: OperationTally {
+        if let tally = Self.tally { return tally }
+        let tally = OperationTally(queue: app.fileOperations.queue)
+        Self.tally = tally
+        return tally
     }
 }
