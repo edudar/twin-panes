@@ -137,6 +137,7 @@ struct SmokeTest {
             "file list is innermost scope (\(chain))")
         check(resolve(.function(3), chain) == .browserView, "F3 in browser → browser.view")
         check(resolve(.function(4), chain) == .browserEdit, "F4 in browser → browser.edit")
+        fileCommandShortcuts(check, in: window)
         guard let table = browser.preferredFirstResponder as? NSTableView else {
             check(false, "the browser's first responder is its file list")
             return

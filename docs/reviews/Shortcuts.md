@@ -12,7 +12,7 @@ and never a replacement for a system shortcut. Before binding, check the keys ma
 reserves: ⌃F1–⌃F8 (keyboard navigation), F11 (Show Desktop), ⌘F5 (VoiceOver), and ⌥ or
 ⌘ with the brightness, volume and Mission Control keys.
 
-**Status:** Decisions made (section 3); no fix has started.
+**Status:** In progress: commit 1 (the ⌃⌘ keys and ⌘Y) done; the Go menu next.
 
 ---
 

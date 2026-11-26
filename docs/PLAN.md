@@ -998,6 +998,10 @@ M6 added the file commands in the browser's scope, each with an F-key and a ⌘ 
 and the function-key bar, whose labels are those commands' titles (D51). After M6 the
 bar was restyled borderless, left off keys with no command, hidden by default, and F10
 no longer quits.
+After the shortcuts review (docs/reviews/Shortcuts.md) Finder's keys come first, then
+⌃⌘ and the command's letter where Finder has none, then the F-key: View ⌘Y, ⌃⌘V, F3;
+Edit ⌃⌘E, F4; Rename ⌃⌘R, F2; Copy ⌃⌘C, F5; Move ⌃⌘M, F6. ⇧⌘C, ⇧⌘M and ⌘R are left
+free for Finder's meanings.
 
 ### 4.12 App icon (D24)
 

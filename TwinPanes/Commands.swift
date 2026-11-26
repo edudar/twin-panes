@@ -198,14 +198,20 @@ enum DefaultCommands {
         // Only in the file list, so the path field and the editor keep Tab (§4.11).
         registry.bind(.tab, to: .switchPanel, in: fileList)
         registry.bind(KeyChord("\t", .shift), to: .switchPanel, in: fileList)
+        // Finder's keys first, then ⌃⌘ and the command's letter where Finder has none
+        // (⇧⌘ is Finder's "go to a place"), then the F-key; menus show the first
+        // (docs/reviews/Shortcuts.md).
+        let controlCommand: KeyChord.Modifiers = [.control, .command]
+        registry.bind(KeyChord("y", .command), to: .browserView, in: browser)  // Quick Look
+        registry.bind(KeyChord("v", controlCommand), to: .browserView, in: browser)
         registry.bind(.function(3), to: .browserView, in: browser)
+        registry.bind(KeyChord("e", controlCommand), to: .browserEdit, in: browser)
         registry.bind(.function(4), to: .browserEdit, in: browser)
-        // ⌘ shortcuts first, so menus show them (docs/plans/M6.md, "Default keys").
-        registry.bind(KeyChord("r", .command), to: .browserRename, in: browser)
+        registry.bind(KeyChord("r", controlCommand), to: .browserRename, in: browser)
         registry.bind(.function(2), to: .browserRename, in: browser)
-        registry.bind(KeyChord("c", [.command, .shift]), to: .browserCopyToOtherPanel, in: browser)
+        registry.bind(KeyChord("c", controlCommand), to: .browserCopyToOtherPanel, in: browser)
         registry.bind(.function(5), to: .browserCopyToOtherPanel, in: browser)
-        registry.bind(KeyChord("m", [.command, .shift]), to: .browserMoveToOtherPanel, in: browser)
+        registry.bind(KeyChord("m", controlCommand), to: .browserMoveToOtherPanel, in: browser)
         registry.bind(.function(6), to: .browserMoveToOtherPanel, in: browser)
         // ⇧⌘N and ⌘⌫ are Finder's.
         registry.bind(KeyChord("n", [.command, .shift]), to: .browserNewFolder, in: browser)
