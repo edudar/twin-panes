@@ -39,6 +39,12 @@ public final class ConflictSheet {
                 - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue)
     }
 
+    /// Ends the sheet if it is currently attached to `window`, stopping the operation.
+    public func dismiss(on window: NSWindow) {
+        guard window.attachedSheet === alert.window else { return }
+        window.endSheet(alert.window, returnCode: .abort)
+    }
+
     /// The answer a click on the `index`th button gives.
     func answer(forButtonAt index: Int) -> ConflictAnswer {
         // A sheet closed some other way (its window went) stops the operation.

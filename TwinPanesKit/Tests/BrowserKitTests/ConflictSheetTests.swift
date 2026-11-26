@@ -83,4 +83,19 @@ import Testing
         sheet.alert.buttons[0].performClick(nil)
         #expect(await answer == ConflictAnswer(.replace, applyToAll: true))
     }
+
+    @Test func dismissEndsAttachedSheetWithStop() async throws {
+        defer { cleanUp() }
+        let sheet = ConflictSheet(try conflict("src/a.txt", "dest/a.txt"))
+        sheet.applyToAll.state = .on
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        async let answer = sheet.ask(on: window)
+        await Task.yield()
+        sheet.dismiss(on: window)
+        #expect(await answer == ConflictAnswer(.stop))
+    }
 }

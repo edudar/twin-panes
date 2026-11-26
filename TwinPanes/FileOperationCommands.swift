@@ -15,7 +15,10 @@ final class FileOperationCommands: FileCommandHandling {
     private let windows: () -> [MainWindowController]
     /// The window each operation was started from, held weakly.
     private var origins: [QueuedOperation.ID: () -> MainWindowController?] = [:]
+    private var strips: [() -> OperationsStripViewController?] = []
+    private nonisolated(unsafe) var windowCloseObserver: (any NSObjectProtocol)?
     private var isUndoingOrRedoing = false
+    private var isQuitting = false
 
     init(
         grants: FolderGrants, fileSystem: any FileOperationSystem = RealFileOperationSystem(),
@@ -25,15 +28,37 @@ final class FileOperationCommands: FileCommandHandling {
         self.fileSystem = fileSystem
         self.windows = windows
         queue = FileOperationQueue(fileSystem: fileSystem)
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Run after MainWindowController.windowWillClose updates windowControllers.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.refreshStripsAfterWindowClose() }
+            }
+        }
+    }
+
+    deinit {
+        if let windowCloseObserver {
+            NotificationCenter.default.removeObserver(windowCloseObserver)
+        }
     }
 
     /// The progress strip for `controller`'s window: its own operations, and those of
     /// windows that have closed when it's the first window.
     func makeStrip(for controller: MainWindowController) -> OperationsStripViewController {
-        OperationsStripViewController(queue: queue) { [weak self, weak controller] operation in
-            guard let self, let controller else { return false }
-            return self.window(of: operation) === controller
-        }
+        let strip = OperationsStripViewController(
+            queue: queue,
+            shows: { [weak self, weak controller] operation in
+                guard let self, let controller else { return false }
+                return self.window(of: operation) === controller
+            },
+            onDismiss: { [weak self] id in
+                self?.queue.removeFinished(id)
+                self?.origins.removeValue(forKey: id)
+            })
+        strips.append { [weak strip] in strip }
+        return strip
     }
 
     var hasRunningOperations: Bool { queue.operations.contains { $0.result == nil } }
@@ -47,32 +72,41 @@ final class FileOperationCommands: FileCommandHandling {
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return false }
-        let running = queue.operations.filter { $0.result == nil }
-        for operation in running { operation.cancel() }
-        for operation in running { _ = await operation.finished() }
-        return true
+        isQuitting = true
+        defer { isQuitting = false }
+        while true {
+            let running = queue.operations.filter { $0.result == nil }
+            guard !running.isEmpty else { return true }
+            for operation in running { operation.cancel() }
+            for operation in running { _ = await operation.finished() }
+        }
     }
 
     // MARK: FileCommandHandling
 
     func perform(_ command: FileCommand, in browser: BrowserItem) {
+        guard !isQuitting else { return }
         guard let controller = controller(showing: browser), let window = controller.window
         else { return NSSound.beep() }
-        let sources = browser.selectedEntries.map(\.url)
         switch command {
         case .copyToOtherPanel, .moveToOtherPanel:
+            let sources = browser.selectedEntries.map(\.url)
+            guard !sources.isEmpty else { return NSSound.beep() }
             askDestination(
                 for: command, sources: sources, from: browser, controller: controller, on: window)
         case .rename:
-            guard let item = sources.first else { return NSSound.beep() }
+            guard let item = browser.selectedEntries.first?.url else { return NSSound.beep() }
+            let expectedParent = item.deletingLastPathComponent()
             askName(
                 TextSheet(
                     message: "Rename “\(item.lastPathComponent)” to:",
                     text: item.lastPathComponent, selecting: .nameWithoutExtension,
                     confirm: "Rename"),
                 on: window, request: { name in .rename(item, to: name) },
-                then: { result in
-                    if case .renamed(.success(let moved)) = result {
+                then: { [weak browser] result in
+                    if case .renamed(.success(let moved)) = result,
+                        let browser, BookmarkStore.pathsEqual(browser.folder, expectedParent)
+                    {
                         browser.selectWhenListed(moved.to.lastPathComponent)
                     }
                 }, from: controller)
@@ -83,17 +117,26 @@ final class FileOperationCommands: FileCommandHandling {
                     message: "New folder in “\(folder.lastPathComponent)”:",
                     text: "untitled folder", selecting: .all, confirm: "Create"),
                 on: window, request: { name in .makeFolder(named: name, in: folder) },
-                then: { result in
-                    if case .madeFolder(.success(let made)) = result {
+                then: { [weak browser] result in
+                    if case .madeFolder(.success(let made)) = result,
+                        let browser, BookmarkStore.pathsEqual(browser.folder, folder)
+                    {
                         browser.selectWhenListed(made.lastPathComponent)
                     }
                 }, from: controller)
         case .trash:
-            Task { await run(.trash(sources), from: controller) }
+            let sources = browser.selectedEntries.map(\.url)
+            guard !sources.isEmpty else { return NSSound.beep() }
+            let origin: () -> MainWindowController? = { [weak controller] in controller }
+            Task { await run(.trash(sources), origin: origin) }
         case .deletePermanently:
-            DeleteConfirmation.makeAlert(for: sources).beginSheetModal(for: window) { response in
-                guard response == .alertFirstButtonReturn else { return }
-                Task { await self.run(.delete(sources), from: controller) }
+            let sources = browser.selectedEntries.map(\.url)
+            guard !sources.isEmpty else { return NSSound.beep() }
+            DeleteConfirmation.makeAlert(for: sources).beginSheetModal(for: window) {
+                [weak self, weak controller] response in
+                guard let self, response == .alertFirstButtonReturn else { return }
+                let origin: () -> MainWindowController? = { [weak controller] in controller }
+                Task { await self.run(.delete(sources), origin: origin) }
             }
         case .undo: undo(from: controller)
         case .redo: redo(from: controller)
@@ -120,65 +163,138 @@ final class FileOperationCommands: FileCommandHandling {
     /// Queues `request`, waits for it and records it for undo.
     @discardableResult
     private func run(
-        _ request: OperationRequest, from controller: MainWindowController
-    ) async
-        -> OperationResult
-    {
-        let result = await add(request, from: controller).finished()
+        _ request: OperationRequest, scopes: [SecurityScope]? = nil,
+        origin: @escaping () -> MainWindowController?
+    ) async -> OperationResult {
+        let operation = add(request, scopes: scopes, origin: origin)
+        let result = await operation.finished()
         if let change = FileChange(request: request, result: result) { history.record(change) }
         return result
     }
 
     private func add(
-        _ request: OperationRequest, from controller: MainWindowController
-    )
-        -> QueuedOperation
-    {
-        let operation = queue.add(request, scopes: scopes(for: request)) {
+        _ request: OperationRequest, scopes: [SecurityScope]? = nil,
+        origin: @escaping () -> MainWindowController?
+    ) -> QueuedOperation {
+        let operation = queue.add(request, scopes: scopes ?? self.scopes(for: request)) {
             [weak self] op, conflict in
-            guard let window = self?.window(of: op)?.window else { return ConflictAnswer(.stop) }
-            return await ConflictSheet(conflict).ask(on: window)
+            guard let self, let window = self.window(of: op)?.window else {
+                return ConflictAnswer(.stop)
+            }
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            if !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
+            let sheet = ConflictSheet(conflict)
+            op.onCancelWhileWaiting = { [weak sheet, weak window] in
+                guard let sheet, let window else { return }
+                sheet.dismiss(on: window)
+            }
+            defer { op.onCancelWhileWaiting = nil }
+            return await sheet.ask(on: window)
         }
-        origins[operation.id] = { [weak controller] in controller }
+        origins[operation.id] = origin
         return operation
     }
 
     /// The access an operation keeps until it ends (§5): its items' and destination's
-    /// folder grants.
+    /// folder grants, deduplicated per grant.
     private func scopes(for request: OperationRequest) -> [SecurityScope] {
-        let urls: [URL] =
-            switch request {
-            case .copy(let items, let destination), .move(let items, let destination):
-                items + [destination]
-            case .trash(let items), .delete(let items): items
-            case .putBack(let items): items.flatMap { [$0.from, $0.to] }
-            case .rename(let item, _): [item]
-            case .makeFolder(_, let folder): [folder]
+        switch request {
+        case .copy(let items, let destination), .move(let items, let destination):
+            scopes(forItems: items, folders: [destination])
+        case .trash(let items), .delete(let items):
+            scopes(forItems: items, folders: [])
+        case .putBack(let items):
+            scopes(forItems: items.flatMap { [$0.from, $0.to] }, folders: [])
+        case .rename(let item, _):
+            scopes(forItems: [item], folders: [])
+        case .makeFolder(_, let folder):
+            scopes(forItems: [], folders: [folder])
+        }
+    }
+
+    private func scopes(forItems items: [URL], folders: [URL]) -> [SecurityScope] {
+        var candidates: [URL] = []
+        var seenPaths: Set<String> = []
+        var seenParents: Set<String> = []
+        var lastParent = ""
+        for folder in folders where seenPaths.insert(folder.path).inserted {
+            candidates.append(folder)
+        }
+        let includeItems = items.count <= FolderListing.mainActorLimit
+        for item in items {
+            if includeItems {
+                if seenPaths.insert(item.path).inserted { candidates.append(item) }
+            } else if Self.hasParent(item.path, parent: lastParent) {
+                continue
             }
-        return urls.compactMap { grants.scope(covering: $0) }
+            let parent = item.deletingLastPathComponent()
+            lastParent = parent.path
+            if seenParents.insert(lastParent).inserted { candidates.append(parent) }
+        }
+        var seenGrants: Set<String> = []
+        var result: [SecurityScope] = []
+        for candidate in candidates {
+            guard let grant = grants.grant(covering: candidate),
+                seenGrants.insert(grant.path).inserted,
+                let scope = grants.scope(covering: candidate)
+            else { continue }
+            result.append(scope)
+        }
+        return result
+    }
+
+    private static func hasParent(_ path: String, parent: String) -> Bool {
+        guard !parent.isEmpty, path.hasPrefix(parent) else { return false }
+        var rest = path.dropFirst(parent.count)
+        if !parent.hasSuffix("/") {
+            guard rest.first == "/" else { return false }
+            rest = rest.dropFirst()
+        }
+        return !rest.isEmpty && !rest.contains("/")
     }
 
     private func undo(from controller: MainWindowController) {
-        guard !isUndoingOrRedoing, let change = history.takeUndo() else { return NSSound.beep() }
+        guard !isUndoingOrRedoing, let (change, epoch) = history.takeUndoWithToken() else {
+            return NSSound.beep()
+        }
         isUndoingOrRedoing = true
+        let origin: () -> MainWindowController? = { [weak controller] in controller }
         Task {
+            defer { isUndoingOrRedoing = false }
+            var allSucceeded = true
+            var changedAnything = false
             for request in change.undoRequests ?? [] {
-                _ = await add(request, from: controller).finished()
+                let operation = add(request, origin: origin)
+                let result = await operation.finished()
+                if FileChange(request: request, result: result) != nil {
+                    changedAnything = true
+                }
+                if result.wasCancelled || !result.failures.isEmpty {
+                    allSucceeded = false
+                    if result.wasCancelled { break }
+                }
             }
-            history.didUndo(change)
-            isUndoingOrRedoing = false
+            if allSucceeded {
+                history.didUndo(change, epoch: epoch)
+            } else if !changedAnything {
+                history.restoreUndo(change, epoch: epoch)
+            }
         }
     }
 
     private func redo(from controller: MainWindowController) {
-        guard !isUndoingOrRedoing, let change = history.takeRedo() else { return NSSound.beep() }
+        guard !isUndoingOrRedoing, let (change, epoch) = history.takeRedoWithToken() else {
+            return NSSound.beep()
+        }
         isUndoingOrRedoing = true
+        let origin: () -> MainWindowController? = { [weak controller] in controller }
         Task {
-            let result = await add(change.request, from: controller).finished()
+            defer { isUndoingOrRedoing = false }
+            let operation = add(change.request, origin: origin)
+            let result = await operation.finished()
             if let again = FileChange(request: change.request, result: result) {
-                history.didRedo(again)
+                history.didRedo(again, epoch: epoch)
             }
-            isUndoingOrRedoing = false
         }
     }
 
@@ -199,10 +315,14 @@ final class FileOperationCommands: FileCommandHandling {
             text: text ?? otherFolder(of: browser, in: controller)?.path ?? browser.folder.path,
             selecting: .all, confirm: isMove ? "Move" : "Copy")
         if let refusal { sheet.refuse(refusal) }
-        sheet.begin(on: window) { [self] typed in
-            guard let typed else { return }
-            let again = { (reason: String) in
+        sheet.begin(on: window) { [weak self, weak browser, weak controller, weak window] typed in
+            guard let self, let browser, let typed else { return }
+            let again: (String) -> Void = { reason in
                 DispatchQueue.main.async {
+                    [weak self, weak browser, weak controller, weak window] in
+                    guard let self, let browser, let controller, let window, window.isVisible,
+                        self.windows().contains(where: { $0 === controller })
+                    else { return }
                     self.askDestination(
                         for: command, sources: sources, from: browser, controller: controller,
                         on: window, text: typed, refusal: reason)
@@ -212,15 +332,30 @@ final class FileOperationCommands: FileCommandHandling {
                 let destination = DestinationPath.resolve(
                     typed, from: browser.folder, home: DirectoryReader.realHomeDirectory)
             else { return again("Type the folder to \(isMove ? "move" : "copy") to.") }
-            do throws(PlanningRefusal) {
-                try OperationPlanner(fileSystem: fileSystem).check(
-                    sources: sources, destination: destination)
-            } catch {
-                return again(Self.reason(for: error))
+            let checkScopes = self.scopes(forItems: sources, folders: [destination])
+            let fileSystem = self.fileSystem
+            let origin: () -> MainWindowController? = { [weak controller] in controller }
+            Task { [weak self] in
+                let refusal: PlanningRefusal? = await Task.detached(priority: .userInitiated) {
+                    withExtendedLifetime(checkScopes) {
+                        do throws(PlanningRefusal) {
+                            try OperationPlanner(fileSystem: fileSystem).check(
+                                sources: sources, destination: destination)
+                            return nil
+                        } catch {
+                            return error
+                        }
+                    }
+                }.value
+                guard let self else { return }
+                if let refusal {
+                    return again(Self.reason(for: refusal))
+                }
+                guard !self.isQuitting else { return }
+                let request: OperationRequest =
+                    isMove ? .move(sources, into: destination) : .copy(sources, into: destination)
+                await self.run(request, scopes: checkScopes, origin: origin)
             }
-            let request: OperationRequest =
-                isMove ? .move(sources, into: destination) : .copy(sources, into: destination)
-            Task { await self.run(request, from: controller) }
         }
     }
 
@@ -232,14 +367,20 @@ final class FileOperationCommands: FileCommandHandling {
         then finished: @escaping (OperationResult) -> Void,
         from controller: MainWindowController
     ) {
-        sheet.begin(on: window) { [self] name in
-            guard let name else { return }
-            Task {
-                let result = await self.run(request(name), from: controller)
+        let message = sheet.alert.messageText
+        let confirm = sheet.alert.buttons[0].title
+        sheet.begin(on: window) { [weak self, weak controller, weak window] name in
+            guard let self, let name else { return }
+            let origin: () -> MainWindowController? = { [weak controller] in controller }
+            Task { [weak self, weak controller, weak window] in
+                guard let self else { return }
+                let result = await self.run(request(name), origin: origin)
                 if let refusal = result.refusal {
+                    guard let controller, let window, window.isVisible,
+                        self.windows().contains(where: { $0 === controller })
+                    else { return }
                     let retry = TextSheet(
-                        message: sheet.alert.messageText, text: name, selecting: .all,
-                        confirm: sheet.alert.buttons[0].title)
+                        message: message, text: name, selecting: .all, confirm: confirm)
                     retry.refuse(Self.reason(for: refusal))
                     self.askName(
                         retry, on: window, request: request, then: finished, from: controller)
@@ -279,11 +420,19 @@ final class FileOperationCommands: FileCommandHandling {
     /// The window an operation's row and questions belong to: where it started, or the
     /// first window once that one has closed.
     private func window(of operation: QueuedOperation) -> MainWindowController? {
-        origins[operation.id]?() ?? windows().first
+        if let origin = origins[operation.id]?(), windows().contains(where: { $0 === origin }) {
+            return origin
+        }
+        return windows().first
     }
 
-    /// The other panel's folder: its front tab if that's a browser, otherwise its most
-    /// recently shown browser tab (D45 guarantees one).
+    private func refreshStripsAfterWindowClose() {
+        strips.removeAll { $0() == nil }
+        for ref in strips { ref()?.refresh() }
+    }
+
+    /// The other panel's folder: its front tab if that's a browser, otherwise its
+    /// rightmost browser tab (D45 guarantees one).
     private func otherFolder(
         of browser: BrowserItem, in controller: MainWindowController
     )
