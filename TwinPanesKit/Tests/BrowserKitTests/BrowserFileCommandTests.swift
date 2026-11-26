@@ -45,6 +45,35 @@ import TwinPanesCore
         NSMenuItem(title: "", action: action, keyEquivalent: "")
     }
 
+    /// Waits until `check` holds after a live update, failing after 10 s.
+    func until(
+        in item: BrowserItem, _ check: @escaping () -> Bool,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        if check() { return }
+        var deadlineTask: Task<Void, Never>?
+        defer { deadlineTask?.cancel() }
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            var finished = false
+            item.didUpdate = {
+                guard !finished, check() else { return }
+                finished = true
+                item.didUpdate = nil
+                done.resume()
+            }
+            deadlineTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(10))
+                guard !finished else { return }
+                finished = true
+                item.didUpdate = nil
+                Issue.record(
+                    "no such update within 10 s: \(item.entries.map(\.name))",
+                    sourceLocation: sourceLocation)
+                done.resume()
+            }
+        }
+    }
+
     @Test func commandsOnTheSelectionReachTheHandler() async {
         defer { cleanUp() }
         let item = await browser()
@@ -96,10 +125,53 @@ import TwinPanesCore
         defer { item.willClose() }
         item.selectWhenListed("c.txt")
         try Data().write(to: root.appendingPathComponent("folder/c.txt"))
-        for _ in 0..<200 where item.selectedName != "c.txt" {
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        await until(in: item) { item.selectedName == "c.txt" }
         #expect(item.selectedName == "c.txt")
+    }
+
+    @Test func selectWhenListedAlreadyListedSelectsDirectlyAndPreservesPendingLargeSelection()
+        async throws
+    {
+        defer { cleanUp() }
+        let item = await browser()
+        defer { item.willClose() }
+        select(["a.txt"], in: item)
+        item.selectWhenListed("b.txt")
+        #expect(item.selectedName == "b.txt")
+        #expect(item.controller.wantedSelection == nil)
+
+        let big = root.appendingPathComponent("big")
+        try FileManager.default.createDirectory(at: big, withIntermediateDirectories: true)
+        let count = FolderListing.mainActorLimit + 10
+        for index in 0..<count {
+            FileManager.default.createFile(
+                atPath: big.appendingPathComponent("f\(index)").path, contents: nil)
+        }
+        item.go(to: big)
+        await item.listed()
+        item.controller.tableView.selectAll(nil)
+        #expect(item.selectedEntries.count == count)
+        item.selectWhenListed("not-there-yet")
+        #expect(item.selectedEntries.count == count)
+    }
+
+    @Test func applyRowChangesFindsWantedSelectionMissingFromAsked() async throws {
+        defer { cleanUp() }
+        let item = await browser()
+        defer { item.willClose() }
+        item.selectWhenListed("c.txt")
+        let entry = DirectoryEntry(
+            url: root.appendingPathComponent("folder/c.txt"), name: "c.txt", isDirectory: false,
+            isPackage: false, isSymbolicLink: false, isHidden: false, size: 0, modified: nil,
+            type: .data)
+        let previous = item.listing
+        let updated = previous.merging([entry])
+        item.replaceListing(with: updated)
+        let changes = try #require(
+            updated.rowChanges(from: previous, touching: ["c.txt"], limit: 100))
+        #expect(item.controller.applyRowChanges(changes))
+        #expect(item.selectedName == "c.txt")
+        #expect(item.controller.wantedSelection == nil)
     }
 }
 

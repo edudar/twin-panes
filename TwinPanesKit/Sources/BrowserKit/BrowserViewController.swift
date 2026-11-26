@@ -17,6 +17,10 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     var completionNames: CompletionNames?
     /// The completion waiting for a folder's names; for tests.
     nonisolated(unsafe) var pendingCompletion: Task<Void, Never>?
+    /// Generation bumped on selection/folder changes so stale summary tasks drop.
+    var selectionSummaryGeneration: UInt64 = 0
+    /// The active off-main-actor selection summary task; for tests.
+    nonisolated(unsafe) var selectionSummaryTask: Task<Void, Never>?
     /// The path field's list of matches; the field holds it weakly.
     lazy var pathSuggestions = PathSuggestions(matchTexts: { [weak self] typed in
         await self?.listedMatchTexts(for: typed) ?? []
@@ -38,6 +42,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
 
     deinit {
         pendingCompletion?.cancel()
+        selectionSummaryTask?.cancel()
         if let iconObserver { NotificationCenter.default.removeObserver(iconObserver) }
     }
 
@@ -133,8 +138,13 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// Selects `name` once the listing has it, as a navigation selects the folder you
     /// came from.
     func selectWhenListed(_ name: String) {
-        wantedSelection = name
-        reloadKeepingSelection()
+        if isViewLoaded, let row = row(named: name) {
+            wantedSelection = nil
+            restoreSelection(row, parentRow: false)
+            tableView.scrollRowToVisible(row)
+        } else {
+            wantedSelection = name
+        }
     }
 
     /// A new folder: empties the list (it fills as batches arrive), selects the first
@@ -142,6 +152,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     func startShowing(selecting name: String?) {
         let step = StepTiming.start("start showing")
         defer { step?.end() }
+        selectionSummaryGeneration &+= 1
         guard isViewLoaded, let item else { return }
         pathField.stringValue = item.folder.path
         showPath(item.folder)
@@ -243,7 +254,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// changed, so the scroll position, the selection and the other rows' views stay.
     /// The changes were worked out with the listing; false if there's no view to update.
     func applyRowChanges(
-        _ changes: RowChanges, asked: Set<String> = [], found: [String: Int] = [:]
+        _ changes: RowChanges, asked: Set<String> = [], found: [String: Int] = [:],
+        selectedRows: IndexSet? = nil
     ) -> Bool {
         let step = StepTiming.start("row changes")
         defer { step?.end() }
@@ -259,7 +271,9 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         let inserted = IndexSet(changes.inserted.map { $0 + offset })
         let changed = IndexSet(changes.changed.map { $0 + offset })
         let selected = tableView.selectedRow
+        let priorSelection = selection
         let priorName = selectedName
+        let priorTableSelected = tableView.selectedRowIndexes
         tableView.beginUpdates()
         tableView.removeRows(at: removed, withAnimation: [])
         tableView.insertRows(at: inserted, withAnimation: [])
@@ -267,24 +281,48 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         tableView.reloadData(
             forRowIndexes: changed, columnIndexes: IndexSet(0..<tableView.numberOfColumns))
         restripe()
-        // NSTableView moved the selected rows with the update; record where they went.
-        isRestoringSelection = true
-        selectionChanged()
-        isRestoringSelection = false
-        if tableView.selectedRow < 0, selected >= 0, tableView.numberOfRows > 0 {
-            if let priorName,
-                let movedRow = asked.contains(priorName)
-                    ? found[priorName] : item.listing.row(named: priorName)
-            {
-                restoreSelection(movedRow + offset, parentRow: false)
-            } else {
-                // The selected entry went: the row that took its place is selected.
-                restoreSelection(min(selected, tableView.numberOfRows - 1), parentRow: false)
+        if !priorTableSelected.intersection(removed).isEmpty {
+            let leadRow = priorName.flatMap { name in
+                asked.contains(name) ? found[name].map { $0 + offset } : self.row(named: name)
             }
+            if let surviving = selectedRows
+                ?? (priorSelection.count <= FolderListing.mainActorLimit
+                    ? priorSelection.rows(in: item.listing) : nil)
+            {
+                var rows = tableRows(surviving)
+                if let leadRow { rows.remove(leadRow) }
+                if !rows.isEmpty || leadRow != nil {
+                    restoreSelection(rows, lead: leadRow, parentRow: false)
+                } else if tableView.numberOfRows > 0, selected >= 0 {
+                    // The selected entries went: the row that took the lead's place is selected.
+                    restoreSelection(min(selected, tableView.numberOfRows - 1), parentRow: false)
+                } else {
+                    restoreSelection([], lead: nil, parentRow: false)
+                }
+            } else if tableView.selectedRow < 0, selected >= 0, tableView.numberOfRows > 0 {
+                if let leadRow {
+                    restoreSelection(leadRow, parentRow: false)
+                } else {
+                    restoreSelection(min(selected, tableView.numberOfRows - 1), parentRow: false)
+                }
+            } else {
+                isRestoringSelection = true
+                if let leadRow { tableView.selectRowIndexes([leadRow], byExtendingSelection: true) }
+                selectionChanged()
+                isRestoringSelection = false
+            }
+        } else {
+            // NSTableView moved the selected rows with the update; record where they went.
+            isRestoringSelection = true
+            selectionChanged()
+            isRestoringSelection = false
         }
         // A name waiting to be selected (a new folder, a rename) that this update
-        // brought; its row was found off the main actor with the others.
-        if let wanted = wantedSelection, asked.contains(wanted), let row = found[wanted] {
+        // brought; its row was found off the main actor with the others, or here if the
+        // selection request arrived while the update was already running.
+        if let wanted = wantedSelection,
+            let row = asked.contains(wanted) ? found[wanted] : item.listing.row(named: wanted)
+        {
             wantedSelection = nil
             restoreSelection(row + offset, parentRow: false)
             tableView.scrollRowToVisible(row + offset)
@@ -302,21 +340,35 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     }
 
     /// Selects `rows` and then `lead`, or the first row when there's nothing to select
-    /// and the ".." row was selected or nothing is.
+    /// and the ".." row was selected or nothing is. Always updates `selection` so it
+    /// matches the current listing even when the table's row indexes didn't change.
     func restoreSelection(_ rows: IndexSet, lead: Int?, parentRow: Bool) {
         isRestoringSelection = true
         defer { isRestoringSelection = false }
         if !rows.isEmpty || lead != nil {
-            tableView.selectRowIndexes(rows, byExtendingSelection: false)
-            if let lead { tableView.selectRowIndexes([lead], byExtendingSelection: true) }
-        } else if tableView.numberOfRows > 0, parentRow || tableView.selectedRow < 0 {
-            tableView.selectRowIndexes([0], byExtendingSelection: false)
+            if rows.isEmpty, let lead {
+                tableView.selectRowIndexes([lead], byExtendingSelection: false)
+            } else {
+                tableView.selectRowIndexes(rows, byExtendingSelection: false)
+                if let lead { tableView.selectRowIndexes([lead], byExtendingSelection: true) }
+            }
+        } else if tableView.numberOfRows > 0 {
+            if parentRow || tableView.selectedRow < 0 {
+                tableView.selectRowIndexes([0], byExtendingSelection: false)
+            } else if tableView.selectedRowIndexes.count > 1
+                || tableView.selectedRow >= tableView.numberOfRows
+            {
+                let replacement = min(tableView.selectedRow, tableView.numberOfRows - 1)
+                tableView.selectRowIndexes([replacement], byExtendingSelection: false)
+            }
         }
+        selectionChanged()
     }
 
     /// The selection changed: records it, and if the user moved it, the folder you came
     /// from no longer wins it back.
     func selectionChanged() {
+        selectionSummaryGeneration &+= 1
         selectedName = selectedEntry?.name
         var rows = tableView.selectedRowIndexes
         if showsParentRow {

@@ -709,6 +709,8 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
     /// Shows "3 of 120 selected, 1,234 bytes"; folders' sizes aren't counted (D-a). A
     /// big selection is added up off the main actor.
     private func showSelectionSummary(of item: BrowserItem) {
+        selectionSummaryGeneration &+= 1
+        let generation = selectionSummaryGeneration
         let selection = selection
         let total = item.entries.count
         let path = item.folder.path
@@ -722,9 +724,13 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         guard selection.count > FolderListing.mainActorLimit else {
             return item.host?.showStatus(summary()) ?? ()
         }
-        Task { [weak self, weak item] in
+        selectionSummaryTask = Task { [weak self, weak item] in
             let text = await Task.detached(priority: .userInitiated) { summary() }.value
-            guard let self, let item, self.selection.rows == selection.rows else { return }
+            guard let self, let item,
+                self.selectionSummaryGeneration == generation,
+                item.folder.path == path,
+                self.selection.rows == selection.rows
+            else { return }
             item.host?.showStatus(text)
         }
     }

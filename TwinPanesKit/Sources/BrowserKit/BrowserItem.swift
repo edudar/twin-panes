@@ -383,7 +383,9 @@ public final class BrowserItem: WorkspaceItem {
         replaceListing(with: applied.listing)
         if resorted
             || !(applied.changes.map {
-                controller.applyRowChanges($0, asked: applied.asked, found: applied.found)
+                controller.applyRowChanges(
+                    $0, asked: applied.asked, found: applied.found,
+                    selectedRows: applied.selectedRows)
             } ?? false)
         {
             controller.reloadKeepingSelection(
@@ -409,7 +411,9 @@ public final class BrowserItem: WorkspaceItem {
 
     func listingFinished(reloading: Bool = true) {
         lister = nil
-        if reloading { controller.reloadKeepingSelection() }
+        if reloading {
+            controller.reloadKeepingSelection(selectedRows: controller.selection.rows)
+        }
         updateStatus()
         readChangedWhileListing()
         if !isReadingChanges { finishWaiting() }

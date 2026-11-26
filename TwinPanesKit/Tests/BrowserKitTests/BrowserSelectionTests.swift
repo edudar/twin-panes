@@ -44,6 +44,35 @@ import WorkspaceKit
 
     func selected(_ item: BrowserItem) -> [String] { item.selectedEntries.map(\.name) }
 
+    /// Waits until `check` holds after a live update, failing after 10 s.
+    func until(
+        in item: BrowserItem, _ check: @escaping () -> Bool,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        if check() { return }
+        var deadlineTask: Task<Void, Never>?
+        defer { deadlineTask?.cancel() }
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            var finished = false
+            item.didUpdate = {
+                guard !finished, check() else { return }
+                finished = true
+                item.didUpdate = nil
+                done.resume()
+            }
+            deadlineTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(10))
+                guard !finished else { return }
+                finished = true
+                item.didUpdate = nil
+                Issue.record(
+                    "no such update within 10 s: \(item.entries.map(\.name))",
+                    sourceLocation: sourceLocation)
+                done.resume()
+            }
+        }
+    }
+
     @Test func severalRowsAreSelectedInRowOrder() async throws {
         defer { cleanUp() }
         let item = await browser(at: folder)
@@ -97,11 +126,94 @@ import WorkspaceKit
         try select(["b.bin", "c.png"], in: item)
         try Data([1]).write(to: folder.appendingPathComponent("0-new.txt"))
         try FileManager.default.removeItem(at: folder.appendingPathComponent("a.txt"))
-        for _ in 0..<200 where item.entries.contains(where: { $0.name == "a.txt" }) {
-            try await Task.sleep(for: .milliseconds(20))
+        await until(in: item) {
+            item.entries.contains(where: { $0.name == "0-new.txt" })
+                && !item.entries.contains(where: { $0.name == "a.txt" })
         }
         await item.listed()
         #expect(selected(item) == ["b.bin", "c.png"])
+    }
+
+    @Test func hidingTheSoleSelectedDotfileResyncsSelection() async throws {
+        defer { cleanUp() }
+        let item = await browser(at: folder)
+        defer { item.willClose() }
+        item.showHidden(true)
+        await item.listed()
+        try select([".hidden"], in: item)
+        #expect(item.selectedName == ".hidden")
+        item.showHidden(false)
+        await item.listed()
+        #expect(item.selectedName != ".hidden")
+        #expect(selected(item) != [".hidden"])
+        #expect(item.selectedName == item.controller.selectedEntry?.name)
+        #expect(selected(item) == [item.selectedName].compactMap { $0 })
+    }
+
+    @Test func aRankMovingLiveUpdatePreservesMultiSelection() async throws {
+        defer { cleanUp() }
+        let item = await browser(at: folder)
+        defer { item.willClose() }
+        item.sort(by: ListingOrder(column: .size, ascending: true))
+        await item.listed()
+        try select(["a.txt", "b.bin"], in: item)
+        try Data(count: 500).write(to: folder.appendingPathComponent("a.txt"))
+        await until(in: item) {
+            item.entries.first { $0.name == "a.txt" }?.size == 500
+        }
+        await item.listed()
+        #expect(Set(selected(item)) == ["a.txt", "b.bin"])
+        #expect(item.selectedName == "b.bin")
+    }
+
+    @Test func reloadWithUnchangedIndexesRefreshesSelectionListing() async throws {
+        defer { cleanUp() }
+        let item = await browser(at: folder)
+        defer { item.willClose() }
+        item.showHidden(true)
+        await item.listed()
+        // `.hidden` sorts last on `name`, so after hiding it `a.txt` keeps row index 2
+        // and `selectRowIndexes([2])` is a no-op; `selection` must still drop `.hidden`.
+        item.sort(by: ListingOrder(column: .name, ascending: false))
+        await item.listed()
+        try select(["a.txt", ".hidden"], in: item)
+        #expect(item.selectedName == ".hidden")
+        item.showHidden(false)
+        await item.listed()
+        #expect(item.selectedName == "a.txt")
+        #expect(selected(item) == ["a.txt"])
+    }
+
+    @Test func staleSelectionSummaryDoesNotOverwriteAfterFolderChange() async throws {
+        defer { cleanUp() }
+        let big1 = root.appendingPathComponent("big1")
+        let big2 = root.appendingPathComponent("big2")
+        for dir in [big1, big2] {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            for index in 0..<(FolderListing.mainActorLimit + 10) {
+                FileManager.default.createFile(
+                    atPath: dir.appendingPathComponent("f\(index)").path, contents: nil)
+            }
+        }
+        var status = ""
+        let item = BrowserItem(folder: big1, grants: grants) { _, _ in }
+        let host = RecordingHost { status = $0 }
+        item.host = host
+        _ = item.viewController.view
+        await item.listed()
+        defer { item.willClose() }
+
+        item.controller.tableView.selectAll(nil)
+        let staleTask = item.controller.selectionSummaryTask
+        item.go(to: big2)
+        await item.listed()
+        item.controller.tableView.selectAll(nil)
+        let currentTask = item.controller.selectionSummaryTask
+
+        await staleTask?.value
+        await currentTask?.value
+        #expect(status.contains(big2.path))
+        #expect(!status.contains(big1.path))
     }
 
     @Test func theStatusLineCountsTheSelection() async throws {
