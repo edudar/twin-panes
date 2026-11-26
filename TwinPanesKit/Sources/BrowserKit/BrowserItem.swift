@@ -125,7 +125,13 @@ public final class BrowserItem: WorkspaceItem {
     public private(set) var hasListed = false
     /// Access to the current folder, held for as long as this tab shows it (§5).
     private(set) var scope: SecurityScope?
-    lazy var controller = BrowserViewController(item: self)
+    private var loadedController: BrowserViewController?
+    var controller: BrowserViewController {
+        if let loadedController { return loadedController }
+        let controller = BrowserViewController(item: self)
+        loadedController = controller
+        return controller
+    }
 
     public init(
         folder: URL, grants: FolderGrants, openFile: @escaping (URL, SecurityScope?) -> Void
@@ -486,6 +492,8 @@ public final class BrowserItem: WorkspaceItem {
             host?.showStatus("\(folder.path) · no access yet")
         } else if isListing {
             host?.showStatus("\(folder.path) · Listing… \(listing.entries.count.formatted()) items")
+        } else if loadedController?.updateSelectionStatus() == true {
+            return
         } else {
             let folders = listing.folderCount
             let hidden = listing.hiddenCount

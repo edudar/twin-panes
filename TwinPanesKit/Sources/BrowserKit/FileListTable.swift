@@ -693,22 +693,14 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard let item else { return }
         selectionChanged()
-        if tableView.numberOfSelectedRows > 1 {
-            return showSelectionSummary(of: item)
+        if !updateSelectionStatus() {
+            item.updateStatus()
         }
-        if isParentRowSelected {
-            let parent = item.folder.deletingLastPathComponent().path
-            item.host?.showStatus("Parent folder: \(parent)")
-            return
-        }
-        guard let entry = selectedEntry else { return item.updateStatus() }
-        let size = entry.size.map { " · \($0.formatted()) bytes" } ?? ""
-        item.host?.showStatus("\(entry.url.path)\(size)")
     }
 
     /// Shows "3 of 120 selected, 1,234 bytes"; folders' sizes aren't counted (D-a). A
     /// big selection is added up off the main actor.
-    private func showSelectionSummary(of item: BrowserItem) {
+    func showSelectionSummary(of item: BrowserItem) {
         selectionSummaryGeneration &+= 1
         let generation = selectionSummaryGeneration
         let selection = selection

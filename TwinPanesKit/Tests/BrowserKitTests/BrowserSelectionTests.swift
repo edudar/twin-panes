@@ -268,6 +268,150 @@ import WorkspaceKit
         #expect(status.contains("310 bytes"))
     }
 
+    @Test func liveUpdatePreservesAndUpdatesMultiRowSelectionStatus() async throws {
+        defer { cleanUp() }
+        var status = ""
+        let item = BrowserItem(folder: folder, grants: grants) { _, _ in }
+        let host = RecordingHost { status = $0 }
+        item.host = host
+        _ = item.viewController.view
+        await item.listed()
+        defer { item.willClose() }
+        #expect(status.contains("4 items"))
+
+        try select(["a.txt", "b.bin"], in: item)
+        #expect(status.contains("2 of 4 selected"))
+        #expect(status.contains("310 bytes"))
+
+        try Data(count: 50).write(to: folder.appendingPathComponent("d.txt"))
+        await until(in: item) { item.entries.contains { $0.name == "d.txt" } }
+        await item.listed()
+        #expect(status.contains("2 of 5 selected"))
+        #expect(status.contains("310 bytes"))
+
+        try FileManager.default.removeItem(at: folder.appendingPathComponent("c.png"))
+        await until(in: item) { !item.entries.contains { $0.name == "c.png" } }
+        await item.listed()
+        #expect(status.contains("2 of 4 selected"))
+        #expect(status.contains("310 bytes"))
+
+        try Data(count: 40).write(to: folder.appendingPathComponent("a.txt"))
+        await until(in: item) { item.entries.first { $0.name == "a.txt" }?.size == 40 }
+        await item.listed()
+        #expect(status.contains("2 of 4 selected"))
+        #expect(status.contains("340 bytes"))
+    }
+
+    @Test func liveUpdatePreservesSingleRowSelectionStatusAndUpdatesSize() async throws {
+        defer { cleanUp() }
+        var status = ""
+        let item = BrowserItem(folder: folder, grants: grants) { _, _ in }
+        let host = RecordingHost { status = $0 }
+        item.host = host
+        _ = item.viewController.view
+        await item.listed()
+        defer { item.willClose() }
+
+        try select(["a.txt"], in: item)
+        #expect(status.contains(folder.appendingPathComponent("a.txt").path))
+        #expect(status.contains("10 bytes"))
+
+        try Data(count: 50).write(to: folder.appendingPathComponent("d.txt"))
+        await until(in: item) { item.entries.contains { $0.name == "d.txt" } }
+        await item.listed()
+        #expect(status.contains(folder.appendingPathComponent("a.txt").path))
+        #expect(status.contains("10 bytes"))
+
+        try Data(count: 42).write(to: folder.appendingPathComponent("a.txt"))
+        await until(in: item) { item.entries.first { $0.name == "a.txt" }?.size == 42 }
+        await item.listed()
+        #expect(status.contains(folder.appendingPathComponent("a.txt").path))
+        #expect(status.contains("42 bytes"))
+    }
+
+    @Test func liveUpdatePreservesParentRowSelectionStatus() async throws {
+        defer { cleanUp() }
+        var status = ""
+        let item = BrowserItem(folder: folder, grants: grants) { _, _ in }
+        let host = RecordingHost { status = $0 }
+        item.host = host
+        _ = item.viewController.view
+        await item.listed()
+        defer { item.willClose() }
+
+        try select(["a.txt"], in: item)
+        item.controller.tableView.selectRowIndexes([0], byExtendingSelection: false)
+        #expect(status.hasPrefix("Parent folder:"))
+
+        try Data(count: 50).write(to: folder.appendingPathComponent("d.txt"))
+        await until(in: item) { item.entries.contains { $0.name == "d.txt" } }
+        await item.listed()
+        #expect(status.hasPrefix("Parent folder:"))
+    }
+
+    @Test func emptyingFolderAfterSingleSelectionFallsBackToFolderSummary() async throws {
+        defer { cleanUp() }
+        let single = root.appendingPathComponent("single", isDirectory: true)
+        try FileManager.default.createDirectory(at: single, withIntermediateDirectories: true)
+        try Data(count: 7).write(to: single.appendingPathComponent("only.txt"))
+
+        var status = ""
+        let item = BrowserItem(folder: single, grants: grants) { _, _ in }
+        let host = RecordingHost { status = $0 }
+        item.host = host
+        _ = item.viewController.view
+        await item.listed()
+        defer { item.willClose() }
+
+        try select(["only.txt"], in: item)
+        #expect(status.contains("only.txt"))
+        #expect(status.contains("7 bytes"))
+
+        try FileManager.default.removeItem(at: single.appendingPathComponent("only.txt"))
+        await until(in: item) { item.entries.isEmpty }
+        await item.listed()
+        #expect(status.contains("0 items (0 folders)"))
+    }
+
+    @Test func noticeNeedsAccessAndListingTakePriorityOverSelectionStatus() async throws {
+        defer { cleanUp() }
+        var status = ""
+        let item = BrowserItem(folder: folder, grants: grants) { _, _ in }
+        let host = RecordingHost { status = $0 }
+        item.host = host
+        _ = item.viewController.view
+        await item.listed()
+        defer { item.willClose() }
+
+        try select(["a.txt", "b.bin"], in: item)
+        #expect(status.contains("2 of 4 selected"))
+
+        item.notice = "Important notice"
+        item.updateStatus()
+        #expect(status == "Important notice")
+
+        item.notice = nil
+        item.needsAccess = true
+        item.updateStatus()
+        #expect(status.contains("no access yet"))
+
+        item.needsAccess = false
+        item.go(to: folder)
+        #expect(item.isListing)
+        let synthetic = ["x.txt", "y.txt"].map { name in
+            DirectoryEntry(
+                url: folder.appendingPathComponent(name), name: name, isDirectory: false,
+                isPackage: false, isSymbolicLink: false, isHidden: false, size: 1,
+                modified: nil, type: .data)
+        }
+        item.received(.batch(synthetic))
+        try select(["x.txt", "y.txt"], in: item)
+        #expect(status.contains("2 of 2 selected"))
+        item.updateStatus()
+        #expect(status.contains("Listing…"))
+        await item.listed()
+    }
+
     /// ⌘A in a big folder, then a re-sort off the main actor, keeps every row selected.
     @Test func everythingStaysSelectedThroughABigSort() async throws {
         defer { cleanUp() }
