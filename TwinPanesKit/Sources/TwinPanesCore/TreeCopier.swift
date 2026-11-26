@@ -27,6 +27,9 @@ public struct CopyOutcome: Sendable {
     /// Every item the copy finished, made or a folder merged into, by its path below
     /// the destination as walked, with where it is now: a move removes these sources.
     public var finished: [String: URL] = [:]
+    /// Relative paths of folders merged into an existing destination folder rather than
+    /// created fresh.
+    var merged: Set<String> = []
     /// What Replace sent to the Trash.
     public var replaced: [TrashedItem] = []
     public var failures: [FileSystemError] = []
@@ -117,6 +120,7 @@ public struct TreeCopier: Sendable {
                 return true
             case .merge:
                 run.outcome.finished[item.relativePath] = target
+                run.outcome.merged.insert(item.relativePath)
                 return true
             case .keepBoth:
                 let name = KeepBothName.next(for: target.lastPathComponent) {

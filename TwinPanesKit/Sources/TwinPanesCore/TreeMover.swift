@@ -51,27 +51,58 @@ public struct TreeMover: Sendable {
             do {
                 try fileSystem.rename(source, to: target)
                 outcome.moved.append(MovedItem(from: source, to: target))
+                state.itemsDone += 1
+                progress(state)
             } catch  where error.errno == EXDEV || error.errno == EEXIST {
                 toCopy.append(source)
             } catch {
                 outcome.failures.append(error)
+                state.itemsDone += 1
+                progress(state)
             }
-            state.itemsDone += 1
-            progress(state)
         }
         guard !toCopy.isEmpty else { return outcome }
         let planner = OperationPlanner(fileSystem: fileSystem)
         let walks = toCopy.map { planner.walk($0, isCancelled: { control.isCancelled }) }
+        let baseDone = state.itemsDone
         let copy = TreeCopier(fileSystem: fileSystem).copy(
-            walks, into: destination, control: control, resolve: resolve, progress: progress)
+            walks, into: destination, control: control, resolve: resolve
+        ) { report in
+            var combined = report
+            combined.itemsDone += baseDone
+            combined.itemsTotal += baseDone
+            progress(combined)
+        }
         outcome.replaced += copy.replaced
         outcome.failures += copy.failures
         outcome.wasCancelled = copy.wasCancelled
-        outcome.failures += removeSources(of: walks, finished: copy.finished)
-        for made in copy.created where (try? fileSystem.metadata(of: made.source)) == nil {
-            outcome.moved.append(MovedItem(from: made.source, to: made.copy))
-        }
+        let removal = removeSources(of: walks, finished: copy.finished)
+        outcome.failures += removal.failures
+        outcome.moved += Self.movedItems(from: walks, copy: copy, removed: removal.removed)
         return outcome
+    }
+
+    /// Top-most removed items that were created (not merged into an existing folder) at
+    /// the destination, so `PutBack` restores only what this move actually moved.
+    private static func movedItems(
+        from walks: [SourceWalk], copy: CopyOutcome, removed: Set<String>
+    ) -> [MovedItem] {
+        var moved: [MovedItem] = []
+        var covered: Set<String> = []
+        for item in walks.flatMap(\.items) {
+            let parent = (item.relativePath as NSString).deletingLastPathComponent
+            if covered.contains(parent) {
+                covered.insert(item.relativePath)
+                continue
+            }
+            guard removed.contains(item.relativePath),
+                !copy.merged.contains(item.relativePath),
+                let destination = copy.finished[item.relativePath]
+            else { continue }
+            moved.append(MovedItem(from: item.source, to: destination))
+            covered.insert(item.relativePath)
+        }
+        return moved
     }
 
     /// Removes each source item whose copy finished, deepest first: a file once its copy
@@ -79,9 +110,8 @@ public struct TreeMover: Sendable {
     /// moved stays, and that isn't a failure.
     private func removeSources(
         of walks: [SourceWalk], finished: [String: URL]
-    )
-        -> [FileSystemError]
-    {
+    ) -> (removed: Set<String>, failures: [FileSystemError]) {
+        var removed: Set<String> = []
         var failures: [FileSystemError] = []
         for item in walks.flatMap(\.items).reversed() {
             guard let copy = finished[item.relativePath] else { continue }
@@ -93,12 +123,13 @@ public struct TreeMover: Sendable {
             }
             do {
                 try fileSystem.remove(item.source)
+                removed.insert(item.relativePath)
             } catch  where item.metadata.kind == .folder && error.errno == ENOTEMPTY {
                 // Skipped or failed items are still inside.
             } catch {
                 failures.append(error)
             }
         }
-        return failures
+        return (removed, failures)
     }
 }

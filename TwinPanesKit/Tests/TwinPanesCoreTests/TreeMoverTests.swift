@@ -135,4 +135,55 @@ import Testing
         #expect(exists("dest/docs/x.txt") && !exists("src/docs/x.txt"))
         #expect(exists("src/docs/y.txt") && !exists("dest/docs/y.txt"))
     }
+
+    @Test func partialCrossVolumeFolderMoveRecordsMovedChildrenForPutBack() {
+        defer { cleanUp() }
+        system.failRename(endingWith: "src/docs", errno: EXDEV)
+        system.failCopy(endingWith: "docs/x.txt", errno: ENOSPC)
+        let outcome = move(["docs"])
+        #expect(outcome.failures.map(\.errno) == [ENOSPC])
+        #expect(
+            outcome.moved == [
+                MovedItem(
+                    from: source.appendingPathComponent("docs/y.txt"),
+                    to: destination.appendingPathComponent("docs/y.txt"))
+            ])
+
+        let undone = PutBack(fileSystem: system).putBack(
+            outcome.moved, control: OperationControl(),
+            resolve: { _ in ConflictAnswer(.stop) }, progress: { _ in })
+        #expect(undone.failures.isEmpty && exists("src/docs/y.txt") && !exists("dest/docs/y.txt"))
+    }
+
+    @Test func folderMergeMoveAndPutBackRestoresSourceAndPreservesDestination() throws {
+        defer { cleanUp() }
+        try FileManager.default.createDirectory(
+            at: destination.appendingPathComponent("docs"), withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: destination.appendingPathComponent("docs/existing.txt"))
+
+        let outcome = move(["docs"], answers: [ConflictAnswer(.merge)])
+        #expect(outcome.failures.isEmpty && !exists("src/docs"))
+        #expect(Set(outcome.moved.map(\.from.lastPathComponent)) == ["x.txt", "y.txt"])
+
+        let undone = PutBack(fileSystem: system).putBack(
+            outcome.moved, control: OperationControl(),
+            resolve: { _ in ConflictAnswer(.stop) }, progress: { _ in })
+        #expect(undone.failures.isEmpty)
+        #expect(exists("src/docs/x.txt") && exists("src/docs/y.txt"))
+        #expect(!exists("dest/docs/x.txt") && !exists("dest/docs/y.txt"))
+        #expect(exists("dest/docs/existing.txt"))
+    }
+
+    @Test func crossVolumeFallbackProgressNeverJumpsToFullBeforeCopyStarts() {
+        defer { cleanUp() }
+        system.failRename(endingWith: "src/docs", errno: EXDEV)
+        var reports: [OperationProgress] = []
+        let outcome = TreeMover(fileSystem: system).move(
+            [source.appendingPathComponent("a.txt"), source.appendingPathComponent("docs")],
+            into: destination, control: OperationControl(),
+            resolve: { _ in ConflictAnswer(.stop) }, progress: { reports.append($0) })
+        #expect(outcome.failures.isEmpty)
+        #expect(reports.dropLast().allSatisfy { $0.itemsDone < $0.itemsTotal })
+        #expect(reports.last?.itemsDone == reports.last?.itemsTotal)
+    }
 }
