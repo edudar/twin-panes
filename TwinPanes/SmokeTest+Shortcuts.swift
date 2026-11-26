@@ -45,4 +45,37 @@ extension SmokeTest {
                 && shows(#selector(BrowserActions.browserEdit(_:)), "e", menuControlCommand),
             "the View menu shows ⌘Y on View and ⌃⌘E on Edit")
     }
+
+    /// The Go menu takes Finder's keys and opens its places in the active panel.
+    /// Applications stands in for the rest, which need grants the smoke test doesn't have.
+    func goMenu(
+        _ check: (Bool, String) -> Void, browser: BrowserItem, in window: NSWindow
+    )
+        async
+    {
+        let chain = FocusChain.scopes(in: window)
+        let keys: [(KeyChord, CommandID, String)] = [
+            (KeyChord("h", [.command, .shift]), .goHome, "⇧⌘H"),
+            (KeyChord("d", [.command, .shift]), .goDesktop, "⇧⌘D"),
+            (KeyChord("o", [.command, .shift]), .goDocuments, "⇧⌘O"),
+            (KeyChord("l", [.command, .option]), .goDownloads, "⌥⌘L"),
+            (KeyChord("a", [.command, .shift]), .goApplications, "⇧⌘A"),
+            (KeyChord("u", [.command, .shift]), .goUtilities, "⇧⌘U"),
+        ]
+        check(
+            keys.allSatisfy { app.registry.candidates(for: $0.0, chain: chain).first?.id == $0.1 },
+            "Finder's Go keys run the Go menu's places")
+        let titles = NSApp.mainMenu?.item(withTitle: "Go")?.submenu?.items.map(\.title) ?? []
+        check(
+            titles == ["Home", "Desktop", "Documents", "Downloads", "Applications", "Utilities"],
+            "the Go menu lists Finder's places: \(titles)")
+        let folder = browser.folder
+        check(dispatch(KeyChord("a", [.command, .shift]), in: window), "⇧⌘A dispatched")
+        await browser.listed()
+        check(
+            browser.folder.path == "/Applications",
+            "⇧⌘A shows Applications in the active panel: \(browser.folder.path)")
+        browser.go(to: folder)
+        await browser.listed()
+    }
 }

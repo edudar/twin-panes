@@ -1001,7 +1001,9 @@ no longer quits.
 After the shortcuts review (docs/reviews/Shortcuts.md) Finder's keys come first, then
 ⌃⌘ and the command's letter where Finder has none, then the F-key: View ⌘Y, ⌃⌘V, F3;
 Edit ⌃⌘E, F4; Rename ⌃⌘R, F2; Copy ⌃⌘C, F5; Move ⌃⌘M, F6. ⇧⌘C, ⇧⌘M and ⌘R are left
-free for Finder's meanings.
+free for Finder's meanings. A Go menu takes Finder's places and keys (Home ⇧⌘H, Desktop
+⇧⌘D, Documents ⇧⌘O, Downloads ⌥⌘L, Applications ⇧⌘A, Utilities ⇧⌘U), opening each in
+the active panel as a sidebar click would.
 
 ### 4.12 App icon (D24)
 

@@ -21,6 +21,12 @@ import WorkspaceKit
     @objc optional func resolveSavedBookmarks(_ sender: Any?)
     @objc optional func showSpikeReport(_ sender: Any?)
     @objc optional func exportSpikeReport(_ sender: Any?)
+    @objc optional func goHome(_ sender: Any?)
+    @objc optional func goDesktop(_ sender: Any?)
+    @objc optional func goDocuments(_ sender: Any?)
+    @objc optional func goDownloads(_ sender: Any?)
+    @objc optional func goApplications(_ sender: Any?)
+    @objc optional func goUtilities(_ sender: Any?)
 }
 
 extension CommandID {
@@ -57,6 +63,12 @@ extension CommandID {
     static let browserBack: CommandID = "browser.back"
     static let browserShowPackageContents: CommandID = "browser.showPackageContents"
     static let browserForward: CommandID = "browser.forward"
+    static let goHome: CommandID = "go.home"
+    static let goDesktop: CommandID = "go.desktop"
+    static let goDocuments: CommandID = "go.documents"
+    static let goDownloads: CommandID = "go.downloads"
+    static let goApplications: CommandID = "go.applications"
+    static let goUtilities: CommandID = "go.utilities"
     static let browserRename: CommandID = "browser.rename"
     static let browserCopyToOtherPanel: CommandID = "browser.copyToOtherPanel"
     static let browserMoveToOtherPanel: CommandID = "browser.moveToOtherPanel"
@@ -137,6 +149,12 @@ enum DefaultCommands {
             .browserShowPackageContents, "Show Package Contents",
             #selector(BrowserActions.browserShowPackageContents(_:)))
         add(.browserForward, "Forward", #selector(BrowserActions.browserForward(_:)))
+        add(.goHome, "Home", #selector(AppActions.goHome(_:)))
+        add(.goDesktop, "Desktop", #selector(AppActions.goDesktop(_:)))
+        add(.goDocuments, "Documents", #selector(AppActions.goDocuments(_:)))
+        add(.goDownloads, "Downloads", #selector(AppActions.goDownloads(_:)))
+        add(.goApplications, "Applications", #selector(AppActions.goApplications(_:)))
+        add(.goUtilities, "Utilities", #selector(AppActions.goUtilities(_:)))
         // File operations (docs/plans/M6.md); short titles, since the F-key bar shows them.
         add(.browserRename, "Rename…", #selector(FileCommandActions.browserRename(_:)))
         add(
@@ -184,6 +202,13 @@ enum DefaultCommands {
         registry.bind(KeyChord("q", .command), to: .quit)
         registry.bind(KeyChord("n", .command), to: .newWindow)
         registry.bind(KeyChord("o", .command), to: .openFile)
+        // Finder's Go menu (docs/reviews/Shortcuts.md, finding 2).
+        registry.bind(KeyChord("h", [.command, .shift]), to: .goHome)
+        registry.bind(KeyChord("d", [.command, .shift]), to: .goDesktop)
+        registry.bind(KeyChord("o", [.command, .shift]), to: .goDocuments)
+        registry.bind(KeyChord("l", [.command, .option]), to: .goDownloads)
+        registry.bind(KeyChord("a", [.command, .shift]), to: .goApplications)
+        registry.bind(KeyChord("u", [.command, .shift]), to: .goUtilities)
         // ⌘L is Finder's "Make Alias"; the conflict is deferred to M10 (§9).
         registry.bind(KeyChord("l", .command), to: .goToOffset, in: editor)
         registry.bind(KeyChord("t", .command), to: .newBrowserTab)

@@ -105,6 +105,12 @@ enum MainMenu {
                     "Text Column", #selector(HexEditorActions.setTextEncoding(_:)),
                     [("ASCII", "ascii"), ("Latin-1", "latin1")]),
             ])
+        _ = submenu(
+            "Go",
+            [
+                command(.goHome), command(.goDesktop), command(.goDocuments),
+                command(.goDownloads), command(.goApplications), command(.goUtilities),
+            ])
         let window = submenu(
             "Window",
             [
