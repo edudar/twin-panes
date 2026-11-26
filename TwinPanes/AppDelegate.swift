@@ -167,7 +167,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// test runs recovery itself, on its own folders.
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenu.build(updater: menuUpdater, recentFiles: recentFiles)
-        guard !Self.isIsolatedRun else { return }
+        guard !Self.isIsolatedRun else {
+            // Smoke and bench runs never become the active app, so they don't take focus
+            // from what the developer is doing; their windows still show and draw. The
+            // checks already work without a key window.
+            NSApp.setActivationPolicy(.accessory)
+            return
+        }
         launchRecovery = LaunchRecovery(crashedSessions(), registry: sessions)
     }
 
