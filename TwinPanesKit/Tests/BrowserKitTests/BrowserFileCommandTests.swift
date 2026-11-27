@@ -125,26 +125,31 @@ import TwinPanesCore
         defer { item.willClose() }
         let controller = item.controller
         let viewItem = menuItem(#selector(BrowserViewController.browserView(_:)))
+        let samePanelItem = menuItem(#selector(BrowserViewController.browserViewInSamePanel(_:)))
         let editItem = menuItem(#selector(BrowserViewController.browserEdit(_:)))
 
         select(["a.txt"], in: item)
         #expect(controller.validateMenuItem(viewItem))
+        #expect(controller.validateMenuItem(samePanelItem))
         #expect(controller.validateMenuItem(editItem))
 
         controller.editPath()
         #expect(controller.isEditingPath)
         #expect(!controller.validateMenuItem(viewItem))
+        #expect(!controller.validateMenuItem(samePanelItem))
         #expect(!controller.validateMenuItem(editItem))
 
         controller.showPathBar()
         #expect(!controller.isEditingPath)
         #expect(controller.validateMenuItem(viewItem))
+        #expect(controller.validateMenuItem(samePanelItem))
         #expect(controller.validateMenuItem(editItem))
 
         item.received(.failed(.needsAccess(item.folder)))
         #expect(item.needsAccess)
         #expect(controller.selectedEntry != nil)
         #expect(!controller.validateMenuItem(viewItem))
+        #expect(!controller.validateMenuItem(samePanelItem))
         #expect(!controller.validateMenuItem(editItem))
     }
 

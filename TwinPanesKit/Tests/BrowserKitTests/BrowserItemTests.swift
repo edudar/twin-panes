@@ -277,6 +277,8 @@ import Testing
     @Test func viewAndEditOnTheParentRowDoNothing() async {
         defer { cleanUp() }
         let item = browser(at: root.appendingPathComponent("sub"))
+        var viewed: [QuickViewPlacement] = []
+        item.viewFile = { _, placement in viewed.append(placement) }
         let controller = item.controller
         _ = controller.view
         await item.listed()
@@ -286,11 +288,114 @@ import Testing
         }
         #expect(enabled(#selector(BrowserViewController.browserOpen(_:))))
         #expect(!enabled(#selector(BrowserViewController.browserView(_:))))
+        #expect(!enabled(#selector(BrowserViewController.browserViewInSamePanel(_:))))
         #expect(!enabled(#selector(BrowserViewController.browserEdit(_:))))
         controller.browserView(nil)
+        controller.browserViewInSamePanel(nil)
         controller.browserEdit(nil)
         #expect(item.folder.path == root.appendingPathComponent("sub").path)
+        #expect(viewed.isEmpty)
         #expect(opened.files.isEmpty)
+    }
+
+    @Test func viewAndEditSplitByEntryKindAndViewFileFallback() async throws {
+        defer { cleanUp() }
+        let appPackage = root.appendingPathComponent("Tool.app")
+        try FileManager.default.createDirectory(at: appPackage, withIntermediateDirectories: true)
+        let item = browser(at: root)
+        var viewed: [(String?, QuickViewPlacement)] = []
+        item.viewFile = { browser, placement in
+            viewed.append((browser.selectedEntry?.name, placement))
+        }
+        let controller = item.controller
+        _ = controller.view
+        await item.listed()
+        #expect(item.activeScope == nil)
+
+        func select(_ name: String) throws {
+            let row = try #require(controller.row(named: name))
+            controller.tableView.selectRowIndexes([row], byExtendingSelection: false)
+        }
+        func enabled(_ action: Selector) -> Bool {
+            controller.validateMenuItem(NSMenuItem(title: "", action: action, keyEquivalent: ""))
+        }
+
+        // Folder: View and View in Same Panel enabled; Edit disabled.
+        try select("sub")
+        #expect(enabled(#selector(BrowserViewController.browserView(_:))))
+        #expect(enabled(#selector(BrowserViewController.browserViewInSamePanel(_:))))
+        #expect(!enabled(#selector(BrowserViewController.browserEdit(_:))))
+        controller.browserView(nil)
+        controller.browserViewInSamePanel(nil)
+        controller.browserEdit(nil)
+        #expect(viewed.count == 2)
+        #expect(viewed[0].0 == "sub" && viewed[0].1 == .oppositePanel)
+        #expect(viewed[1].0 == "sub" && viewed[1].1 == .samePanel)
+        #expect(opened.files.isEmpty)
+
+        // Package (.app): View enabled; Edit disabled.
+        try select("Tool.app")
+        #expect(try #require(item.selectedEntry).isPackage)
+        #expect(enabled(#selector(BrowserViewController.browserView(_:))))
+        #expect(enabled(#selector(BrowserViewController.browserViewInSamePanel(_:))))
+        #expect(!enabled(#selector(BrowserViewController.browserEdit(_:))))
+        controller.browserEdit(nil)
+        #expect(opened.files.isEmpty)
+
+        // Regular file: all three enabled; Edit opens via `openFile`.
+        try select("file.txt")
+        #expect(enabled(#selector(BrowserViewController.browserView(_:))))
+        #expect(enabled(#selector(BrowserViewController.browserViewInSamePanel(_:))))
+        #expect(enabled(#selector(BrowserViewController.browserEdit(_:))))
+        controller.browserView(nil)
+        controller.browserViewInSamePanel(nil)
+        controller.browserEdit(nil)
+        #expect(viewed.count == 4)
+        #expect(viewed[2].0 == "file.txt" && viewed[2].1 == .oppositePanel)
+        #expect(viewed[3].0 == "file.txt" && viewed[3].1 == .samePanel)
+        #expect(opened.files.count == 1)
+        #expect(opened.files[0].0.lastPathComponent == "file.txt")
+
+        // Fallback when `viewFile` is nil: `browserView` still opens the file via `browserOpen`.
+        item.viewFile = nil
+        controller.browserView(nil)
+        #expect(opened.files.count == 2)
+        #expect(opened.files[1].0.lastPathComponent == "file.txt")
+    }
+
+    @Test func selectionCallbackFiresOnCursorFolderAndAccessWithoutRebuildingTabs() async throws {
+        defer { cleanUp() }
+        let item = browser(at: root)
+        var tabChanges = 0
+        var selections: [(folder: URL, entry: String?, needsAccess: Bool)] = []
+        item.onChange = { tabChanges += 1 }
+        item.onSelectionChange = { changed in
+            selections.append((changed.folder, changed.selectedEntry?.name, changed.needsAccess))
+        }
+        _ = item.viewController.view
+        await item.listed()
+        selections.removeAll()
+        let baselineTabChanges = tabChanges
+
+        // Cursor movement notifies `onSelectionChange` without triggering `onChange`.
+        let fileRow = try #require(item.controller.row(named: "file.txt"))
+        item.controller.tableView.selectRowIndexes([fileRow], byExtendingSelection: false)
+        #expect(tabChanges == baselineTabChanges)
+        #expect(selections.last?.entry == "file.txt")
+        #expect(selections.last?.needsAccess == false)
+
+        // Folder navigation fires `onSelectionChange` (and `onChange` once for the new tab title).
+        let sub = root.appendingPathComponent("sub")
+        item.go(to: sub)
+        await item.listed()
+        #expect(tabChanges == baselineTabChanges + 1)
+        #expect(selections.contains { $0.folder.path == sub.path })
+
+        // Access denial notifies `onSelectionChange` without rebuilding tabs.
+        selections.removeAll()
+        item.received(.failed(.needsAccess(sub)))
+        #expect(tabChanges == baselineTabChanges + 1)
+        #expect(selections.last?.needsAccess == true)
     }
 
     @Test func typeToSelectSkipsTheParentRow() async {

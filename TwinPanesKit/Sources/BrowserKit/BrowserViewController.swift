@@ -157,7 +157,10 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         defer { step?.end() }
         selectionSummaryGeneration &+= 1
         showsSelectionStatus = false
-        guard isViewLoaded, let item else { return }
+        guard isViewLoaded, let item else {
+            self.item?.notifySelectionChange()
+            return
+        }
         pathField.stringValue = item.folder.path
         showPath(item.folder)
         updateAccessPrompt()
@@ -175,7 +178,10 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         scrolling: Bool = false, asked: Set<String> = [], found: [String: Int] = [:],
         selectedRows: IndexSet? = nil
     ) {
-        guard isViewLoaded, let item else { return }
+        guard isViewLoaded, let item else {
+            self.item?.notifySelectionChange()
+            return
+        }
         // The rows of the names asked about were found off the main actor; only a name
         // that wasn't asked about (the selection moved meanwhile) is searched for here.
         func row(named name: String) -> Int? {
@@ -400,6 +406,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             showsSelectionStatus = tableView.numberOfSelectedRows > 0
             viewIfLoaded?.window?.invalidateRestorableState()
         }
+        item?.notifySelectionChange()
     }
 
     /// Refreshes the status line for the active selection if the user moved it (or more
@@ -467,11 +474,42 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         openTypedFile(target) { item.openFile($0, item.grants.scope(covering: $0)) }
     }
 
-    /// F3/F4 act on files and folders, not on "..".
-    @objc func browserView(_ sender: Any?) {
-        if selectedEntry != nil { browserOpen(sender) } else { NSSound.beep() }
+    private var canViewSelection: Bool {
+        guard let item else { return false }
+        return !isEditingPath && !item.needsAccess && selectedEntry != nil
     }
-    @objc func browserEdit(_ sender: Any?) { browserView(sender) }
+
+    private var editableEntry: DirectoryEntry? {
+        guard let item, !isEditingPath, !item.needsAccess,
+            let entry = selectedEntry, !entry.isDirectory && !entry.isPackage
+        else { return nil }
+        return entry
+    }
+
+    /// F3 / ⌘Y / ⌃⌘V: view the selected entry in the opposite panel, falling back to
+    /// `browserOpen` until the app wires `viewFile`.
+    @objc func browserView(_ sender: Any?) {
+        guard let item, canViewSelection else { return NSSound.beep() }
+        if let viewFile = item.viewFile {
+            viewFile(item, .oppositePanel)
+        } else {
+            browserOpen(sender)
+        }
+    }
+
+    /// ⇧F3 / ⇧⌃⌘V: view the selected entry in the active panel.
+    @objc func browserViewInSamePanel(_ sender: Any?) {
+        guard let item, canViewSelection, let viewFile = item.viewFile else {
+            return NSSound.beep()
+        }
+        viewFile(item, .samePanel)
+    }
+
+    /// F4 / ⌃⌘E: open the selected regular file in the editor.
+    @objc func browserEdit(_ sender: Any?) {
+        guard let item, let entry = editableEntry else { return NSSound.beep() }
+        item.openFile(entry.url, item.grants.scope(covering: entry.url))
+    }
     @objc func browserParent(_ sender: Any?) { item?.goToParent() }
 
     /// Packages list as files, as in Finder; this enters one as a folder (D-i).
@@ -610,8 +648,10 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         case #selector(browserOpen(_:)):
             return !isEditingPath && !item.needsAccess
                 && (selectedEntry != nil || isParentRowSelected)
-        case #selector(browserView(_:)), #selector(browserEdit(_:)):
-            return !isEditingPath && !item.needsAccess && selectedEntry != nil
+        case #selector(browserView(_:)), #selector(browserViewInSamePanel(_:)):
+            return canViewSelection
+        case #selector(browserEdit(_:)):
+            return editableEntry != nil
         case #selector(browserParent(_:)):
             return !isEditingPath && item.folder.path != "/"
         case #selector(browserShowPackageContents(_:)):

@@ -7,6 +7,11 @@ extension ItemKind {
     public static let browser: ItemKind = "browser"
 }
 
+/// Where Quick View should open when triggered from a browser.
+public enum QuickViewPlacement: Equatable, Sendable {
+    case oppositePanel, samePanel
+}
+
 /// Action selectors of the browser, so menus and the command catalog can name them.
 @objc public protocol BrowserActions {
     /// Enter, double-click, ⌘↓: into a folder, or open a file in the editor.
@@ -14,8 +19,11 @@ extension ItemKind {
     /// ⌘↩ in the path field: open the typed file in the hex editor (Return opens it in
     /// its default app).
     @objc optional func browserOpenInEditor(_ sender: Any?)
-    /// F3 and F4: open the file under the cursor in the editor (quick view is M7).
+    /// F3, ⌘Y, ⌃⌘V: view the selected entry in Quick View in the opposite panel.
     @objc optional func browserView(_ sender: Any?)
+    /// ⇧F3, ⇧⌃⌘V: view the selected entry in Quick View in the active panel.
+    @objc optional func browserViewInSamePanel(_ sender: Any?)
+    /// F4, ⌃⌘E: open the selected regular file in the editor.
     @objc optional func browserEdit(_ sender: Any?)
     /// ⌘↑, Backspace: the parent folder.
     @objc optional func browserParent(_ sender: Any?)
@@ -43,11 +51,16 @@ public final class BrowserItem: WorkspaceItem {
     /// Runs the file commands (F2 to ⇧F8, undo); the app supplies it.
     public weak var fileCommands: FileCommandHandling?
     public var onChange: (() -> Void)?
+    /// Called when the browser's selection, folder, entries, or access state changes,
+    /// without asking the tab bar to rebuild.
+    public var onSelectionChange: ((BrowserItem) -> Void)?
 
     public let grants: FolderGrants
     /// Opens a file in an editor tab; supplied by the app so BrowserKit doesn't
     /// import EditorKit (§4). The scope covers the file's folder, if one was needed.
     public let openFile: (URL, SecurityScope?) -> Void
+    /// Opens Quick View for the current selection in the requested panel; supplied by the app.
+    public var viewFile: ((BrowserItem, QuickViewPlacement) -> Void)?
     /// Opens a file in the app Finder would open it with, saying in the status line when
     /// it can't; the smoke test stands in for it so it launches no other app.
     public lazy var openInDefaultApp: (URL) -> Void = { [weak self] url in
@@ -151,6 +164,10 @@ public final class BrowserItem: WorkspaceItem {
     /// The generic folder icon, cached: asking for this folder's own one on every change
     /// cost tens of milliseconds per navigation.
     public var icon: NSImage? { IconCache.shared.folder }
+    /// The lead selected entry, or nil when nothing or ".." is selected.
+    public var selectedEntry: DirectoryEntry? { controller.selectedEntry }
+    /// The security-scoped token covering the current folder, if one is active.
+    public var activeScope: SecurityScope? { scope }
     public var viewController: NSViewController { controller }
     public var preferredFirstResponder: NSView? { controller.tableView }
     /// Whether the rows on screen show the icons for the tab's scale and appearance.
@@ -479,6 +496,10 @@ public final class BrowserItem: WorkspaceItem {
         let parentParts = parent.resolvingSymlinksInPath().standardizedFileURL.pathComponents
         let childParts = child.resolvingSymlinksInPath().standardizedFileURL.pathComponents
         return childParts.starts(with: parentParts)
+    }
+
+    func notifySelectionChange() {
+        onSelectionChange?(self)
     }
 
     public func willClose() { stopListing() }
