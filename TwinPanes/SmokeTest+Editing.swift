@@ -456,6 +456,9 @@ extension SmokeTest {
         print("       looking for \(url.path)")
         print(
             "       recent: \(recents.entries.map(\.url.path)); lost: \(recents.lost.map(\.path))")
+        if let failure = recents.lastFailure {
+            print("       noting \(failure.url.path) failed: \(failure.error)")
+        }
         do {
             let data = try url.bookmarkData(
                 options: [.withSecurityScope], includingResourceValuesForKeys: nil,

@@ -1,5 +1,6 @@
 import AppKit
 import TwinPanesCore
+import os
 
 /// File › Open Recent, backed by app-scoped security-scoped bookmarks so files stay
 /// reachable from the sandbox after relaunch (PLAN.md §5). A bookmark that resolves
@@ -50,9 +51,24 @@ final class RecentFiles: NSObject, NSMenuDelegate {
         if let isolatedFolder { try? FileManager.default.removeItem(at: isolatedFolder) }
     }
 
+    /// The last file `note` couldn't record, and why. A recent file that can't be
+    /// bookmarked is left out of the menu without troubling the user, so this and the
+    /// log are where the reason shows.
+    private(set) var lastFailure: (url: URL, error: any Error)?
+    private static let log = Logger(
+        subsystem: "io.github.edudar.twinpanes", category: "RecentFiles")
+
     /// Records `url` at the top of the list. Call while access to it is active.
     func note(_ url: URL) {
-        guard (try? store.add(url)) != nil else { return }
+        do {
+            try store.add(url)
+        } catch {
+            lastFailure = (url, error)
+            Self.log.error(
+                "Can't add \(url.path, privacy: .private) to recent files: \(String(describing: error), privacy: .public)"
+            )
+            return
+        }
         if recordSystemRecents { NSDocumentController.shared.noteNewRecentDocumentURL(url) }
     }
 

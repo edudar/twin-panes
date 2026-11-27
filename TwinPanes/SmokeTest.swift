@@ -377,6 +377,14 @@ struct SmokeTest {
         check(
             menu.items.last?.title == "Clear Menu" && menu.items.last?.isEnabled == true,
             "Clear Menu is enabled when Open Recent has items")
+        let missing = folder.appendingPathComponent("never-written-\(UUID().uuidString).bin")
+        app.recentFiles.note(missing)
+        check(
+            app.recentFiles.lastFailure?.url == missing
+                && !app.recentFiles.entries.contains {
+                    $0.url.lastPathComponent == missing.lastPathComponent
+                },
+            "a file that can't be bookmarked is left out, and why is kept")
     }
 
     /// Clicking a path-bar component navigates up and selects the child folder (M4, D-h).
