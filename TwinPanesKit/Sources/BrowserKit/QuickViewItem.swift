@@ -29,9 +29,10 @@ public final class QuickViewItem: WorkspaceItem {
     public var preferredFirstResponder: NSView? { controller.preferredResponder }
 
     public private(set) var isPinned: Bool
-    public let isFollowing: Bool
+    public private(set) var isFollowing: Bool
     public private(set) var currentURL: URL?
     public private(set) var activeMode: PreviewMode = .quickLook
+    public private(set) var isDataless = false
 
     private(set) var currentEntry: DirectoryEntry?
     private(set) var currentScope: SecurityScope?
@@ -135,6 +136,17 @@ public final class QuickViewItem: WorkspaceItem {
         loadedController?.syncPinButton()
     }
 
+    /// Permanently detaches a following tab from its source browser, hiding the Keep button
+    /// so it behaves like a standalone tab.
+    public func detachFromSource() {
+        guard isFollowing else { return }
+        isFollowing = false
+        isPinned = true
+        cancelPendingRetarget()
+        retargetGeneration &+= 1
+        loadedController?.syncPinButton()
+    }
+
     func togglePin() {
         guard isFollowing else { return }
         if isPinned {
@@ -146,9 +158,9 @@ public final class QuickViewItem: WorkspaceItem {
     }
 
     func selectMode(_ mode: PreviewMode) {
-        guard !isClosed, let entry = currentEntry, !entry.isDirectory, !entry.isPackage else {
-            return
-        }
+        guard !isClosed, let entry = currentEntry,
+            !entry.isDirectory, !entry.isPackage, !entry.isBrokenSymbolicLink
+        else { return }
         userOverrideMode = mode
         guard activeMode != mode else { return }
         activeMode = mode
@@ -171,6 +183,7 @@ public final class QuickViewItem: WorkspaceItem {
         currentEntry = nil
         currentURL = nil
         currentScope = nil
+        isDataless = false
         loadedController?.tearDown()
     }
 
@@ -181,9 +194,11 @@ public final class QuickViewItem: WorkspaceItem {
         currentEntry = entry
         currentURL = url
 
-        guard let entry, let url, !entry.isDirectory, !entry.isPackage else {
+        guard let entry, let url, !entry.isDirectory, !entry.isPackage, !entry.isBrokenSymbolicLink
+        else {
             detachSession()
             currentScope = nil
+            isDataless = false
             activeMode = .quickLook
             finishTargetUpdate(oldTitle: oldTitle)
             return
@@ -202,6 +217,7 @@ public final class QuickViewItem: WorkspaceItem {
     }
 
     private func refreshModeFromClassifier(for entry: DirectoryEntry, url: URL) {
+        isDataless = cloudDownloads.isDataless(url)
         if let override = userOverrideMode {
             activeMode = override
             return
@@ -210,7 +226,7 @@ public final class QuickViewItem: WorkspaceItem {
             for: entry.type,
             isDirectory: false,
             isPackage: false,
-            isDataless: cloudDownloads.isDataless(url),
+            isDataless: isDataless,
             hasDirtySession: observedSession?.isDirty ?? false
         )
     }
@@ -236,11 +252,17 @@ public final class QuickViewItem: WorkspaceItem {
     private func sessionRegistered(_ session: EditorSession) {
         guard !isClosed, let currentURL, Self.sameFile(session.url, currentURL) else { return }
         attachSession(session)
-        sessionChanged(.edited)
+        if session.isDirty {
+            sessionChanged(.edited)
+        } else {
+            loadedController?.syncHeader()
+            updateStatus()
+        }
     }
 
     private func sessionChanged(_ change: EditorSession.Change) {
-        guard let entry = currentEntry, let url = currentURL, !entry.isDirectory, !entry.isPackage
+        guard let entry = currentEntry, let url = currentURL,
+            !entry.isDirectory, !entry.isPackage, !entry.isBrokenSymbolicLink
         else { return }
         if change == .closed { detachSession() }
         let previousMode = activeMode
@@ -266,6 +288,8 @@ public final class QuickViewItem: WorkspaceItem {
             parts.append("Folder")
         } else if entry.isPackage {
             parts.append("Package")
+        } else if entry.isBrokenSymbolicLink {
+            parts.append("Broken symbolic link")
         } else {
             parts.append(activeMode == .quickLook ? "Quick Look" : "Hex")
             if showsUnsavedEdits { parts.append("Includes unsaved edits") }

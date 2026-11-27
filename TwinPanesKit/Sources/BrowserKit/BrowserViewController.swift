@@ -428,6 +428,10 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             return true
         }
         guard let entry = selectedEntry else { return false }
+        if entry.isBrokenSymbolicLink {
+            item.host?.showStatus("\(entry.url.path) · Broken symbolic link")
+            return true
+        }
         let size = entry.size.map { " · \($0.formatted()) bytes" } ?? ""
         item.host?.showStatus("\(entry.url.path)\(size)")
         return true
@@ -483,7 +487,8 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
 
     private var editableEntry: DirectoryEntry? {
         guard let item, !isEditingPath, !item.needsAccess,
-            let entry = selectedEntry, !entry.isDirectory && !entry.isPackage
+            let entry = selectedEntry, !entry.isDirectory && !entry.isPackage,
+            !entry.isBrokenSymbolicLink
         else { return nil }
         return entry
     }

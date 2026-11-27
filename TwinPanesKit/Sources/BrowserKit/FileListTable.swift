@@ -171,6 +171,7 @@ final class FileCell: NSTableCellView {
 final class IconCache {
     static let shared = IconCache(center: .default)
     static let didChange = Notification.Name("IconCache.didChange")
+    private nonisolated static let brokenSymbolicLinkID = "twinpanes.brokenSymbolicLink"
 
     struct Key: Hashable, Sendable {
         /// A type identifier, or an app's path.
@@ -272,6 +273,13 @@ final class IconCache {
     func icon(
         for entry: DirectoryEntry, scale: CGFloat, appearance: NSAppearance.Name
     ) -> NSImage? {
+        if entry.isBrokenSymbolicLink {
+            let key = Key(
+                id: Self.brokenSymbolicLinkID, isPath: false, scale: scale, appearance: appearance)
+            let cached = icons[key]
+            if cached?.generation != generation { load(key) }
+            return cached?.image
+        }
         let path = entry.url.path
         var usePath = entry.isApplication
         if !usePath, let known = customIcons[path] {
@@ -291,11 +299,17 @@ final class IconCache {
     func cachedIcon(
         for entry: DirectoryEntry, scale: CGFloat, appearance: NSAppearance.Name
     ) -> NSImage? {
-        let path = entry.url.path
-        let usePath = entry.isApplication || customIcons[path] == true
-        let key = Key(
-            id: usePath ? path : entry.type.identifier, isPath: usePath, scale: scale,
-            appearance: appearance)
+        let key: Key
+        if entry.isBrokenSymbolicLink {
+            key = Key(
+                id: Self.brokenSymbolicLinkID, isPath: false, scale: scale, appearance: appearance)
+        } else {
+            let path = entry.url.path
+            let usePath = entry.isApplication || customIcons[path] == true
+            key = Key(
+                id: usePath ? path : entry.type.identifier, isPath: usePath, scale: scale,
+                appearance: appearance)
+        }
         guard let cached = icons[key], cached.generation == generation else { return nil }
         return cached.image
     }
@@ -374,11 +388,38 @@ final class IconCache {
 
     /// Looks the key's icon up and draws it, off the main actor.
     nonisolated static func render(_ key: Key) -> NSImage? {
+        if key.id == brokenSymbolicLinkID {
+            return renderBrokenSymbolicLink(key)
+        }
         let workspace = NSWorkspace.shared
         let icon =
             key.isPath
             ? workspace.icon(forFile: key.id) : UTType(key.id).map { workspace.icon(for: $0) }
         return icon.map { drawn($0, key) }
+    }
+
+    private nonisolated static func renderBrokenSymbolicLink(_ key: Key) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [.systemOrange]))
+        guard
+            let symbol = NSImage(
+                systemSymbolName: "exclamationmark.triangle.fill",
+                accessibilityDescription: "Broken symbolic link")?
+                .withSymbolConfiguration(config)
+        else { return nil }
+        let canvas = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
+            let size = symbol.size
+            guard size.width > 0, size.height > 0 else { return false }
+            let scale = min(rect.width / size.width, rect.height / size.height)
+            let width = size.width * scale
+            let height = size.height * scale
+            let target = NSRect(
+                x: (rect.width - width) / 2, y: (rect.height - height) / 2,
+                width: width, height: height)
+            symbol.draw(in: target)
+            return true
+        }
+        return drawn(canvas, key)
     }
 
     /// `icon` drawn once, at 16 points, for the key's scale and appearance.
@@ -530,6 +571,9 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         cell.text = text(for: entry, column)
         cell.icon = column == .name ? icon(for: entry) : nil
         cell.alignment = column == .size ? .right : .left
+        cell.toolTip =
+            column == .name && entry.isBrokenSymbolicLink
+            ? "Broken symbolic link (target does not exist)" : nil
     }
 
     /// Gives the cells of `rowView` the entry now at `row`, in place; false if the row

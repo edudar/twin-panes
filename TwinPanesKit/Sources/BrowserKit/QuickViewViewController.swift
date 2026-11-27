@@ -27,13 +27,21 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
 
     var preferredResponder: NSView? {
         guard let viewIfLoaded else { return nil }
-        if item?.activeMode == .hex, let hexView = hexViewer?.viewController.view {
+        if item?.activeMode == .hex,
+            let hexView = hexViewer?.viewController.view,
+            !hexView.isHidden
+        {
             if hexView.acceptsFirstResponder { return hexView }
-            if let sub = hexView.subviews.first(where: { $0.acceptsFirstResponder }) {
+            if let sub = hexView.subviews.first(where: { !$0.isHidden && $0.acceptsFirstResponder })
+            {
                 return sub
             }
         }
-        if item?.activeMode == .quickLook, let ql = quickLookHost, ql.acceptsFirstResponder {
+        if item?.activeMode == .quickLook,
+            let ql = quickLookHost,
+            !ql.isHidden,
+            ql.acceptsFirstResponder
+        {
             return ql
         }
         return viewIfLoaded
@@ -99,12 +107,15 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
         let badgeLabel = NSTextField(labelWithString: "Includes unsaved edits")
         badgeLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
         badgeLabel.textColor = .labelColor
+        badgeLabel.lineBreakMode = .byTruncatingTail
+        badgeLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         badgeLabel.translatesAutoresizingMaskIntoConstraints = false
         unsavedBadge.boxType = .custom
         unsavedBadge.borderWidth = 0
         unsavedBadge.cornerRadius = 8
         unsavedBadge.fillColor = NSColor.systemOrange.withAlphaComponent(0.2)
         unsavedBadge.contentViewMargins = .zero
+        unsavedBadge.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         unsavedBadge.setAccessibilityIdentifier("quickViewUnsavedBadge")
         unsavedBadge.addSubview(badgeLabel)
         NSLayoutConstraint.activate([
@@ -176,16 +187,31 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
             showPlaceholder(symbol: "shippingbox", title: entry.name, subtitle: "Package")
             return
         }
+        if entry.isBrokenSymbolicLink {
+            clearViewers()
+            showPlaceholder(
+                symbol: "exclamationmark.triangle", title: entry.name,
+                subtitle: "Broken symbolic link — target not found")
+            return
+        }
 
-        placeholderStack.isHidden = true
         switch item.activeMode {
         case .quickLook:
+            if item.isDataless {
+                clearViewers()
+                showPlaceholder(
+                    symbol: "icloud.and.arrow.down", title: entry.name,
+                    subtitle: "In iCloud — not downloaded")
+                return
+            }
+            placeholderStack.isHidden = true
             hexViewer?.viewController.view.isHidden = true
             hexViewer?.show(nil, scope: nil)
             let host = ensureQuickLookHost(for: item)
             host.isHidden = false
             host.show(entry.url, scope: item.currentScope)
         case .hex:
+            placeholderStack.isHidden = true
             quickLookHost?.isHidden = true
             quickLookHost?.show(nil, scope: nil)
             let viewer = ensureHexViewer(for: item)
@@ -197,7 +223,9 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
     func syncHeader() {
         guard isViewLoaded, let item else { return }
         titleLabel.stringValue = item.title
-        let isRegularFile = item.currentEntry.map { !$0.isDirectory && !$0.isPackage } ?? false
+        let isRegularFile =
+            item.currentEntry.map { !$0.isDirectory && !$0.isPackage && !$0.isBrokenSymbolicLink }
+            ?? false
         unsavedBadge.isHidden = !(isRegularFile && item.showsUnsavedEdits)
         modeControl.isEnabled = isRegularFile
         modeControl.selectedSegment = item.activeMode == .hex ? 1 : 0
@@ -218,6 +246,7 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
         quickLookHost?.close()
         quickLookHost?.removeFromSuperview()
         quickLookHost = nil
+        hexViewer?.onStateChange = nil
         hexViewer?.show(nil, scope: nil)
         hexViewer?.viewController.view.removeFromSuperview()
         hexViewer?.viewController.removeFromParent()
@@ -277,9 +306,11 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
     }
 
     /// F4 / ⌃⌘E / Edit button: opens the displayed regular file in the editor; beeps on
-    /// folders, packages, or empty selection.
+    /// folders, packages, broken symlinks, or empty selection.
     @objc func browserEdit(_ sender: Any?) {
-        guard let item, let entry = item.currentEntry, !entry.isDirectory, !entry.isPackage else {
+        guard let item, let entry = item.currentEntry,
+            !entry.isDirectory, !entry.isPackage, !entry.isBrokenSymbolicLink
+        else {
             NSSound.beep()
             return
         }
@@ -290,7 +321,7 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
         switch menuItem.action {
         case #selector(browserEdit(_:)):
             guard let entry = item?.currentEntry else { return false }
-            return !entry.isDirectory && !entry.isPackage
+            return !entry.isDirectory && !entry.isPackage && !entry.isBrokenSymbolicLink
         default:
             return true
         }

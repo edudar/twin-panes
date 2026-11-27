@@ -30,8 +30,14 @@ import WorkspaceKit
     }
 
     @MainActor
+    final class ResponderViewController: NSViewController {
+        final class ResponderView: NSView { override var acceptsFirstResponder: Bool { true } }
+        override func loadView() { view = ResponderView() }
+    }
+
+    @MainActor
     final class FakeHexViewer: HexPreviewing {
-        let viewController = NSViewController()
+        let viewController: NSViewController = ResponderViewController()
         var showsUnsavedEdits = false
         var onStateChange: (() -> Void)?
         var shown: [URL?] = []
@@ -40,6 +46,12 @@ import WorkspaceKit
             shown.append(url)
             currentScope = url == nil ? nil : scope
         }
+    }
+
+    struct FakeCloudDownloads: CloudDownloads {
+        let datalessURLs: Set<URL>
+        func isDataless(_ url: URL) -> Bool { datalessURLs.contains(url.standardizedFileURL) }
+        func startDownload(_ url: URL) throws {}
     }
 
     @MainActor
@@ -93,13 +105,14 @@ import WorkspaceKit
         sessions: SessionRegistry? = nil,
         isFollowing: Bool = true,
         debounce: Duration = .zero,
+        cloudDownloads: any CloudDownloads = RealCloudDownloads(),
         onEdit: @escaping (URL, SecurityScope?) -> Void = { _, _ in }
     ) -> (item: QuickViewItem, quickLook: FakeQuickLookViewer, quickLookCount: () -> Int) {
         let quickLook = FakeQuickLookViewer()
         var creations = 0
         let item = QuickViewItem(
             viewerFactory: factory, sessions: sessions, isFollowing: isFollowing,
-            debounce: debounce, onEdit: onEdit,
+            debounce: debounce, cloudDownloads: cloudDownloads, onEdit: onEdit,
             makeQuickLook: {
                 creations += 1
                 return QuickLookHostView(viewer: quickLook)
@@ -263,7 +276,7 @@ import WorkspaceKit
         item.show(liveTxt, scope: nil)
         #expect(item.activeMode == .quickLook && badge.isHidden)
         let (liveSession, _) = try sessions.open(liveTxt.url)
-        #expect(badge.isHidden)
+        #expect(badge.isHidden && item.activeMode == .quickLook)
         try editFirst(liveSession)
         #expect(!badge.isHidden && item.activeMode == .hex)
         #expect(host.messages.last?.contains("Includes unsaved edits") == true)
@@ -344,5 +357,81 @@ import WorkspaceKit
         hexItem.willClose()
         #expect(hexProbe.scope == nil && factory.created.first?.shown == [bin.url, nil])
         #expect(factory.created.first?.currentScope == nil)
+        #expect(factory.created.first?.onStateChange == nil)
+    }
+
+    @Test func datalessFileShowsPlaceholderWithoutCallingQuickLookAndAllowsHexToggle() throws {
+        defer { cleanUp() }
+        let file = try makeFileEntry(name: "cloud.txt", content: Data("x".utf8))
+        let factory = FakeHexViewerFactory()
+        let (item, quickLook, _) = makeItem(
+            factory: factory,
+            cloudDownloads: FakeCloudDownloads(datalessURLs: [file.url.standardizedFileURL]))
+        defer { item.willClose() }
+        let rootView = item.viewController.view
+        let modeControl: NSSegmentedControl = try #require(
+            view(withID: "quickViewModeControl", in: rootView))
+
+        item.show(file, scope: nil)
+        #expect(item.activeMode == .quickLook && item.isDataless)
+        #expect(quickLook.shown.isEmpty)
+        let labels = rootView.subviews.flatMap { allTextFields(in: $0) }.map(\.stringValue)
+        #expect(labels.contains("In iCloud — not downloaded"))
+
+        modeControl.selectedSegment = 1
+        modeControl.sendAction(modeControl.action, to: modeControl.target)
+        #expect(item.activeMode == .hex && factory.created.first?.shown == [file.url])
+    }
+
+    @Test func detachFromSourceHidesKeepButtonAndIgnoresRetarget() throws {
+        defer { cleanUp() }
+        let (item, quickLook, _) = makeItem(isFollowing: true)
+        defer { item.willClose() }
+        let pinButton: NSButton = try #require(
+            view(withID: "quickViewPinButton", in: item.viewController.view))
+        let fileA = try makeFileEntry(name: "a.txt", content: Data("a".utf8))
+        let fileB = try makeFileEntry(name: "b.txt", content: Data("b".utf8))
+
+        item.show(fileA, scope: nil)
+        item.detachFromSource()
+        #expect(!item.isFollowing && item.isPinned && pinButton.isHidden)
+
+        item.retarget(to: fileB, scope: nil)
+        #expect(item.currentURL == fileA.url && quickLook.shown == [fileA.url])
+    }
+
+    @Test func brokenSymlinkShowsPlaceholderDisablesEditAndSkipsHiddenHexResponder() throws {
+        defer { cleanUp() }
+        let factory = FakeHexViewerFactory()
+        let (item, quickLook, _) = makeItem(factory: factory)
+        defer { item.willClose() }
+        let rootView = item.viewController.view
+        let editButton: NSButton = try #require(view(withID: "quickViewEditButton", in: rootView))
+        let modeControl: NSSegmentedControl = try #require(
+            view(withID: "quickViewModeControl", in: rootView))
+
+        let bin = try makeFileEntry(name: "data.bin", content: Data([1, 2]))
+        item.show(bin, scope: nil)
+        #expect(item.preferredFirstResponder === factory.created.first?.viewController.view)
+
+        let linkURL = root.appendingPathComponent("broken")
+        try FileManager.default.createSymbolicLink(
+            atPath: linkURL.path, withDestinationPath: "/nonexistent/target")
+        let broken = DirectoryEntry(
+            url: linkURL, name: "broken", isDirectory: false, isPackage: false,
+            isSymbolicLink: true, isHidden: false, size: nil, modified: nil, type: .symbolicLink)
+        item.show(broken, scope: nil)
+
+        #expect(!editButton.isEnabled && !modeControl.isEnabled)
+        #expect(quickLook.shown.isEmpty)
+        #expect(item.preferredFirstResponder === rootView)
+        let labels = rootView.subviews.flatMap { allTextFields(in: $0) }.map(\.stringValue)
+        #expect(labels.contains("Broken symbolic link — target not found"))
+    }
+
+    private func allTextFields(in view: NSView) -> [NSTextField] {
+        var result = (view as? NSTextField).map { [$0] } ?? []
+        for subview in view.subviews { result += allTextFields(in: subview) }
+        return result
     }
 }

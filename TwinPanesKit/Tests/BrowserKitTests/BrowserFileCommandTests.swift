@@ -1,6 +1,7 @@
 import AppKit
 import Testing
 import TwinPanesCore
+import WorkspaceKit
 
 @testable import BrowserKit
 
@@ -207,6 +208,57 @@ import TwinPanesCore
         #expect(item.selectedName == "c.txt")
         #expect(item.controller.wantedSelection == nil)
     }
+
+    @Test func brokenSymbolicLinkDisablesEditKeepsViewAndShowsVisualIndicators() async throws {
+        defer { cleanUp() }
+        let linkURL = root.appendingPathComponent("folder/broken-link")
+        try FileManager.default.createSymbolicLink(
+            atPath: linkURL.path, withDestinationPath: "/nonexistent/missing-target")
+        var lastStatus = ""
+        let item = BrowserItem(folder: root.appendingPathComponent("folder"), grants: grants) {
+            _, _ in
+        }
+        let host = StatusRecorder { lastStatus = $0 }
+        item.host = host
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 300), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = item.viewController.view
+        defer {
+            window.close()
+            item.willClose()
+        }
+        await item.listed()
+
+        select(["broken-link"], in: item)
+        let controller = item.controller
+        let editItem = menuItem(#selector(BrowserViewController.browserEdit(_:)))
+        let viewItem = menuItem(#selector(BrowserViewController.browserView(_:)))
+        #expect(!controller.validateMenuItem(editItem))
+        #expect(controller.validateMenuItem(viewItem))
+        #expect(lastStatus.contains("Broken symbolic link"))
+
+        window.contentView?.layoutSubtreeIfNeeded()
+        let row = try #require(controller.row(named: "broken-link"))
+        let cell = try #require(
+            controller.tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileCell)
+        #expect(cell.toolTip == "Broken symbolic link (target does not exist)")
+        let entry = try #require(controller.selectedEntry)
+        #expect(entry.isBrokenSymbolicLink)
+        let cache = IconCache(center: NotificationCenter())
+        while cache.icon(for: entry, scale: 2, appearance: .aqua) == nil {
+            await Task.yield()
+        }
+        #expect(cache.cachedIcon(for: entry, scale: 2, appearance: .aqua) != nil)
+    }
+}
+
+@MainActor
+private final class StatusRecorder: WorkspaceHost {
+    let record: (String) -> Void
+    init(_ record: @escaping (String) -> Void) { self.record = record }
+    func showStatus(_ message: String) { record(message) }
 }
 
 @MainActor
