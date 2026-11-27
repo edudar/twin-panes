@@ -277,7 +277,14 @@ private final class ScopedResponderView: NSView, CommandScopeProviding, NSMenuIt
         #expect(window.toolbarStyle == .unified)
         let toolbar = try #require(window.toolbar)
         let ids = toolbar.items.map(\.itemIdentifier)
-        #expect(ids == [.toggleSidebar, .flexibleSpace, .togglePreviewPane])
+        #expect(ids == [.toggleSidebar, .flexibleSpace, .toggleOperations, .togglePreviewPane])
+        let operationsItem = try #require(
+            toolbar.items.first { $0.itemIdentifier == .toggleOperations })
+        #expect(operationsItem.label == "Activity")
+        #expect(operationsItem.toolTip == "Show Activity")
+        #expect(operationsItem.isBordered)
+        #expect(
+            operationsItem.action == #selector(MainFrameViewController.toggleOperationsPopover(_:)))
         let previewItem = try #require(
             toolbar.items.first { $0.itemIdentifier == .togglePreviewPane })
         #expect(previewItem.label == "Preview")

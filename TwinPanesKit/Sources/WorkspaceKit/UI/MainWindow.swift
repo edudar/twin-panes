@@ -176,6 +176,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 
     public func windowWillClose(_ notification: Notification) {
+        frameController.hideOperationsPopover()
         workspace.unregister(layout)
         for item in layout.allItems {
             item.willClose()
@@ -199,11 +200,11 @@ private final class MainToolbar: NSToolbar, NSToolbarDelegate {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .flexibleSpace, .togglePreviewPane]
+        [.toggleSidebar, .flexibleSpace, .toggleOperations, .togglePreviewPane]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .flexibleSpace, .togglePreviewPane]
+        [.toggleSidebar, .flexibleSpace, .toggleOperations, .togglePreviewPane]
     }
 
     func toolbar(
@@ -216,6 +217,11 @@ private final class MainToolbar: NSToolbar, NSToolbarDelegate {
                 .toggleSidebar, label: "Sidebar", palette: "Toggle Sidebar",
                 toolTip: "Show or hide the sidebar", symbol: "sidebar.leading",
                 action: #selector(MainFrameViewController.toggleSidebarShown(_:)))
+        case .toggleOperations:
+            makeToggleItem(
+                .toggleOperations, label: "Activity", palette: "Toggle Activity",
+                toolTip: "Show Activity", symbol: "arrow.up.arrow.down.circle",
+                action: #selector(MainFrameViewController.toggleOperationsPopover(_:)))
         case .togglePreviewPane:
             makeToggleItem(
                 .togglePreviewPane, label: "Preview", palette: "Toggle Preview",

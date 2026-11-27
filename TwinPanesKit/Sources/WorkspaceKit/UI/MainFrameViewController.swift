@@ -1,6 +1,8 @@
 import AppKit
 
 extension NSToolbarItem.Identifier {
+    /// Toolbar identifier for toggling the operations activity popover.
+    public static let toggleOperations = NSToolbarItem.Identifier("toggleOperations")
     /// Toolbar identifier for toggling the trailing preview pane.
     public static let togglePreviewPane = NSToolbarItem.Identifier("togglePreviewPane")
 }
@@ -12,7 +14,8 @@ extension NSToolbarItem.Identifier {
 /// The bottom drawer (M12) exists in the model but isn't drawn yet.
 @MainActor
 public final class MainFrameViewController: NSViewController, WorkspaceHost,
-    CommandScopeProviding, NSMenuItemValidation, NSToolbarItemValidation, NSSplitViewDelegate
+    CommandScopeProviding, NSMenuItemValidation, NSToolbarItemValidation, NSSplitViewDelegate,
+    NSPopoverDelegate
 {
     public let layout: MainFrameLayout
     private let closeCoordinator: CloseCoordinator
@@ -265,6 +268,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         }
         lastFocusedItemID = nil
         focusCurrentItemIfChanged()
+        updateOperationsToolbarItem()
     }
 
     // MARK: Restoration (docs/plans/M5.md, D-c)
@@ -517,6 +521,89 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     /// Called when the owning window is about to close so external hosts can tear down resources.
     public var onWillClose: (() -> Void)?
 
+    // MARK: Operations popover
+
+    private lazy var operationsPopover: NSPopover = {
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        popover.delegate = self
+        return popover
+    }()
+
+    /// Content controller shown inside the toolbar's anchored activity popover.
+    public var operationsPopoverContent: NSViewController? {
+        didSet {
+            if operationsPopoverContent == nil { hideOperationsPopover() }
+            operationsPopover.contentViewController = operationsPopoverContent
+            updateOperationsToolbarItem()
+        }
+    }
+
+    /// Visual state reflected on the toolbar's activity button.
+    public var operationsIndicatorState: OperationsIndicatorState = .idle {
+        didSet {
+            guard operationsIndicatorState != oldValue else { return }
+            updateOperationsToolbarItem()
+        }
+    }
+
+    /// Whether the operations popover is currently open.
+    public var isOperationsPopoverShown: Bool { operationsPopover.isShown }
+
+    /// Called right before the user opens the popover via the toolbar button.
+    public var onOperationsPopoverUserOpen: (() -> Void)?
+
+    /// Called after the popover closes (programmatically or when the user dismisses it).
+    public var onOperationsPopoverClose: (() -> Void)?
+
+    /// Opens the operations popover anchored to the toolbar button, if attached to a window.
+    public func showOperationsPopover() {
+        guard operationsPopoverContent != nil, !operationsPopover.isShown,
+            let window = viewIfLoaded?.window
+        else { return }
+        if let toolbarItem = operationsToolbarItem(in: window) {
+            operationsPopover.show(relativeTo: toolbarItem)
+        } else {
+            let anchor = NSRect(
+                x: max(view.bounds.maxX - 36, 0), y: max(view.bounds.maxY - 8, 0),
+                width: 28, height: 8)
+            operationsPopover.show(relativeTo: anchor, of: view, preferredEdge: .minY)
+        }
+    }
+
+    /// Closes the operations popover if it is open.
+    public func hideOperationsPopover() {
+        guard operationsPopover.isShown else { return }
+        operationsPopover.performClose(nil)
+    }
+
+    /// Toggles the operations popover from the toolbar button.
+    @objc public func toggleOperationsPopover(_ sender: Any?) {
+        if operationsPopover.isShown {
+            hideOperationsPopover()
+        } else {
+            onOperationsPopoverUserOpen?()
+            showOperationsPopover()
+        }
+    }
+
+    public func popoverDidClose(_ notification: Notification) {
+        onOperationsPopoverClose?()
+    }
+
+    private func operationsToolbarItem(in window: NSWindow) -> NSToolbarItem? {
+        window.toolbar?.items.first { $0.itemIdentifier == .toggleOperations }
+    }
+
+    private func updateOperationsToolbarItem() {
+        guard let window = viewIfLoaded?.window, let item = operationsToolbarItem(in: window) else {
+            return
+        }
+        item.image = OperationsToolbarIcon.image(for: operationsIndicatorState)
+        item.toolTip = OperationsToolbarIcon.toolTip(for: operationsIndicatorState)
+    }
+
     private func notifyPreviewVisibilityChange() {
         let shown = isPreviewPaneShown
         lastNotifiedPreviewShown = shown
@@ -685,6 +772,12 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         {
             item.toolTip = isSidebarShown ? "Hide Sidebar" : "Show Sidebar"
             return sidebar != nil
+        }
+        if item.itemIdentifier == .toggleOperations
+            || item.action == #selector(toggleOperationsPopover(_:))
+        {
+            item.toolTip = OperationsToolbarIcon.toolTip(for: operationsIndicatorState)
+            return operationsPopoverContent != nil
         }
         if item.itemIdentifier == .togglePreviewPane
             || item.action == #selector(togglePreviewPane(_:))
