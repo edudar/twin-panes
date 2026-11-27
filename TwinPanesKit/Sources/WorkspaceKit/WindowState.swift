@@ -42,6 +42,9 @@ public struct WindowState: Codable, Equatable, Sendable {
     /// Whether the sidebar was shown, and how wide it was; nil for the defaults.
     public var sidebarShown: Bool?
     public var sidebarWidth: Double?
+    /// Whether the preview pane was shown, and how wide it was; nil for the defaults.
+    public var previewShown: Bool?
+    public var previewWidth: Double?
 
     public func encoded() throws -> Data {
         let encoder = JSONEncoder()

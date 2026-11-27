@@ -211,4 +211,30 @@ import Testing
         #expect(!layout.canRemove(unknown))
         #expect(!layout.canMove(unknown, to: .rightPanel))
     }
+
+    @Test func backgroundInsertAndSelectKeepActivePanel() {
+        let layout = MainFrameLayout(filler: .testBrowsers)
+        let left = TestItem("left"), rightA = TestItem("rightA", slot: .rightPanel)
+        let quick = TestItem("quick", slot: .rightPanel)
+        let front = TestItem("front", slot: .rightPanel)
+        layout.insert(left)
+        layout.insert(rightA)
+        layout.activate(.leftPanel)
+
+        layout.insertInBackground(quick, in: .rightPanel)
+        #expect(layout.activePanel == .leftPanel && layout.focusedPanelItem?.id == left.id)
+        #expect(layout.selectedItem(in: .rightPanel)?.id == quick.id)
+
+        layout.insertInBackground(front, in: .rightPanel, at: 0)
+        #expect(layout.activePanel == .leftPanel)
+        #expect(layout.items(in: .rightPanel).map(\.title) == ["front", "rightA", "quick"])
+        #expect(layout.selectedItem(in: .rightPanel)?.id == front.id)
+
+        layout.selectInBackground(rightA.id)
+        #expect(layout.activePanel == .leftPanel && layout.focusedPanelItem?.id == left.id)
+        #expect(layout.selectedItem(in: .rightPanel)?.id == rightA.id)
+
+        layout.selectInBackground(ItemID())
+        #expect(layout.selectedItem(in: .rightPanel)?.id == rightA.id)
+    }
 }

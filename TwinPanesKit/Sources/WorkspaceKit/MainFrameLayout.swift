@@ -70,17 +70,30 @@ public final class MainFrameLayout {
         _ item: any WorkspaceItem, in slot: SlotID? = nil, at index: Int? = nil,
         select: Bool = true
     ) {
-        precondition(self.item(item.id) == nil, "item \(item.id) is already in this layout")
         let slot = slot ?? item.preferredSlot
+        place(item, in: slot, at: index)
+        if select || selection[slot] == nil { selection[slot] = item.id }
+        if select && slot.isPanel { activePanel = slot }
+        notify()
+    }
+
+    /// Inserts `item` into `slot` and selects it in `slot` without changing `activePanel`.
+    public func insertInBackground(
+        _ item: any WorkspaceItem, in slot: SlotID, at index: Int? = nil
+    ) {
+        place(item, in: slot, at: index)
+        selection[slot] = item.id
+        notify()
+    }
+
+    private func place(_ item: any WorkspaceItem, in slot: SlotID, at index: Int?) {
+        precondition(self.item(item.id) == nil, "item \(item.id) is already in this layout")
         var list = items(in: slot)
         let defaultIndex =
             selection[slot].flatMap { id in list.firstIndex { $0.id == id }.map { $0 + 1 } }
             ?? list.count
         list.insert(item, at: min(max(index ?? defaultIndex, 0), list.count))
         tabs[slot] = list
-        if select || selection[slot] == nil { selection[slot] = item.id }
-        if select && slot.isPanel { activePanel = slot }
-        notify()
     }
 
     /// Gives each empty panel a tab from the filler, the left panel first, so the right
@@ -154,6 +167,13 @@ public final class MainFrameLayout {
         guard let slot = slot(of: id) else { return }
         selection[slot] = id
         if slot.isPanel { activePanel = slot }
+        notify()
+    }
+
+    /// Selects `id` in its slot without changing `activePanel`.
+    public func selectInBackground(_ id: ItemID) {
+        guard let slot = slot(of: id) else { return }
+        selection[slot] = id
         notify()
     }
 

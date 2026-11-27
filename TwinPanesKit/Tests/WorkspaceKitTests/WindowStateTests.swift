@@ -138,4 +138,19 @@ private final class CountingItem: WorkspaceItem {
         #expect(
             restorer.item(from: ItemState(kind: "test", version: version, payload: Data())) == nil)
     }
+
+    @Test func previewFieldsRoundTripAndOlderStateDecodesWithoutThem() throws {
+        var state = saved.savedState
+        let legacyData = try state.encoded()
+        let legacyJSON = String(decoding: legacyData, as: UTF8.self)
+        #expect(!legacyJSON.contains("previewShown") && !legacyJSON.contains("previewWidth"))
+        let decodedLegacy = try WindowState(decoding: legacyData)
+        #expect(decodedLegacy.version == 1)
+        #expect(decodedLegacy.previewShown == nil && decodedLegacy.previewWidth == nil)
+
+        state.previewShown = true
+        state.previewWidth = 310
+        let decoded = try WindowState(decoding: try state.encoded())
+        #expect(decoded.previewShown == true && decoded.previewWidth == 310)
+    }
 }
