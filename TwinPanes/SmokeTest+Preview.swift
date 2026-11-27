@@ -60,10 +60,11 @@ extension SmokeTest {
             check, browser: leftBrowser, table: leftTable, controller: controller, window: window)
         await activePanelAndDirtySyncChecks(
             check, leftBrowser: leftBrowser, leftTable: leftTable, rightBrowser: rightBrowser,
-            rightTable: rightTable, preview: preview, controller: controller, window: window)
+            rightTable: rightTable, controller: controller, window: window)
         check(app.sessions.sessions.isEmpty, "closing editor leaves zero active EditorSessions")
         await cursorSweepCheck(
-            check, browser: leftBrowser, table: leftTable, controller: controller, window: window)
+            check, browser: leftBrowser, table: leftTable, preview: preview,
+            controller: controller, window: window)
 
         await leftBrowser.listed()
         await rightBrowser.listed()
@@ -73,9 +74,12 @@ extension SmokeTest {
         _ check: (Bool, String) -> Void, browser: BrowserItem, table: NSTableView,
         preview: PreviewPaneViewController, controller: MainWindowController, window: NSWindow
     ) async {
+        window.layoutIfNeeded()
+        let initialFraction = controller.frameController.windowState.dividerFraction
         check(
             dispatch(KeyChord("p", [.command, .shift]), in: window), "⇧⌘P opens the preview pane")
         window.layoutIfNeeded()
+        let shownFraction = controller.frameController.windowState.dividerFraction
         let metadataHeight = Self.view(in: preview.view, id: "previewMetadata")?.frame.height ?? 0
         check(
             controller.frameController.isPreviewPaneShown
@@ -84,6 +88,7 @@ extension SmokeTest {
                 && metadataHeight >= 120,
             "preview pane is shown with real layout (\(Int(preview.view.frame.width)) pt wide, metadata \(Int(metadataHeight)) pt tall)"
         )
+        panelSlotChecks(check, preview: preview, controller: controller, window: window)
 
         select(name: "hello.txt", in: browser, table: table)
         await waitFor {
@@ -97,10 +102,55 @@ extension SmokeTest {
 
         check(
             dispatch(KeyChord("p", [.command, .shift]), in: window), "⇧⌘P hides the preview pane")
+        window.layoutIfNeeded()
+        let hiddenFraction = controller.frameController.windowState.dividerFraction
         check(
             !controller.frameController.isPreviewPaneShown
                 && controller.frameController.windowState.previewShown == false,
             "preview pane is collapsed and recorded in WindowState")
+        if let initialFraction, let shownFraction, let hiddenFraction {
+            check(
+                abs(shownFraction - initialFraction) <= 0.01
+                    && abs(hiddenFraction - initialFraction) <= 0.01,
+                "⇧⌘P preserves panel split ratio (\(String(format: "%.3f -> %.3f -> %.3f", initialFraction, shownFraction, hiddenFraction)))"
+            )
+        } else {
+            check(false, "dividerFraction is available before and after ⇧⌘P")
+        }
+    }
+
+    private func panelSlotChecks(
+        _ check: (Bool, String) -> Void, preview: PreviewPaneViewController,
+        controller: MainWindowController, window: NSWindow
+    ) {
+        guard let content = window.contentView else {
+            return check(false, "window has contentView for panelSlot(at:) checks")
+        }
+        func windowCenter(of view: NSView) -> NSPoint {
+            view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+        }
+        let leftView = Self.view(in: content, id: SlotID.leftPanel.rawValue)
+        let rightView = Self.view(in: content, id: SlotID.rightPanel.rawValue)
+        check(
+            leftView.map {
+                controller.frameController.panelSlot(at: windowCenter(of: $0)) == .leftPanel
+            } ?? false,
+            "panelSlot(at:) routes left panel point to .leftPanel")
+        check(
+            rightView.map {
+                controller.frameController.panelSlot(at: windowCenter(of: $0)) == .rightPanel
+            } ?? false,
+            "panelSlot(at:) routes right panel point to .rightPanel")
+        check(
+            controller.frameController.panelSlot(at: windowCenter(of: preview.view)) == nil,
+            "panelSlot(at:) returns nil over the preview pane")
+        if controller.frameController.isSidebarShown,
+            let sidebarView = Self.view(in: content, id: "sidebar")
+        {
+            check(
+                controller.frameController.panelSlot(at: windowCenter(of: sidebarView)) == nil,
+                "panelSlot(at:) returns nil over the sidebar")
+        }
     }
 
     private func quickViewChecks(
@@ -112,9 +162,10 @@ extension SmokeTest {
         let qv = controller.layout.selectedItem(in: .rightPanel) as? QuickViewItem
         check(
             qv?.currentURL?.lastPathComponent == "hello.txt"
+                && qv?.activeMode == .quickLook
                 && controller.layout.activePanel == .leftPanel
                 && window.firstResponder === table,
-            "F3 opens Quick View in opposite panel without stealing focus")
+            "F3 opens Quick View in Quick Look mode in opposite panel without stealing focus")
 
         select(name: "raw.bin", in: browser, table: table)
         await waitFor { qv?.currentURL?.lastPathComponent == "raw.bin" && qv?.activeMode == .hex }
@@ -138,6 +189,24 @@ extension SmokeTest {
             await waitFor { qv.currentURL?.lastPathComponent == "raw.bin" }
         } else {
             check(false, "Quick View exposes Keep button")
+        }
+
+        if let qv,
+            let buriedBehind = controller.layout.items(in: .rightPanel).first(where: {
+                $0.id != qv.id
+            })
+        {
+            controller.layout.selectInBackground(buriedBehind.id)
+            check(
+                controller.layout.selectedItem(in: .rightPanel)?.id == buriedBehind.id,
+                "opposite panel shows another tab over Quick View")
+            check(dispatch(.function(3), in: window), "F3 surfaces buried Quick View")
+            check(
+                controller.layout.selectedItem(in: .rightPanel)?.id == qv.id
+                    && controller.layout.items(in: .rightPanel).contains { $0.id == qv.id }
+                    && controller.layout.activePanel == .leftPanel
+                    && window.firstResponder === table,
+                "F3 brings buried Quick View forward without closing it or stealing activePanel")
         }
 
         check(dispatch(.function(3), in: window), "second F3 toggles frontmost Quick View closed")
@@ -164,11 +233,29 @@ extension SmokeTest {
         }
         controller.layout.select(browser.id)
         window.makeFirstResponder(table)
+
+        check(dispatch(.function(3), in: window), "F3 opens Quick View for auto-detach check")
+        if let movedQV = controller.layout.selectedItem(in: .rightPanel) as? QuickViewItem {
+            controller.layout.move(movedQV.id, to: .leftPanel)
+            check(
+                !movedQV.isFollowing && movedQV.isPinned,
+                "moving following Quick View into source panel permanently detaches it")
+            let pinHidden =
+                Self.view(in: movedQV.viewController.view, id: "quickViewPinButton")?.isHidden
+                ?? false
+            check(pinHidden, "detached Quick View hides Keep button")
+            movedQV.willClose()
+            controller.layout.remove(movedQV.id)
+        } else {
+            check(false, "Quick View opened for auto-detach check")
+        }
+        controller.layout.select(browser.id)
+        window.makeFirstResponder(table)
     }
 
     private func activePanelAndDirtySyncChecks(
         _ check: (Bool, String) -> Void, leftBrowser: BrowserItem, leftTable: NSTableView,
-        rightBrowser: BrowserItem, rightTable: NSTableView, preview: PreviewPaneViewController,
+        rightBrowser: BrowserItem, rightTable: NSTableView,
         controller: MainWindowController, window: NSWindow
     ) async {
         controller.layout.select(rightBrowser.id)
@@ -202,6 +289,22 @@ extension SmokeTest {
                 } == false,
             "dirty session updates Quick View with unsaved-edits badge")
 
+        if let qv {
+            controller.layout.select(qv.id)
+            window.makeFirstResponder(qv.preferredFirstResponder)
+            let sessionsBefore = app.sessions.sessions.count
+            let tabsBefore = controller.layout.allItems.count
+            check(
+                dispatch(.function(4), in: window),
+                "F4 inside Quick View focuses already-open editor")
+            check(
+                controller.layout.selectedItem(in: .leftPanel)?.id == editor.id
+                    && controller.layout.activePanel == .leftPanel
+                    && app.sessions.sessions.count == sessionsBefore
+                    && controller.layout.allItems.count == tabsBefore,
+                "F4 from Quick View focuses existing editor without duplicating session or tab")
+        }
+
         editor.willClose()
         controller.layout.remove(editor.id)
         if let qv {
@@ -214,7 +317,7 @@ extension SmokeTest {
 
     private func cursorSweepCheck(
         _ check: (Bool, String) -> Void, browser: BrowserItem, table: NSTableView,
-        controller: MainWindowController, window: NSWindow
+        preview: PreviewPaneViewController, controller: MainWindowController, window: NSWindow
     ) async {
         let sweepDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("smoke-sweep-\(UUID().uuidString)", isDirectory: true)
@@ -227,25 +330,76 @@ extension SmokeTest {
         await browser.listed()
         controller.layout.select(browser.id)
         window.makeFirstResponder(table)
-        _ = dispatch(KeyChord("p", [.command, .shift]), in: window)
-        table.selectRowIndexes([1], byExtendingSelection: false)
-        _ = dispatch(.function(3), in: window)
 
-        let stalls = StallGate(smoke: self)
-        defer { stalls.close() }
-        await stalls.check("1,000-file cursor sweep in Quick View and preview", check) {
-            for row in 1...min(1_000, table.numberOfRows - 1) {
-                table.selectRowIndexes([row], byExtendingSelection: false)
-                if row % 50 == 0 { await settle(milliseconds: 1) }
+        let fdBefore = Self.openFileDescriptorCount()
+        let openedPreview = dispatch(KeyChord("p", [.command, .shift]), in: window)
+        check(
+            openedPreview && controller.frameController.isPreviewPaneShown,
+            "⇧⌘P opens preview pane before cursor sweep")
+        table.selectRowIndexes([1], byExtendingSelection: false)
+        let openedQV = dispatch(.function(3), in: window)
+        let qv = controller.layout.selectedItem(in: .rightPanel) as? QuickViewItem
+        check(
+            openedQV && qv?.isFollowing == true,
+            "F3 opens following Quick View before cursor sweep")
+
+        let lastRow = min(1_000, table.numberOfRows - 1)
+        let finalName = lastRow >= 1 ? browser.entries[lastRow - 1].name : ""
+        if lastRow >= 1 {
+            let stalls = StallGate(smoke: self)
+            defer { stalls.close() }
+            await stalls.check("1,000-file cursor sweep in Quick View and preview", check) {
+                for row in 1...lastRow {
+                    table.selectRowIndexes([row], byExtendingSelection: false)
+                    if row % 50 == 0 { await settle(milliseconds: 1) }
+                }
             }
         }
-        await settle(milliseconds: 60)
+        await waitFor {
+            qv?.currentURL?.lastPathComponent == finalName
+                && Self.allText(in: preview.view, underID: "previewMetadata").contains(finalName)
+        }
+        check(
+            !finalName.isEmpty
+                && qv?.currentURL?.lastPathComponent == finalName
+                && Self.allText(in: preview.view, underID: "previewMetadata").contains(finalName),
+            "Quick View and preview pane settle on final swept file (\(finalName))")
         check(
             app.sessions.sessions.isEmpty,
             "1,000-file cursor sweep creates zero EditorSessions (\(app.sessions.sessions.count))")
         check(
             controller.layout.activePanel == .leftPanel,
             "1,000-file cursor sweep keeps activePanel on the browser")
+
+        if let qv {
+            let closedQV = dispatch(.function(3), in: window)
+            check(
+                closedQV
+                    && controller.layout.items(in: .rightPanel).allSatisfy {
+                        !($0 is QuickViewItem)
+                    },
+                "F3 closes sweep Quick View")
+            if controller.layout.item(qv.id) != nil {
+                qv.willClose()
+                controller.layout.remove(qv.id)
+            }
+        }
+        if controller.frameController.isPreviewPaneShown {
+            check(
+                dispatch(KeyChord("p", [.command, .shift]), in: window)
+                    && !controller.frameController.isPreviewPaneShown,
+                "⇧⌘P hides sweep preview pane")
+        }
+        if let fdBefore {
+            await waitFor { (Self.openFileDescriptorCount() ?? Int.max) <= fdBefore + 16 }
+            let fdAfter = Self.openFileDescriptorCount()
+            check(
+                fdAfter.map { $0 <= fdBefore + 16 } ?? false,
+                "1,000-file sweep leaks no file descriptors (before \(fdBefore), after \(fdAfter.map(String.init) ?? "nil"))"
+            )
+        } else {
+            check(false, "count open file descriptors in /dev/fd")
+        }
     }
 
     private func select(name: String, in browser: BrowserItem, table: NSTableView) {
@@ -286,6 +440,21 @@ extension SmokeTest {
         } catch {
             return false
         }
+    }
+
+    private static func openFileDescriptorCount() -> Int? {
+        guard let dir = opendir("/dev/fd") else { return nil }
+        defer { closedir(dir) }
+        var count = 0
+        while let entry = readdir(dir) {
+            let isDot = withUnsafeBytes(of: entry.pointee.d_name) { raw in
+                raw[0] == UInt8(ascii: ".")
+                    && (raw[1] == 0 || (raw[1] == UInt8(ascii: ".") && raw[2] == 0))
+            }
+            if !isDot { count += 1 }
+        }
+        // Subtract 1 for the opendir descriptor itself.
+        return max(0, count - 1)
     }
 
     private static func allText(in root: NSView, underID id: String) -> String {
