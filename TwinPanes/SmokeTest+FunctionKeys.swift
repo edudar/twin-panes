@@ -40,10 +40,19 @@ extension SmokeTest {
         table.selectRowIndexes([2], byExtendingSelection: false)
         window.update()
         button(3, of: bar)?.performClick(nil)
+        let quickViews = app.workspace.allItems.compactMap { $0 as? QuickViewItem }
+        check(
+            quickViews.contains { $0.currentURL?.lastPathComponent == "data.bin" },
+            "clicking the bar's F3 opens Quick View on the selected file")
+        for item in quickViews {
+            item.willClose()
+            controller.layout.remove(item.id)
+        }
+        button(4, of: bar)?.performClick(nil)
         let editors = app.workspace.allItems.compactMap { $0 as? HexEditorItem }
         check(
             editors.contains { $0.url.lastPathComponent == "data.bin" },
-            "clicking the bar's F3 opens the selected file")
+            "clicking the bar's F4 opens the selected file")
         if let editor = editors.first {
             window.makeFirstResponder(editor.preferredFirstResponder)
             window.update()

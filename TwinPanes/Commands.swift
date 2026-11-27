@@ -50,10 +50,12 @@ extension CommandID {
     static let nextTab: CommandID = "workspace.nextTab"
     static let previousTab: CommandID = "workspace.previousTab"
     static let toggleSidebar: CommandID = "view.toggleSidebar"
+    static let togglePreviewPane: CommandID = "view.togglePreviewPane"
     static let toggleFunctionKeys: CommandID = "view.toggleFunctionKeys"
     static let switchPanel: CommandID = "panel.switch"
     static let moveTabToOtherPanel: CommandID = "panel.moveTab"
     static let browserView: CommandID = "browser.view"
+    static let browserViewInSamePanel: CommandID = "browser.viewInSamePanel"
     static let browserEdit: CommandID = "browser.edit"
     static let browserOpen: CommandID = "browser.open"
     static let browserOpenInEditor: CommandID = "browser.openInEditor"
@@ -130,6 +132,9 @@ enum DefaultCommands {
             .toggleSidebar, "Show Sidebar",
             #selector(MainFrameViewController.toggleSidebarShown(_:)))
         add(
+            .togglePreviewPane, "Show Preview",
+            #selector(MainFrameViewController.togglePreviewPane(_:)))
+        add(
             .toggleFunctionKeys, "Show Function Keys",
             #selector(AppActions.toggleFunctionKeys(_:)))
         add(.switchPanel, "Switch Panel", #selector(MainFrameViewController.switchPanel(_:)))
@@ -137,6 +142,9 @@ enum DefaultCommands {
             .moveTabToOtherPanel, "Move Tab to Other Panel",
             #selector(MainFrameViewController.moveTabToOtherPanel(_:)))
         add(.browserView, "View", #selector(BrowserActions.browserView(_:)))
+        add(
+            .browserViewInSamePanel, "View in This Panel",
+            #selector(BrowserActions.browserViewInSamePanel(_:)))
         add(.browserEdit, "Edit", #selector(BrowserActions.browserEdit(_:)))
         add(.browserOpen, "Open", #selector(BrowserActions.browserOpen(_:)))
         add(
@@ -198,6 +206,7 @@ enum DefaultCommands {
         let pathField = BindingScope.item(.browser, part: "pathField")
         let editor = BindingScope.item(.editor)
         let findBar = BindingScope.item(.editor, part: "findBar")
+        let quickView = BindingScope.item(.quickView)
 
         registry.bind(KeyChord("q", .command), to: .quit)
         registry.bind(KeyChord("n", .command), to: .newWindow)
@@ -220,6 +229,7 @@ enum DefaultCommands {
         registry.bind(KeyChord("\t", .control), to: .nextTab)
         registry.bind(KeyChord("\t", [.control, .shift]), to: .previousTab)
         registry.bind(KeyChord("s", [.control, .command]), to: .toggleSidebar)  // as in Finder
+        registry.bind(KeyChord("p", [.command, .shift]), to: .togglePreviewPane)  // as in Finder
         // Only in the file list, so the path field and the editor keep Tab (§4.11).
         registry.bind(.tab, to: .switchPanel, in: fileList)
         registry.bind(KeyChord("\t", .shift), to: .switchPanel, in: fileList)
@@ -230,8 +240,14 @@ enum DefaultCommands {
         registry.bind(KeyChord("y", .command), to: .browserView, in: browser)  // Quick Look
         registry.bind(KeyChord("v", controlCommand), to: .browserView, in: browser)
         registry.bind(.function(3), to: .browserView, in: browser)
+        registry.bind(
+            KeyChord(KeyChord.function(3).key, .shift), to: .browserViewInSamePanel, in: browser)
+        registry.bind(
+            KeyChord("v", [.control, .command, .shift]), to: .browserViewInSamePanel, in: browser)
         registry.bind(KeyChord("e", controlCommand), to: .browserEdit, in: browser)
         registry.bind(.function(4), to: .browserEdit, in: browser)
+        registry.bind(KeyChord("e", controlCommand), to: .browserEdit, in: quickView)
+        registry.bind(.function(4), to: .browserEdit, in: quickView)
         registry.bind(KeyChord("r", controlCommand), to: .browserRename, in: browser)
         registry.bind(.function(2), to: .browserRename, in: browser)
         registry.bind(KeyChord("c", controlCommand), to: .browserCopyToOtherPanel, in: browser)

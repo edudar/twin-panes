@@ -1,6 +1,7 @@
 import AppKit
 import BrowserKit
 import EditorKit
+import HexViewKit
 import TwinPanesCore
 import WorkspaceKit
 
@@ -39,6 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     lazy var fileOperations = FileOperationCommands(grants: folderGrants) { [unowned self] in
         self.windowControllers
     }
+    /// Factory for read-only hex previews sharing live sessions (`docs/plans/M7.md`, D-a).
+    lazy var viewerFactory = SessionHexViewerFactory(sessions: sessions)
+    /// Maps each following `QuickViewItem.id` to the `BrowserItem.id` it follows.
+    var quickViewSources: [ItemID: ItemID] = [:]
 
     override init() {
         let child = SmokeChild(arguments: CommandLine.arguments)
@@ -114,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 url, scope in
                 self.openFile(url, scope: scope)
             }
-            browser?.fileCommands = self.fileOperations
+            if let browser { self.configureBrowser(browser) }
             return browser
         }
         restorer.register(.editor, newestVersion: HexEditorItem.stateVersion) { state in
@@ -346,10 +351,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             guard let self, let controller else { return }
             self.open(folder, inActivePanelOf: controller)
         }
-        controller.frameController.onUpdate = { [weak sidebar, weak controller] in
-            let active = controller?.layout.zoomedItem ?? controller?.layout.focusedPanelItem
-            sidebar?.highlight((active as? BrowserItem)?.folder)
-        }
         sidebar.onFavoritesEdited = { [weak self] in
             for controller in self?.windowControllers ?? [] {
                 (controller.frameController.sidebar as? SidebarViewController)?.reloadFavorites()
@@ -362,6 +363,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         controller.frameController.sidebar = sidebar
         controller.frameController.isFunctionKeyBarShown = isFunctionKeyBarShown
         controller.frameController.bottomAccessory = fileOperations.makeStrip(for: controller)
+        attachPreviewPane(to: controller)
         sidebar.show(volumes: volumes)
         volumeWatcher.start()
     }
@@ -424,7 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         ) { [weak self] url, scope in
             self?.openFile(url, scope: scope)
         }
-        browser.fileCommands = fileOperations
+        configureBrowser(browser)
         return browser
     }
 
@@ -443,10 +445,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         windowControllers.first { $0.layout.item(id) != nil }
     }
 
-    /// Adds an item to `target` (or the active window, opening one if needed).
+    /// Adds an item to `target` (or the active window, opening one if needed) in its
+    /// active panel.
     func show(_ item: any WorkspaceItem, in target: MainWindowController? = nil) {
         let controller = target ?? activeController ?? openMainWindow()
-        controller.layout.insert(item)
+        if controller.layout.zoomedItem != nil { controller.layout.exitZoom() }
+        controller.layout.insert(item, in: controller.layout.activePanel)
         controller.window?.makeKeyAndOrderFront(nil)
     }
 

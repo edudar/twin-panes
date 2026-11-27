@@ -83,11 +83,12 @@ enum MainMenu {
         _ = submenu(
             "View",
             [
-                command(.toggleSidebar), command(.toggleFunctionKeys), .separator(),
+                command(.toggleSidebar), command(.togglePreviewPane), command(.toggleFunctionKeys),
+                .separator(),
                 command(.toggleZoom), command(.exitZoom), .separator(),
                 command(.nextTab), command(.previousTab), command(.switchPanel), .separator(),
                 command(.browserOpen), command(.browserShowPackageContents),
-                command(.browserView), command(.browserEdit),
+                command(.browserView), command(.browserViewInSamePanel), command(.browserEdit),
                 command(.browserBack), command(.browserForward),
                 command(.browserParent), command(.browserGoToFolder),
                 command(.browserToggleHidden),
