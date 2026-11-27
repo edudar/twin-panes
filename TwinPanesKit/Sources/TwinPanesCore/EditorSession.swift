@@ -42,6 +42,8 @@ public final class EditorSession {
         /// Another app changed or deleted the file while the session has unsaved edits
         /// (`fileState` says which); a clean session just reloads.
         case fileChanged
+        /// The session closed (its editor tab closed or the app quit).
+        case closed
     }
 
     /// The file on disk compared with what the session last opened or saved.

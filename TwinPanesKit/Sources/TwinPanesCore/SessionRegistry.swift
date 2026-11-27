@@ -7,9 +7,15 @@ import Foundation
 @MainActor
 public final class SessionRegistry {
     private var entries: [FileIdentity.Key: Entry] = [:]
+    private var observers: [Observer] = []
 
     private struct Entry {
         weak var session: EditorSession?
+    }
+
+    private struct Observer {
+        weak var owner: AnyObject?
+        let handler: @MainActor (EditorSession) -> Void
     }
 
     /// Where sessions keep their folders and clones; nil keeps none.
@@ -34,8 +40,8 @@ public final class SessionRegistry {
         }
         let session = try EditorSession(
             url: url, scope: scope, addDirectory: addDirectory, sessionsRoot: sessionsRoot)
-        register(session, key: session.identity.key)
         session.startWatching()
+        register(session, key: session.identity.key)
         return (session, true)
     }
 
@@ -57,6 +63,19 @@ public final class SessionRegistry {
             self.entries = self.entries.filter { $0.value.session.map { $0 !== session } ?? false }
             self.entries[session.identity.key] = Entry(session: session)
         }
+        notifyObservers(session)
+    }
+
+    /// Calls `handler` whenever `open(_:scope:addDirectory:)` creates a new session or
+    /// `adopt(_:)` registers one, for as long as `owner` lives.
+    public func observe(_ owner: AnyObject, _ handler: @escaping @MainActor (EditorSession) -> Void)
+    {
+        observers.append(Observer(owner: owner, handler: handler))
+    }
+
+    private func notifyObservers(_ session: EditorSession) {
+        observers.removeAll { $0.owner == nil }
+        for observer in observers where observer.owner != nil { observer.handler(session) }
     }
 
     /// Live sessions, for tests and the quit workflow.

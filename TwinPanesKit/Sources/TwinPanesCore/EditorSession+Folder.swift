@@ -85,9 +85,15 @@ extension EditorSession {
     }
 
     /// The session is done with its file (its tab closed, or the app quits): the folder
-    /// is marked closed and deleted. Snapshots still reading the clone keep their open
-    /// descriptors.
+    /// is marked closed and deleted, and observers learn the session closed. Snapshots
+    /// still reading the clone keep their open descriptors.
     public func close() {
+        closeFolder()
+        notify(.closed)
+    }
+
+    /// Closes the journal and deletes the session folder without notifying `.closed`.
+    func closeFolder() {
         journal?.close()
         journal = nil
         guard let folder else { return }
