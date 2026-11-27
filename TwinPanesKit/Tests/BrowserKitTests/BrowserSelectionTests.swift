@@ -429,6 +429,23 @@ import WorkspaceKit
         await item.listed()
         #expect(item.selectedEntries.count == count)
     }
+
+    @Test func garbageReleasesItsValueOffTheMainThreadWhileBoxIsHeld() async {
+        var box: Garbage<DeinitProbe>?
+        let freedOffMain = await withCheckedContinuation { continuation in
+            let garbage = Garbage(DeinitProbe { continuation.resume(returning: $0) })
+            box = garbage
+            DispatchQueue.global(qos: .utility).async { garbage.empty() }
+        }
+        #expect(freedOffMain)
+        _ = box
+    }
+}
+
+private final class DeinitProbe: @unchecked Sendable {
+    private let onDeinit: @Sendable (Bool) -> Void
+    init(_ onDeinit: @escaping @Sendable (Bool) -> Void) { self.onDeinit = onDeinit }
+    deinit { onDeinit(!Thread.isMainThread) }
 }
 
 @MainActor

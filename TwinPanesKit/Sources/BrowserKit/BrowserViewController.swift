@@ -191,25 +191,24 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         showSortIndicator(item.order)
         updateAccessPrompt()
         let lead = selectedName
-        let selected = selection
+        let hadSelection = !selection.isEmpty
         let onParent = selectedParentRow
+        var restoredRows = tableRows(selectedRows ?? selectionRows(selection, in: item.listing))
         refreshRows()
         if let wanted = wantedSelection, let row = row(named: wanted) {
             wantedSelection = nil
             restoreSelection(row, parentRow: false)
             tableView.scrollRowToVisible(row)
         } else {
-            var rows = tableRows(
-                selectedRows ?? selectionRows(selected, in: item.listing))
             // The lead row last, so it stays the one `selectedRow` reports.
             let leadRow = lead.flatMap(row(named:))
-            if let leadRow { rows.remove(leadRow) }
-            restoreSelection(rows, lead: leadRow, parentRow: onParent)
+            if let leadRow { restoredRows.remove(leadRow) }
+            restoreSelection(restoredRows, lead: leadRow, parentRow: onParent)
             if scrolling, tableView.selectedRow >= 0 {
                 tableView.scrollRowToVisible(tableView.selectedRow)
             }
         }
-        if selected.count > 0, selection.count == 0 {
+        if hadSelection, selection.count == 0 {
             showsSelectionStatus = false
         }
     }
@@ -284,9 +283,15 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         let inserted = IndexSet(changes.inserted.map { $0 + offset })
         let changed = IndexSet(changes.changed.map { $0 + offset })
         let selected = tableView.selectedRow
-        let priorSelection = selection
+        let hadSelection = !selection.isEmpty
         let priorName = selectedName
         let priorTableSelected = tableView.selectedRowIndexes
+        let survivingRows =
+            !priorTableSelected.intersection(removed).isEmpty
+            ? (selectedRows
+                ?? (selection.count <= FolderListing.mainActorLimit
+                    ? selection.rows(in: item.listing) : nil))
+            : nil
         // Removing a selected row fires tableViewSelectionDidChange synchronously; keep
         // `wantedSelection` intact until lines below restore or fulfill it.
         isRestoringSelection = true
@@ -302,10 +307,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             let leadRow = priorName.flatMap { name in
                 asked.contains(name) ? found[name].map { $0 + offset } : self.row(named: name)
             }
-            if let surviving = selectedRows
-                ?? (priorSelection.count <= FolderListing.mainActorLimit
-                    ? priorSelection.rows(in: item.listing) : nil)
-            {
+            if let surviving = survivingRows {
                 var rows = tableRows(surviving)
                 if let leadRow { rows.remove(leadRow) }
                 if !rows.isEmpty || leadRow != nil {
@@ -344,7 +346,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             restoreSelection(row + offset, parentRow: false)
             tableView.scrollRowToVisible(row + offset)
         }
-        if priorSelection.count > 0, selection.count == 0 {
+        if hadSelection, selection.count == 0 {
             showsSelectionStatus = false
         }
         return true
@@ -395,11 +397,11 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             rows.remove(0)
             rows.shift(startingAt: 1, by: -1)
         }
-        let old = selection
+        let old = Garbage(selection)
         selection = item.map { ListingSelection(rows: rows, of: $0.listing) } ?? .none
         // The old selection may hold the last copy of a replaced 100k listing, which
         // takes tens of milliseconds to free: let it go off the main actor.
-        DispatchQueue.global(qos: .utility).async { _ = old }
+        DispatchQueue.global(qos: .utility).async { old.empty() }
         selectedParentRow = isParentRowSelected
         if !isRestoringSelection {
             wantedSelection = nil
