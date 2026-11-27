@@ -9,7 +9,7 @@ extension AppDelegate {
     /// Attaches the trailing preview pane and wires layout updates for auto-pinning
     /// following Quick View tabs and refreshing the preview pane.
     func attachPreviewPane(to controller: MainWindowController) {
-        let preview = PreviewPaneViewController(viewerFactory: viewerFactory, sessions: sessions)
+        let preview = PreviewPaneViewController()
         let frame = controller.frameController
         frame.onPreviewVisibilityChange = { [weak self, weak preview, weak controller] shown in
             preview?.setActive(shown)
@@ -117,10 +117,15 @@ extension AppDelegate {
     private func makeQuickView(
         isFollowing: Bool, in controller: MainWindowController
     ) -> QuickViewItem {
-        QuickViewItem(viewerFactory: viewerFactory, sessions: sessions, isFollowing: isFollowing) {
-            [weak self, weak controller] url, scope in
-            self?.openFile(url, scope: scope, in: controller)
+        weak var created: QuickViewItem?
+        let item = QuickViewItem(
+            viewerFactory: viewerFactory, sessions: sessions, isFollowing: isFollowing
+        ) { [weak self, weak controller] url, scope in
+            let slot = created.flatMap { controller?.layout.slot(of: $0.id) }
+            self?.openFile(url, scope: scope, in: controller, slot: slot)
         }
+        created = item
+        return item
     }
 
     private func followingQuickView(

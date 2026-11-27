@@ -17,39 +17,19 @@ import WorkspaceKit
         func close() { closeCount += 1 }
     }
 
-    private final class FakeHexViewer: HexPreviewing {
-        let viewController = NSViewController()
-        var showsUnsavedEdits = false
-        var onStateChange: (() -> Void)?
-        var shown: [URL?] = []
-        func show(_ url: URL?, scope: SecurityScope?) { shown.append(url) }
-    }
-
-    private final class FakeHexViewerFactory: HexViewerFactory {
-        var createdStyles: [HexViewerStyle] = []
-        var viewers: [FakeHexViewer] = []
-        func makeHexViewer(style: HexViewerStyle) -> any HexPreviewing {
-            createdStyles.append(style)
-            let viewer = FakeHexViewer()
-            viewers.append(viewer)
-            return viewer
-        }
-    }
-
     private final class ScopeProbe { weak var scope: SecurityScope? }
 
     private func makeController(
-        sessions: SessionRegistry? = nil,
         readMetadata: @escaping @Sendable (URL) throws -> FileMetadata = {
             PreviewPaneViewControllerTests.metadata(for: $0)
         }
-    ) -> (PreviewPaneViewController, FakeQuickLookViewer, FakeHexViewerFactory) {
-        let (fakeQL, factory) = (FakeQuickLookViewer(), FakeHexViewerFactory())
+    ) -> (PreviewPaneViewController, FakeQuickLookViewer) {
+        let fakeQL = FakeQuickLookViewer()
         let controller = PreviewPaneViewController(
-            viewerFactory: factory, sessions: sessions, debounce: .zero,
-            makeQuickLook: { QuickLookHostView(viewer: fakeQL) }, readMetadata: readMetadata)
+            debounce: .zero, makeQuickLook: { QuickLookHostView(viewer: fakeQL) },
+            readMetadata: readMetadata)
         _ = controller.view
-        return (controller, fakeQL, factory)
+        return (controller, fakeQL)
     }
 
     private func withTempDir(_ body: (URL) async throws -> Void) async throws {
@@ -72,12 +52,13 @@ import WorkspaceKit
         }
     }
 
-    nonisolated private static func metadata(for url: URL) -> FileMetadata {
+    nonisolated private static func metadata(for url: URL, isDataless: Bool = false) -> FileMetadata
+    {
         let type: UTType = url.pathExtension == "bin" ? .data : .text
         return FileMetadata(
             url: url, name: url.lastPathComponent, kind: type == .text ? "Text" : "Data",
             typeIdentifier: type.identifier, isDirectory: false, isPackage: false,
-            isSymbolicLink: false, isDataless: false, size: 16, allocatedSize: 4096,
+            isSymbolicLink: false, isDataless: isDataless, size: 16, allocatedSize: 4096,
             created: nil, modified: nil, accessed: nil, posixMode: 0o644,
             owner: "user", group: "staff", hardLinkCount: 1, flags: [], symlinkTarget: nil,
             extendedAttributes: [], hasMoreExtendedAttributes: false)
@@ -94,7 +75,7 @@ import WorkspaceKit
         try await withTempDir { dir in
             let readCounter = ReadCounter()
             let urls = (0..<100).map { dir.appendingPathComponent("file-\($0).txt") }
-            let (controller, fakeQL, factory) = makeController { url in
+            let (controller, fakeQL) = makeController { url in
                 readCounter.increment()
                 return Self.metadata(for: url)
             }
@@ -102,73 +83,44 @@ import WorkspaceKit
                 for url in urls { controller.show(file: url, scope: nil) }
             }
             #expect(readCounter.count == 1 && fakeQL.shown.last == urls.last)
-            #expect(factory.viewers.isEmpty)
             controller.tearDown()
             #expect(fakeQL.closeCount == 1)
-        }
-    }
-
-    @Test func pinningFreezesDisplayAndCatchesUpOnUnpin() async throws {
-        try await withTempDir { dir in
-            let (a, b) = (dir.appendingPathComponent("a.txt"), dir.appendingPathComponent("b.txt"))
-            let (controller, fakeQL, _) = makeController()
-            await waitForLoad(controller) { controller.show(file: a, scope: nil) }
-            controller.togglePin(nil)
-            #expect(controller.isPinned)
-            controller.show(file: b, scope: nil)
-            await Task.yield()
-            #expect(fakeQL.shown == [a])
-            await waitForLoad(controller) { controller.togglePin(nil) }
-            #expect(!controller.isPinned && fakeQL.shown.last == b)
-            controller.tearDown()
         }
     }
 
     @Test func setActiveFalseClearsResourcesAndResumesLatestTarget() async throws {
         try await withTempDir { dir in
             let (a, b) = (dir.appendingPathComponent("a.bin"), dir.appendingPathComponent("b.txt"))
-            let (controller, fakeQL, factory) = makeController()
+            let (controller, fakeQL) = makeController()
             let probe = ScopeProbe()
             await waitForLoad(controller) {
                 let scope = SecurityScope(url: a)
                 probe.scope = scope
                 controller.show(file: a, scope: scope)
             }
-            #expect(controller.activeMode == .hex && factory.createdStyles == [.compact])
-            #expect(probe.scope != nil)
+            #expect(fakeQL.shown.last == a && probe.scope != nil)
 
             controller.setActive(false)
-            #expect(probe.scope == nil && factory.viewers.first?.shown.last == .some(nil))
+            #expect(probe.scope == nil && fakeQL.shown.last == .some(nil))
             #expect(controller.metadataView.titleText == nil)
             controller.show(file: b, scope: nil)
             await Task.yield()
-            #expect(fakeQL.shown.isEmpty)
+            #expect(fakeQL.shown.last == .some(nil))
 
             await waitForLoad(controller) { controller.setActive(true) }
-            #expect(controller.activeMode == .quickLook && fakeQL.shown.last == b)
+            #expect(fakeQL.shown.last == b)
             controller.tearDown()
         }
     }
 
-    @Test func modeOverrideResetsOnNextItemAndSelectionSummariesWork() async throws {
+    @Test func selectionSummariesAndDatalessPlaceholderWork() async throws {
         try await withTempDir { dir in
             let (a, b) = (dir.appendingPathComponent("a.txt"), dir.appendingPathComponent("b.txt"))
-            let (controller, _, factory) = makeController()
-            await waitForLoad(controller) { controller.show(file: a, scope: nil) }
-            #expect(controller.activeMode == .quickLook && controller.modeControl.isEnabled)
-
-            controller.modeControl.selectedSegment = 1
-            controller.modeChanged(controller.modeControl)
-            #expect(controller.activeMode == .hex && factory.viewers.first?.shown.last == a)
-
-            await waitForLoad(controller) { controller.show(file: b, scope: nil) }
-            #expect(controller.activeMode == .quickLook)
-
+            let (controller, _) = makeController()
             let entries = [makeEntry(url: a, size: 120), makeEntry(url: b, size: 380)]
             await waitForLoad(controller) { controller.show(entries: entries, scope: nil) }
             #expect(controller.metadataView.titleText == "2 items selected")
             #expect(controller.metadataView.rows.first?.label == "Total Size")
-            #expect(!controller.modeControl.isEnabled)
 
             await waitForLoad(controller) {
                 controller.show(entries: [makeEntry(url: dir, name: "..")], scope: nil)
@@ -177,55 +129,43 @@ import WorkspaceKit
             await waitForLoad(controller) { controller.show(file: nil, scope: nil) }
             #expect(controller.metadataView.messageText == "No Selection")
             controller.tearDown()
+
+            let (datalessController, datalessQL) = makeController { url in
+                Self.metadata(for: url, isDataless: true)
+            }
+            await waitForLoad(datalessController) { datalessController.show(file: a, scope: nil) }
+            #expect(datalessQL.shown.isEmpty)
+            #expect(datalessController.placeholderLabel.stringValue.contains("iCloud"))
+            datalessController.tearDown()
         }
     }
 
     @Test func metadataReadFailureShowsInlineErrorPlaceholder() async throws {
-        let (controller, _, _) = makeController { _ in throw POSIXError(.ENOENT) }
+        let (controller, _) = makeController { _ in throw POSIXError(.ENOENT) }
         await waitForLoad(controller) {
             controller.show(file: URL(fileURLWithPath: "/tmp/missing.txt"), scope: nil)
         }
-        #expect(!controller.modeControl.isEnabled)
         #expect(controller.placeholderLabel.stringValue.contains("missing.txt"))
         #expect(controller.metadataView.messageText != nil)
         controller.tearDown()
     }
 
-    @Test func liveDirtySessionUpdatesBannerAndModeBeforeAndAfterHexCreation() async throws {
-        try await withTempDir { dir in
-            let registry = SessionRegistry()
-            let file = dir.appendingPathComponent("notes.txt")
-            try Data("hello".utf8).write(to: file)
-            let (controller, _, factory) = makeController(sessions: registry)
+    @Test func layoutGivesPreviewAndMetadataRealHeightsBelowSafeArea() {
+        let (controller, _) = makeController()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 600),
+            styleMask: [.titled, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
+        window.contentView = controller.view
+        window.layoutIfNeeded()
 
-            await waitForLoad(controller) { controller.show(file: file, scope: nil) }
-            #expect(controller.activeMode == .quickLook && controller.unsavedBanner.isHidden)
-            #expect(factory.viewers.isEmpty)
-
-            let (session, _) = try registry.open(file)
-            #expect(controller.activeMode == .quickLook && controller.unsavedBanner.isHidden)
-
-            try session.overwrite(
-                Data("H".utf8), at: 0, selectionBefore: 0..<0, selectionAfter: 1..<1)
-            #expect(controller.activeMode == .hex && !controller.unsavedBanner.isHidden)
-            #expect(controller.unsavedLabel.stringValue == "Includes unsaved edits")
-            #expect(controller.showHexButton.isHidden && factory.viewers.count == 1)
-
-            controller.modeControl.selectedSegment = 0
-            controller.modeChanged(controller.modeControl)
-            #expect(controller.activeMode == .quickLook && !controller.showHexButton.isHidden)
-            #expect(
-                controller.unsavedLabel.stringValue
-                    == "Unsaved edits in editor (showing saved file)")
-
-            controller.showHexFromBanner(nil)
-            #expect(controller.activeMode == .hex && controller.showHexButton.isHidden)
-
-            session.revert()
-            session.close()
-            #expect(controller.unsavedBanner.isHidden)
-            controller.tearDown()
-        }
+        #expect(controller.previewContainer.frame.height >= 120)
+        #expect(controller.metadataView.frame.height >= 120)
+        let previewTop = controller.previewContainer.convert(
+            controller.previewContainer.bounds, to: nil
+        ).maxY
+        #expect(previewTop <= window.contentLayoutRect.maxY + 1)
+        controller.tearDown()
     }
 }
 

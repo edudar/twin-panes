@@ -12,7 +12,7 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
     private let modeControl = NSSegmentedControl(
         labels: ["Quick Look", "Hex"], trackingMode: .selectOne, target: nil, action: nil)
     private let editButton = NSButton(title: "Edit", target: nil, action: nil)
-    private let pinButton = NSButton(title: "Pin", target: nil, action: nil)
+    private let pinButton = NSButton(title: "Keep", target: nil, action: nil)
     private let bodyContainer = NSView()
     private let placeholderStack = NSStackView()
     private let placeholderIcon = NSImageView()
@@ -129,7 +129,6 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
         pinButton.controlSize = .small
         pinButton.bezelStyle = .push
         pinButton.setButtonType(.pushOnPushOff)
-        pinButton.imagePosition = .imageLeading
         pinButton.target = self
         pinButton.action = #selector(pinClicked(_:))
         pinButton.setAccessibilityIdentifier("quickViewPinButton")
@@ -209,10 +208,10 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
         guard isViewLoaded, let item else { return }
         pinButton.isHidden = !item.isFollowing
         pinButton.state = item.isPinned ? .on : .off
-        pinButton.image = NSImage(
-            systemSymbolName: item.isPinned ? "pin.fill" : "pin",
-            accessibilityDescription: "Pin"
-        )
+        pinButton.toolTip =
+            item.isPinned
+            ? "Keeping this file — click to follow selection"
+            : "Keep this file open (stop following selection)"
     }
 
     func tearDown() {

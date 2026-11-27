@@ -76,53 +76,24 @@ extension SmokeTest {
         check(
             dispatch(KeyChord("p", [.command, .shift]), in: window), "⇧⌘P opens the preview pane")
         window.layoutIfNeeded()
+        let metadataHeight = Self.view(in: preview.view, id: "previewMetadata")?.frame.height ?? 0
         check(
             controller.frameController.isPreviewPaneShown
                 && controller.frameController.windowState.previewShown == true
-                && preview.view.frame.width >= 200,
-            "preview pane is shown with real width (\(Int(preview.view.frame.width)) pt)")
+                && preview.view.frame.width >= 200
+                && metadataHeight >= 120,
+            "preview pane is shown with real layout (\(Int(preview.view.frame.width)) pt wide, metadata \(Int(metadataHeight)) pt tall)"
+        )
 
         select(name: "hello.txt", in: browser, table: table)
         await waitFor {
-            preview.activeMode == .quickLook
-                && Self.allText(in: preview.view, underID: "previewMetadata")
-                    .contains("com.twinpanes.smoke")
+            Self.allText(in: preview.view, underID: "previewMetadata")
+                .contains("com.twinpanes.smoke")
         }
         check(
-            preview.activeMode == .quickLook
-                && Self.allText(in: preview.view, underID: "previewMetadata")
-                    .contains("com.twinpanes.smoke"),
-            "preview pane uses Quick Look and shows xattr metadata for hello.txt")
-
-        select(name: "raw.bin", in: browser, table: table)
-        await waitFor { preview.activeMode == .hex }
-        check(preview.activeMode == .hex, "preview pane auto-selects hex for binary data")
-
-        if let modeControl = Self.view(in: preview.view, id: "previewModeControl")
-            as? NSSegmentedControl
-        {
-            modeControl.selectedSegment = 0
-            _ = modeControl.action.map { modeControl.sendAction($0, to: modeControl.target) }
-            check(preview.activeMode == .quickLook, "mode control switches preview to Quick Look")
-            modeControl.selectedSegment = 1
-            _ = modeControl.action.map { modeControl.sendAction($0, to: modeControl.target) }
-            check(preview.activeMode == .hex, "mode control switches preview back to Hex")
-        } else {
-            check(false, "preview pane exposes previewModeControl")
-        }
-
-        if let pin = Self.view(in: preview.view, id: "previewPinButton") as? NSButton {
-            pin.performClick(nil)
-            check(preview.isPinned, "Pin freezes the preview pane")
-            select(name: "hello.txt", in: browser, table: table)
-            await settle(milliseconds: 80)
-            check(preview.activeMode == .hex, "pinned preview ignores selection changes")
-            pin.performClick(nil)
-            await waitFor { preview.activeMode == .quickLook }
-            check(!preview.isPinned && preview.activeMode == .quickLook, "unpin catches up")
-        } else {
-            check(false, "preview pane exposes previewPinButton")
-        }
+            Self.allText(in: preview.view, underID: "previewMetadata")
+                .contains("com.twinpanes.smoke"),
+            "preview pane shows Quick Look and xattr metadata for hello.txt")
 
         check(
             dispatch(KeyChord("p", [.command, .shift]), in: window), "⇧⌘P hides the preview pane")
@@ -151,6 +122,24 @@ extension SmokeTest {
             qv?.currentURL?.lastPathComponent == "raw.bin" && qv?.activeMode == .hex,
             "moving cursor retargets following Quick View and switches to hex")
 
+        if let qv,
+            let keepButton = Self.view(in: qv.viewController.view, id: "quickViewPinButton")
+                as? NSButton
+        {
+            keepButton.performClick(nil)
+            check(keepButton.title == "Keep" && qv.isPinned, "Keep freezes Quick View")
+            select(name: "hello.txt", in: browser, table: table)
+            await settle(milliseconds: 50)
+            check(
+                qv.currentURL?.lastPathComponent == "raw.bin",
+                "kept Quick View ignores selection changes")
+            keepButton.performClick(nil)
+            select(name: "raw.bin", in: browser, table: table)
+            await waitFor { qv.currentURL?.lastPathComponent == "raw.bin" }
+        } else {
+            check(false, "Quick View exposes Keep button")
+        }
+
         check(dispatch(.function(3), in: window), "second F3 toggles frontmost Quick View closed")
         check(
             controller.layout.items(in: .rightPanel).allSatisfy { !($0 is QuickViewItem) },
@@ -168,7 +157,7 @@ extension SmokeTest {
         let promoted = controller.layout.selectedItem(in: .leftPanel) as? HexEditorItem
         check(
             promoted?.url.lastPathComponent == "raw.bin",
-            "F4 from Quick View opens HexEditorItem on the same file")
+            "F4 from Quick View opens HexEditorItem in the same panel")
         for item in [promoted as (any WorkspaceItem)?, standalone].compactMap({ $0 }) {
             item.willClose()
             controller.layout.remove(item.id)
@@ -186,36 +175,32 @@ extension SmokeTest {
         window.makeFirstResponder(rightTable)
         select(name: "raw.bin", in: rightBrowser, table: rightTable)
         check(dispatch(.function(4), in: window), "F4 in right panel opens editor")
-        guard let editor = controller.layout.selectedItem(in: .rightPanel) as? HexEditorItem else {
-            return check(false, "F4 in right panel opens HexEditorItem in .rightPanel")
+        guard let editor = controller.layout.selectedItem(in: .leftPanel) as? HexEditorItem else {
+            return check(false, "F4 in right panel opens HexEditorItem in .leftPanel")
         }
         check(
-            controller.layout.slot(of: editor.id) == .rightPanel,
-            "F4 opens HexEditorItem in the active panel (.rightPanel)")
+            controller.layout.slot(of: editor.id) == .leftPanel,
+            "F4 opens HexEditorItem in the opposite panel (.leftPanel)")
 
-        controller.layout.select(leftBrowser.id)
-        window.makeFirstResponder(leftTable)
-        select(name: "raw.bin", in: leftBrowser, table: leftTable)
-        _ = dispatch(KeyChord("p", [.command, .shift]), in: window)
+        controller.layout.select(rightBrowser.id)
+        window.makeFirstResponder(rightTable)
+        select(name: "raw.bin", in: rightBrowser, table: rightTable)
         _ = dispatch(.function(3), in: window)
-        let qv = controller.layout.selectedItem(in: .rightPanel) as? QuickViewItem
+        let qv = controller.layout.selectedItem(in: .leftPanel) as? QuickViewItem
 
         try? editor.session.overwrite(
             Data([0xAA]), at: 0, selectionBefore: 0..<0, selectionAfter: 1..<1)
         await waitFor {
-            let banner = Self.view(in: preview.view, id: "previewUnsavedBanner")
-            let badge = qv.flatMap {
-                Self.view(in: $0.viewController.view, id: "quickViewUnsavedBadge")
-            }
-            return banner?.isHidden == false && badge?.isHidden == false
+            qv.flatMap {
+                Self.view(in: $0.viewController.view, id: "quickViewUnsavedBadge")?.isHidden
+            } == false
         }
         check(
             editor.session.isDirty
-                && Self.view(in: preview.view, id: "previewUnsavedBanner")?.isHidden == false
                 && qv.flatMap {
                     Self.view(in: $0.viewController.view, id: "quickViewUnsavedBadge")?.isHidden
                 } == false,
-            "dirty session updates preview pane and Quick View with unsaved-edits markers")
+            "dirty session updates Quick View with unsaved-edits badge")
 
         editor.willClose()
         controller.layout.remove(editor.id)
@@ -223,7 +208,8 @@ extension SmokeTest {
             qv.willClose()
             controller.layout.remove(qv.id)
         }
-        _ = dispatch(KeyChord("p", [.command, .shift]), in: window)
+        controller.layout.select(leftBrowser.id)
+        window.makeFirstResponder(leftTable)
     }
 
     private func cursorSweepCheck(
