@@ -145,6 +145,7 @@ struct SmokeTest {
         }
         await parentRow(check, browser: browser, table: table, folder: folder, window: window)
         await selectionAndFunctionKeys(check, browser: browser, table: table, controller: first)
+        await previewAndQuickView(check, in: first)
         await fileOperations(check, in: first)
         await largeCopy(check, in: first)
         table.selectRowIndexes([1], byExtendingSelection: false)
