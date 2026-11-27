@@ -32,12 +32,17 @@ public final class PreviewPaneViewController: NSViewController {
 
     let modeControl = NSSegmentedControl(
         labels: ["Quick Look", "Hex"], trackingMode: .selectOne, target: nil, action: nil)
+    let pinButton = NSButton()
+    let unsavedBanner = NSBox()
+    let unsavedLabel = NSTextField(labelWithString: "")
+    let showHexButton = NSButton(title: "Show Hex", target: nil, action: nil)
     let metadataView = PreviewMetadataView()
     let placeholderLabel = NSTextField(wrappingLabelWithString: "")
     private let previewContainer = NSView()
     private var quickLookHost: QuickLookHostView?
     private var hexViewer: (any HexPreviewing)?
 
+    public private(set) var isPinned = false
     public private(set) var activeMode: PreviewMode = .quickLook
     private var isActive = true
     private var isTornDown = false
@@ -48,6 +53,8 @@ public final class PreviewPaneViewController: NSViewController {
     private var displayedMetadata: FileMetadata?
     private var currentScope: SecurityScope?
     private var userModeOverride: PreviewMode?
+    private weak var activeSession: EditorSession?
+    private var sessionObserverToken = NSObject()
     var onLoadFinished: (() -> Void)?
 
     /// Creates a preview pane using `viewerFactory` for compact hex previews and `sessions` for
@@ -75,6 +82,14 @@ public final class PreviewPaneViewController: NSViewController {
         self.readMetadata = readMetadata
         super.init(nibName: nil, bundle: nil)
         configureControls()
+        sessions?.observe(self) { [weak self] session in
+            guard let self, self.isActive, let url = self.displayedMetadata?.url,
+                self.sessions?.session(for: url) === session
+                    || url.standardizedFileURL == session.url.standardizedFileURL
+            else { return }
+            self.attachSession(session)
+            self.renderSingleTarget()
+        }
     }
 
     @available(*, unavailable)
@@ -83,9 +98,8 @@ public final class PreviewPaneViewController: NSViewController {
     public override func loadView() {
         let root = NSView()
         root.setAccessibilityIdentifier("previewPane")
-        let header = NSStackView(views: [modeControl, NSView()])
-        header.alignment = .centerY
-        header.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
+        let header = makeBar([modeControl, NSView(), pinButton], pad: 6)
+        pinEdges(makeBar([unsavedLabel, NSView(), showHexButton], pad: 4), in: unsavedBanner)
 
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         previewContainer.addSubview(placeholderLabel)
@@ -105,7 +119,7 @@ public final class PreviewPaneViewController: NSViewController {
         splitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         splitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
 
-        let stack = NSStackView(views: [header, splitView])
+        let stack = NSStackView(views: [header, unsavedBanner, splitView])
         stack.orientation = .vertical
         stack.alignment = .width
         stack.spacing = 0
@@ -134,11 +148,11 @@ public final class PreviewPaneViewController: NSViewController {
         guard active else {
             cancelPending()
             latestTarget = latestTarget.withoutScope
-            displayedTarget = .none
-            userModeOverride = nil
+            displayedTarget = isPinned ? displayedTarget.withoutScope : .none
+            if !isPinned { userModeOverride = nil }
             return clearDisplayedContent()
         }
-        loadNow(latestTarget)
+        loadNow(isPinned ? displayedTarget : latestTarget)
     }
 
     /// Releases Quick Look XPC resources, hex viewer state, and pending background tasks.
@@ -161,6 +175,20 @@ public final class PreviewPaneViewController: NSViewController {
         renderSingleTarget()
     }
 
+    @objc func togglePin(_ sender: Any?) {
+        isPinned.toggle()
+        updatePinButton()
+        guard !isPinned, isActive, latestTarget.key != displayedTarget.key else { return }
+        cancelPending()
+        loadNow(latestTarget)
+    }
+
+    @objc func showHexFromBanner(_ sender: Any?) {
+        guard displayedMetadata != nil else { return }
+        userModeOverride = .hex
+        renderSingleTarget()
+    }
+
     private func configureControls() {
         modeControl.selectedSegment = 0
         modeControl.controlSize = .small
@@ -169,11 +197,39 @@ public final class PreviewPaneViewController: NSViewController {
         modeControl.action = #selector(modeChanged(_:))
         modeControl.setAccessibilityIdentifier("previewModeControl")
 
+        pinButton.bezelStyle = .accessoryBarAction
+        pinButton.setButtonType(.toggle)
+        pinButton.isBordered = false
+        pinButton.target = self
+        pinButton.action = #selector(togglePin(_:))
+        pinButton.setAccessibilityIdentifier("previewPinButton")
+        updatePinButton()
+
+        unsavedBanner.boxType = .custom
+        unsavedBanner.borderWidth = 0
+        unsavedBanner.fillColor = NSColor.systemYellow.withAlphaComponent(0.14)
+        unsavedBanner.isHidden = true
+        unsavedBanner.setAccessibilityIdentifier("previewUnsavedBanner")
+        unsavedLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        unsavedLabel.lineBreakMode = .byTruncatingTail
+        showHexButton.controlSize = .mini
+        showHexButton.bezelStyle = .rounded
+        showHexButton.target = self
+        showHexButton.action = #selector(showHexFromBanner(_:))
+
         placeholderLabel.alignment = .center
         placeholderLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         placeholderLabel.textColor = .secondaryLabelColor
         placeholderLabel.stringValue = "No Selection"
         metadataView.showMessage("No Selection")
+    }
+
+    private func updatePinButton() {
+        pinButton.state = isPinned ? .on : .off
+        let tip = isPinned ? "Unpin preview" : "Pin preview"
+        pinButton.image = NSImage(
+            systemSymbolName: isPinned ? "pin.fill" : "pin", accessibilityDescription: tip)
+        pinButton.toolTip = tip
     }
 
     private func cancelPending() {
@@ -186,12 +242,14 @@ public final class PreviewPaneViewController: NSViewController {
         guard !isTornDown else { return }
         guard isActive else { return latestTarget = target.withoutScope }
         latestTarget = target
+        guard !isPinned else { return }
         cancelPending()
         let expected = generation
         let delay = debounce
         debounceTask = Task { @MainActor [weak self] in
             if delay > .zero { try? await Task.sleep(for: delay) } else { await Task.yield() }
-            guard let self, !Task.isCancelled, self.generation == expected, self.isActive
+            guard let self, !Task.isCancelled, self.generation == expected,
+                self.isActive, !self.isPinned
             else { return }
             self.loadNow(target)
         }
@@ -234,6 +292,7 @@ public final class PreviewPaneViewController: NSViewController {
         case .success(let metadata):
             displayedMetadata = metadata
             currentScope = scope
+            attachSession(sessions?.session(for: url))
             metadataView.show(metadata)
             renderSingleTarget()
         }
@@ -248,7 +307,7 @@ public final class PreviewPaneViewController: NSViewController {
             && metadata.size != nil
         let defaultMode = PreviewClassifier.defaultMode(
             for: utType, isDirectory: metadata.isDirectory, isPackage: metadata.isPackage,
-            isDataless: metadata.isDataless)
+            isDataless: metadata.isDataless, hasDirtySession: activeSession?.isDirty == true)
         activeMode = canUseHex ? (userModeOverride ?? defaultMode) : .quickLook
         modeControl.isEnabled = canUseHex
         modeControl.selectedSegment = activeMode == .hex ? 1 : 0
@@ -264,14 +323,18 @@ public final class PreviewPaneViewController: NSViewController {
             quickLookHost?.show(nil, scope: nil)
             ensureHexViewer().show(metadata.url, scope: currentScope)
         }
+        updateUnsavedBanner()
     }
 
     private func clearDisplayedContent(placeholder: String? = nil) {
         displayedMetadata = nil
         currentScope = nil
+        activeSession = nil
+        sessionObserverToken = NSObject()
         modeControl.isEnabled = false
         modeControl.selectedSegment = 0
         activeMode = .quickLook
+        unsavedBanner.isHidden = true
         quickLookHost?.isHidden = true
         hexViewer?.viewController.view.isHidden = true
         quickLookHost?.show(nil, scope: nil)
@@ -296,10 +359,42 @@ public final class PreviewPaneViewController: NSViewController {
     private func ensureHexViewer() -> any HexPreviewing {
         if let hexViewer { return hexViewer }
         let viewer = viewerFactory.makeHexViewer(style: .compact)
+        viewer.onStateChange = { [weak self] in self?.updateUnsavedBanner() }
         addChild(viewer.viewController)
         pinEdges(viewer.viewController.view, in: previewContainer)
         hexViewer = viewer
         return viewer
+    }
+
+    private func attachSession(_ session: EditorSession?) {
+        activeSession = session
+        let token = NSObject()
+        sessionObserverToken = token
+        session?.observe(token) { [weak self, weak session] change in
+            guard let self, let session, session === self.activeSession else { return }
+            if change == .closed {
+                self.activeSession = nil
+                self.sessionObserverToken = NSObject()
+            }
+            self.renderSingleTarget()
+        }
+    }
+
+    private func updateUnsavedBanner() {
+        let dirty = (activeSession?.isDirty == true) || (hexViewer?.showsUnsavedEdits == true)
+        guard dirty, displayedMetadata != nil else { return unsavedBanner.isHidden = true }
+        unsavedBanner.isHidden = false
+        let inHex = activeMode == .hex
+        unsavedLabel.stringValue =
+            inHex ? "Includes unsaved edits" : "Unsaved edits in editor (showing saved file)"
+        showHexButton.isHidden = inHex
+    }
+
+    private func makeBar(_ views: [NSView], pad: CGFloat) -> NSStackView {
+        let bar = NSStackView(views: views)
+        bar.alignment = .centerY
+        bar.edgeInsets = NSEdgeInsets(top: pad, left: 8, bottom: pad, right: 8)
+        return bar
     }
 
     private func pinEdges(_ child: NSView, in parent: NSView) {
