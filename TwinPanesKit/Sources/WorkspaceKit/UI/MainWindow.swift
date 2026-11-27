@@ -67,9 +67,9 @@ public final class MainWindow: NSWindow, NSDraggingDestination {
     }
 
     private func dragOperation(for info: NSDraggingInfo) -> NSDragOperation {
-        guard onDropFiles != nil || onDropFilesInSlot != nil, !fileURLs(info).isEmpty else {
-            return []
-        }
+        guard (onDropFilesInSlot != nil && dropSlotForPoint != nil) || onDropFiles != nil,
+            !fileURLs(info).isEmpty
+        else { return [] }
         if let dropSlotForPoint, dropSlotForPoint(info.draggingLocation) == nil { return [] }
         return .copy
     }

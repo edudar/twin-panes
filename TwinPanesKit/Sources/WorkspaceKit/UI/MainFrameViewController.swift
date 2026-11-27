@@ -5,11 +5,11 @@ extension NSToolbarItem.Identifier {
     public static let togglePreviewPane = NSToolbarItem.Identifier("togglePreviewPane")
 }
 
-/// Renders a `MainFrameLayout`: panel slots with tab bars, the zoom overlay and a status
-/// line. Also the responder for frame-level commands (close tab, zoom, tab switching).
+/// Renders a `MainFrameLayout`: panel slots with tab bars, optional sidebar and trailing
+/// preview pane, the zoom overlay, bottom accessory, and status line. Also the responder
+/// for frame-level commands (close tab, zoom, tab switching).
 ///
-/// It shows both panel slots; the preview pane (M7) and bottom drawer (M12) exist in the
-/// model but aren't drawn yet.
+/// The bottom drawer (M12) exists in the model but isn't drawn yet.
 @MainActor
 public final class MainFrameViewController: NSViewController, WorkspaceHost,
     CommandScopeProviding, NSMenuItemValidation, NSToolbarItemValidation, NSSplitViewDelegate
@@ -431,14 +431,31 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         update()
         let splitView = splitViewController.splitView
         splitView.adjustSubviews()
+        view.window?.layoutIfNeeded()
+        let totalWidth = splitView.bounds.width
+        let divider = splitView.dividerThickness
+        let activeDividers = CGFloat((isSidebarShown ? 1 : 0) + (isPreviewPaneShown ? 1 : 0))
+        let minContentWidth: CGFloat = 481
+        var remaining = totalWidth - minContentWidth - activeDividers * divider
+        var contentStart: CGFloat = 0
         if isSidebarShown {
-            splitView.setPosition(sidebarWidth, ofDividerAt: 0)
+            let reservedPreview = isPreviewPaneShown ? previewItem.minimumThickness : 0
+            let maxSidebar = max(sidebarItem.minimumThickness, remaining - reservedPreview)
+            let targetSidebar = min(sidebarWidth, maxSidebar)
+            if totalWidth >= minContentWidth + divider + sidebarItem.minimumThickness {
+                splitView.setPosition(targetSidebar, ofDividerAt: 0)
+            }
+            let actualSidebar =
+                splitView.arrangedSubviews.first?.frame.width ?? targetSidebar
+            remaining -= actualSidebar
+            contentStart = actualSidebar + divider
         }
         if isPreviewPaneShown {
-            let totalWidth = splitView.bounds.width
-            let divider = splitView.dividerThickness
-            if totalWidth > previewWidth + divider {
-                splitView.setPosition(totalWidth - previewWidth - divider, ofDividerAt: 1)
+            let maxPreview = max(previewItem.minimumThickness, remaining)
+            let targetPreview = min(previewWidth, maxPreview)
+            let position = totalWidth - targetPreview - divider
+            if position >= contentStart + minContentWidth {
+                splitView.setPosition(position, ofDividerAt: 1)
             }
         }
         if let ratio {
@@ -459,8 +476,9 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         if isSidebarShown, contains(windowPoint, in: sidebarHostController.view) {
             return nil
         }
-        if layout.zoomedItem != nil {
-            return contains(windowPoint, in: zoomHost.view) ? layout.activePanel : nil
+        if let zoomed = layout.zoomedItem {
+            return contains(windowPoint, in: zoomHost.view)
+                ? (layout.slot(of: zoomed.id) ?? layout.activePanel) : nil
         }
         return slotControllers.first { contains(windowPoint, in: $0.value.view) }?.key
     }

@@ -129,6 +129,53 @@ private final class ScopedResponderView: NSView, CommandScopeProviding, NSMenuIt
         #expect(dropped?.0 == [url] && dropped?.1 == .rightPanel)
     }
 
+    @Test func rejectsDragWhenSlotCallbackLacksHitTester() {
+        let window = makeWindow()
+        let info = StubDraggingInfo(urls: [URL(fileURLWithPath: "/tmp/sample.bin")])
+        var dropped: ([URL], SlotID)?
+        window.onDropFilesInSlot = { dropped = ($0, $1) }
+
+        #expect(window.draggingEntered(info) == [])
+        #expect(window.draggingUpdated(info) == [])
+        #expect(!window.performDragOperation(info))
+        #expect(dropped == nil)
+    }
+
+    @Test func deliversMultipleDroppedFileURLsTogether() {
+        let window = makeWindow()
+        let urls = [
+            URL(fileURLWithPath: "/tmp/first.bin"),
+            URL(fileURLWithPath: "/tmp/second.bin"),
+        ]
+        let info = StubDraggingInfo(urls: urls)
+        var received: [URL] = []
+        window.onDropFiles = { received = $0 }
+        #expect(window.draggingEntered(info) == .copy)
+        #expect(window.performDragOperation(info))
+        #expect(received == urls)
+
+        var dropped: ([URL], SlotID)?
+        window.onDropFiles = nil
+        window.onDropFilesInSlot = { dropped = ($0, $1) }
+        window.dropSlotForPoint = { _ in .leftPanel }
+        #expect(window.draggingEntered(info) == .copy)
+        #expect(window.performDragOperation(info))
+        #expect(dropped?.0 == urls && dropped?.1 == .leftPanel)
+    }
+
+    @Test func rejectsNonFileURLs() {
+        let window = makeWindow()
+        let webURL = URL(string: "https://example.com/sample.bin")!
+        let info = StubDraggingInfo(urls: [webURL])
+        var received: [URL] = []
+        window.onDropFiles = { received = $0 }
+
+        #expect(window.draggingEntered(info) == [])
+        #expect(window.draggingUpdated(info) == [])
+        #expect(!window.performDragOperation(info))
+        #expect(received.isEmpty)
+    }
+
     @Test func dispatcherFallsBackWhenInnerCandidateIsDisabled() {
         let registry = CommandRegistry()
         registry.register(

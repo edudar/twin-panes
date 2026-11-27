@@ -1,26 +1,7 @@
 import AppKit
 import Testing
-import TwinPanesCore
 
 @testable import WorkspaceKit
-
-@MainActor
-private final class StubHexViewer: HexPreviewing {
-    let viewController = NSViewController()
-    var showsUnsavedEdits = false
-    var onStateChange: (() -> Void)?
-    init() { viewController.view = NSView() }
-    func show(_ url: URL?, scope: SecurityScope?) {}
-}
-
-@MainActor
-private final class StubHexViewerFactory: HexViewerFactory {
-    private(set) var styles: [HexViewerStyle] = []
-    func makeHexViewer(style: HexViewerStyle) -> any HexPreviewing {
-        styles.append(style)
-        return StubHexViewer()
-    }
-}
 
 /// The main frame hosts an optional trailing preview pane (docs/plans/M7.md, D-d).
 @MainActor
@@ -101,7 +82,7 @@ private final class StubHexViewerFactory: HexViewerFactory {
         #expect(notifications == [true, false])
     }
 
-    @Test func sidebarAndPreviewPaneFitAndHexFactoryContract() throws {
+    @Test func sidebarAndPreviewPaneFitTogether() throws {
         let controller = makeController()
         let frame = controller.frameController
         let window = try #require(controller.window)
@@ -115,17 +96,6 @@ private final class StubHexViewerFactory: HexViewerFactory {
             .arrangedSubviews
         #expect(panes.count == 3 && abs(panes[0].frame.width - 180) <= 1)
         #expect(abs(panes[2].frame.width - 260) <= 1 && panes[1].frame.width >= 481)
-
-        let factory = StubHexViewerFactory()
-        let regular = factory.makeHexViewer(style: .regular)
-        let compact = factory.makeHexViewer(style: .compact)
-        var changes = 0
-        compact.onStateChange = { changes += 1 }
-        regular.show(URL(fileURLWithPath: "/tmp/sample.bin"), scope: nil)
-        compact.show(nil, scope: nil)
-        compact.onStateChange?()
-        #expect(
-            factory.styles == [.regular, .compact] && !regular.showsUnsavedEdits && changes == 1)
     }
 
     @Test func previewTogglePreservesPanelRatioAndHitTestsDropSlots() throws {
@@ -168,5 +138,120 @@ private final class StubHexViewerFactory: HexViewerFactory {
         window.layoutIfNeeded()
         let afterCloseRatio = try #require(frame.windowState.dividerFraction)
         #expect(abs(afterCloseRatio - beforeRatio) < 0.02)
+    }
+
+    @Test func dragCollapsingPreviewUpdatesVisibilityAndRestoresFocus() throws {
+        let controller = makeController()
+        let frame = controller.frameController
+        let window = try #require(controller.window)
+        var notifications: [Bool] = []
+        frame.onPreviewVisibilityChange = { notifications.append($0) }
+        let previewVC = focusableVC()
+        frame.previewPane = previewVC
+        window.layoutIfNeeded()
+        frame.viewDidAppear()
+        frame.togglePreviewPane(nil)
+        window.layoutIfNeeded()
+        window.makeFirstResponder(previewVC.view)
+        #expect(frame.isPreviewPaneShown)
+        #expect((window.firstResponder as? NSView)?.isDescendant(of: previewVC.view) == true)
+
+        let splitVC = try #require(frame.children.first as? NSSplitViewController)
+        splitVC.splitView.setPosition(splitVC.splitView.bounds.width, ofDividerAt: 1)
+        window.layoutIfNeeded()
+
+        #expect(!frame.isPreviewPaneShown)
+        #expect(notifications == [false, true, false])
+        #expect((window.firstResponder as? NSView)?.isDescendant(of: previewVC.view) != true)
+
+        frame.togglePreviewPane(nil)
+        #expect(frame.isPreviewPaneShown && notifications == [false, true, false, true])
+    }
+
+    @Test func restoreIgnoresNonFinitePreviewWidths() throws {
+        let controller = makeController()
+        let frame = controller.frameController
+        frame.previewPane = focusableVC()
+        var state = frame.windowState
+        state.previewShown = true
+        state.previewWidth = .nan
+        frame.restore(state, using: ItemRestorer())
+        #expect(frame.isPreviewPaneShown && frame.windowState.previewWidth == 260)
+
+        state.previewWidth = .infinity
+        frame.restore(state, using: ItemRestorer())
+        #expect(frame.windowState.previewWidth == 260)
+
+        state.previewWidth = 300
+        frame.restore(state, using: ItemRestorer())
+        #expect(frame.windowState.previewWidth == 300)
+
+        state.previewWidth = -.infinity
+        frame.restore(state, using: ItemRestorer())
+        #expect(frame.windowState.previewWidth == 300)
+    }
+
+    @Test func panelSlotHitTestingExcludesSidebarAndOutsideAndUsesZoomedSlot() throws {
+        let controller = makeController()
+        let frame = controller.frameController
+        let window = try #require(controller.window)
+        let sidebarVC = focusableVC()
+        let previewVC = focusableVC()
+        frame.sidebar = sidebarVC
+        frame.previewPane = previewVC
+        window.layoutIfNeeded()
+        frame.viewDidAppear()
+        frame.togglePreviewPane(nil)
+        window.layoutIfNeeded()
+
+        func center(of target: NSView) -> NSPoint {
+            target.convert(NSPoint(x: target.bounds.midX, y: target.bounds.midY), to: nil)
+        }
+        #expect(frame.panelSlot(at: center(of: sidebarVC.view)) == nil)
+        #expect(frame.panelSlot(at: center(of: previewVC.view)) == nil)
+        #expect(frame.panelSlot(at: NSPoint(x: -10, y: -10)) == nil)
+        #expect(frame.panelSlot(at: NSPoint(x: frame.view.bounds.midX, y: 2)) == nil)
+
+        let rightItem = TestItem("zoomed", slot: .rightPanel)
+        frame.layout.insert(rightItem, in: .rightPanel)
+        frame.layout.activate(.leftPanel)
+        frame.layout.toggleZoom(rightItem.id)
+        window.layoutIfNeeded()
+        let contentView = try #require(frame.children.first?.children[1].view)
+        #expect(frame.layout.activePanel == .leftPanel)
+        #expect(frame.panelSlot(at: center(of: contentView)) == .rightPanel)
+    }
+
+    @Test func sidePanesDoNotSqueezeContentBelowMinimumWidth() throws {
+        let controller = makeController()
+        let frame = controller.frameController
+        let window = try #require(controller.window)
+        window.setContentSize(NSSize(width: 900, height: 700))
+        var state = frame.windowState
+        state.sidebarShown = true
+        state.sidebarWidth = 400
+        state.previewShown = true
+        state.previewWidth = 480
+        frame.restore(state, using: ItemRestorer())
+        frame.sidebar = focusableVC()
+        frame.previewPane = focusableVC()
+        window.layoutIfNeeded()
+        frame.viewDidAppear()
+        let panes = try #require(frame.children.first as? NSSplitViewController).splitView
+            .arrangedSubviews
+        #expect(panes.count == 3 && panes[1].frame.width >= 481)
+        #expect(abs(window.contentRect(forFrameRect: window.frame).width - 900) <= 1)
+
+        let narrowController = makeController()
+        let narrowFrame = narrowController.frameController
+        let narrowWindow = try #require(narrowController.window)
+        narrowFrame.previewPane = focusableVC()
+        narrowWindow.setContentSize(NSSize(width: 650, height: 700))
+        narrowWindow.layoutIfNeeded()
+        narrowFrame.viewDidAppear()
+        narrowFrame.togglePreviewPane(nil)
+        let narrowPanes = try #require(narrowFrame.children.first as? NSSplitViewController)
+            .splitView.arrangedSubviews
+        #expect(narrowPanes[1].frame.width >= 481)
     }
 }

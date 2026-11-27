@@ -2,7 +2,7 @@ import AppKit
 import TwinPanesCore
 
 /// Visual density for a read-only hex viewer: `.regular` for full-panel Quick View,
-/// `.compact` for the trailing preview pane (`docs/plans/M7.md`, D-b).
+/// `.compact` for compact or narrow layouts (`docs/plans/M7.md`, D-b).
 public enum HexViewerStyle: Sendable, Equatable {
     case regular
     case compact

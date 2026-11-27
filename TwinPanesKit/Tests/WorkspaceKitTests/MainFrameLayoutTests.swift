@@ -221,20 +221,61 @@ import Testing
         layout.insert(rightA)
         layout.activate(.leftPanel)
 
+        var notifications = 0
+        let token = layout.observe { notifications += 1 }
         layout.insertInBackground(quick, in: .rightPanel)
+        #expect(notifications == 1)
         #expect(layout.activePanel == .leftPanel && layout.focusedPanelItem?.id == left.id)
         #expect(layout.selectedItem(in: .rightPanel)?.id == quick.id)
 
         layout.insertInBackground(front, in: .rightPanel, at: 0)
+        #expect(notifications == 2)
         #expect(layout.activePanel == .leftPanel)
         #expect(layout.items(in: .rightPanel).map(\.title) == ["front", "rightA", "quick"])
         #expect(layout.selectedItem(in: .rightPanel)?.id == front.id)
 
         layout.selectInBackground(rightA.id)
+        #expect(notifications == 3)
         #expect(layout.activePanel == .leftPanel && layout.focusedPanelItem?.id == left.id)
         #expect(layout.selectedItem(in: .rightPanel)?.id == rightA.id)
 
         layout.selectInBackground(ItemID())
+        #expect(notifications == 3)
         #expect(layout.selectedItem(in: .rightPanel)?.id == rightA.id)
+        _ = token
+    }
+
+    @Test func indexClampingForNegativeAndOutOfBoundsInsertAndMove() {
+        let layout = MainFrameLayout(filler: .testBrowsers)
+        let a = TestItem("a"), b = TestItem("b"), c = TestItem("c")
+        let d = TestItem("d"), e = TestItem("e")
+        layout.insert(a)
+        layout.insert(b, in: .leftPanel, at: -5)
+        layout.insert(c, in: .leftPanel, at: 99)
+        layout.insertInBackground(d, in: .leftPanel, at: -1)
+        layout.insertInBackground(e, in: .leftPanel, at: 99)
+        #expect(layout.items(in: .leftPanel).map(\.title) == ["d", "b", "a", "c", "e"])
+
+        layout.move(e.id, to: .leftPanel, at: -3)
+        #expect(layout.items(in: .leftPanel).map(\.title) == ["e", "d", "b", "a", "c"])
+        layout.move(e.id, to: .leftPanel, at: 99)
+        #expect(layout.items(in: .leftPanel).map(\.title) == ["d", "b", "a", "c", "e"])
+    }
+
+    @Test func backgroundOpsPreserveZoomedItem() {
+        let layout = MainFrameLayout(filler: .testBrowsers)
+        let left = TestItem("left")
+        let rightA = TestItem("rightA", slot: .rightPanel)
+        let rightB = TestItem("rightB", slot: .rightPanel)
+        layout.insert(left)
+        layout.insert(rightA)
+        layout.activate(.leftPanel)
+        layout.toggleZoom(left.id)
+
+        layout.insertInBackground(rightB, in: .rightPanel)
+        #expect(layout.zoomedItemID == left.id && layout.activePanel == .leftPanel)
+
+        layout.selectInBackground(rightA.id)
+        #expect(layout.zoomedItemID == left.id && layout.activePanel == .leftPanel)
     }
 }
