@@ -390,16 +390,12 @@ extension SmokeTest {
                     && !controller.frameController.isPreviewPaneShown,
                 "⇧⌘P hides sweep preview pane")
         }
-        if let fdBefore {
-            await waitFor { (Self.openFileDescriptorCount() ?? Int.max) <= fdBefore + 16 }
-            let fdAfter = Self.openFileDescriptorCount()
-            check(
-                fdAfter.map { $0 <= fdBefore + 16 } ?? false,
-                "1,000-file sweep leaks no file descriptors (before \(fdBefore), after \(fdAfter.map(String.init) ?? "nil"))"
-            )
-        } else {
-            check(false, "count open file descriptors in /dev/fd")
-        }
+        await waitFor { Self.openFileDescriptorCount() <= fdBefore + 16 }
+        let fdAfter = Self.openFileDescriptorCount()
+        check(
+            fdAfter <= fdBefore + 16,
+            "1,000-file sweep leaks no file descriptors (before \(fdBefore), after \(fdAfter))"
+        )
     }
 
     private func select(name: String, in browser: BrowserItem, table: NSTableView) {
@@ -442,19 +438,18 @@ extension SmokeTest {
         }
     }
 
-    private static func openFileDescriptorCount() -> Int? {
-        guard let dir = opendir("/dev/fd") else { return nil }
-        defer { closedir(dir) }
+    private static func openFileDescriptorCount() -> Int {
+        // Probe the process FD table directly rather than opendir("/dev/fd"), which
+        // App Sandbox denies on macOS 15.
+        var limit = rlimit()
+        let upper: Int32 =
+            getrlimit(RLIMIT_NOFILE, &limit) == 0 && limit.rlim_cur > 0
+            ? Int32(min(limit.rlim_cur, 16_384)) : 4_096
         var count = 0
-        while let entry = readdir(dir) {
-            let isDot = withUnsafeBytes(of: entry.pointee.d_name) { raw in
-                raw[0] == UInt8(ascii: ".")
-                    && (raw[1] == 0 || (raw[1] == UInt8(ascii: ".") && raw[2] == 0))
-            }
-            if !isDot { count += 1 }
+        for fd in 0..<upper where fcntl(fd, F_GETFD) != -1 {
+            count += 1
         }
-        // Subtract 1 for the opendir descriptor itself.
-        return max(0, count - 1)
+        return count
     }
 
     private static func allText(in root: NSView, underID id: String) -> String {
