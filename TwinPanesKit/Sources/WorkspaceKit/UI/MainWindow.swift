@@ -51,19 +51,48 @@ public final class MainWindow: NSWindow, NSDraggingDestination {
             if onDropFiles != nil { registerForDraggedTypes([.fileURL]) }
         }
     }
+    /// Called with file URLs dropped onto a specific panel slot.
+    public var onDropFilesInSlot: (([URL], SlotID) -> Void)? {
+        didSet {
+            if onDropFilesInSlot != nil { registerForDraggedTypes([.fileURL]) }
+        }
+    }
+    /// Maps a window-coordinate drop point to its target panel slot, or nil to reject
+    /// drops outside the panels (such as over the preview pane or sidebar).
+    public var dropSlotForPoint: ((NSPoint) -> SlotID?)?
 
     private func fileURLs(_ info: NSDraggingInfo) -> [URL] {
         info.draggingPasteboard.readObjects(
             forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
     }
 
+    private func dragOperation(for info: NSDraggingInfo) -> NSDragOperation {
+        guard onDropFiles != nil || onDropFilesInSlot != nil, !fileURLs(info).isEmpty else {
+            return []
+        }
+        if let dropSlotForPoint, dropSlotForPoint(info.draggingLocation) == nil { return [] }
+        return .copy
+    }
+
     public func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        onDropFiles != nil && !fileURLs(sender).isEmpty ? .copy : []
+        dragOperation(for: sender)
+    }
+
+    public func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        dragOperation(for: sender)
     }
 
     public func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         let urls = fileURLs(sender)
-        guard let onDropFiles, !urls.isEmpty else { return false }
+        guard !urls.isEmpty else { return false }
+        if let dropSlotForPoint {
+            guard let slot = dropSlotForPoint(sender.draggingLocation) else { return false }
+            if let onDropFilesInSlot {
+                onDropFilesInSlot(urls, slot)
+                return true
+            }
+        }
+        guard let onDropFiles else { return false }
         onDropFiles(urls)
         return true
     }
@@ -107,6 +136,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         window.onFirstResponderChange = { [weak frameController] responder in
             frameController?.followFocus(to: responder)
+        }
+        window.dropSlotForPoint = { [weak frameController] point in
+            frameController?.panelSlot(at: point)
         }
         workspace.register(layout)
     }

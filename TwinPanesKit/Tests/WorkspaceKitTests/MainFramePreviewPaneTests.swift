@@ -127,4 +127,46 @@ private final class StubHexViewerFactory: HexViewerFactory {
         #expect(
             factory.styles == [.regular, .compact] && !regular.showsUnsavedEdits && changes == 1)
     }
+
+    @Test func previewTogglePreservesPanelRatioAndHitTestsDropSlots() throws {
+        let controller = makeController()
+        let frame = controller.frameController
+        let window = try #require(controller.window)
+        frame.previewPane = focusableVC()
+        window.layoutIfNeeded()
+        frame.viewDidAppear()
+
+        let innerSplit = try #require(
+            frame.children.first?.children[1].view.subviews.first as? NSSplitView)
+        let beforeWidth = innerSplit.bounds.width - innerSplit.dividerThickness
+        innerSplit.setPosition(round(beforeWidth * 0.35), ofDividerAt: 0)
+        window.layoutIfNeeded()
+        let beforeRatio = try #require(frame.windowState.dividerFraction)
+
+        frame.togglePreviewPane(nil)
+        window.layoutIfNeeded()
+        let afterOpenRatio = try #require(frame.windowState.dividerFraction)
+        #expect(abs(afterOpenRatio - beforeRatio) < 0.02)
+
+        let leftCenter = innerSplit.arrangedSubviews[0].convert(
+            NSPoint(
+                x: innerSplit.arrangedSubviews[0].bounds.midX,
+                y: innerSplit.arrangedSubviews[0].bounds.midY), to: nil)
+        let rightCenter = innerSplit.arrangedSubviews[1].convert(
+            NSPoint(
+                x: innerSplit.arrangedSubviews[1].bounds.midX,
+                y: innerSplit.arrangedSubviews[1].bounds.midY), to: nil)
+        let previewCenter = frame.previewPane!.view.convert(
+            NSPoint(
+                x: frame.previewPane!.view.bounds.midX,
+                y: frame.previewPane!.view.bounds.midY), to: nil)
+        #expect(frame.panelSlot(at: leftCenter) == .leftPanel)
+        #expect(frame.panelSlot(at: rightCenter) == .rightPanel)
+        #expect(frame.panelSlot(at: previewCenter) == nil)
+
+        frame.togglePreviewPane(nil)
+        window.layoutIfNeeded()
+        let afterCloseRatio = try #require(frame.windowState.dividerFraction)
+        #expect(abs(afterCloseRatio - beforeRatio) < 0.02)
+    }
 }

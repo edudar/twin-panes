@@ -425,6 +425,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     }
 
     private func withSidePanesPlaced(_ update: () -> Void) {
+        let ratio = hasPlacedDivider ? placedDividerFraction : nil
         isPlacingSidePanes = true
         defer { isPlacingSidePanes = false }
         update()
@@ -440,6 +441,32 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
                 splitView.setPosition(totalWidth - previewWidth - divider, ofDividerAt: 1)
             }
         }
+        if let ratio {
+            contentController.view.layoutSubtreeIfNeeded()
+            if usableSplitWidth > 0 {
+                split.setPosition(round(usableSplitWidth * ratio), ofDividerAt: 0)
+            }
+        }
+    }
+
+    /// The panel slot under `windowPoint` (in window coordinates), or nil when the point
+    /// lies over the sidebar, the preview pane, or outside the panels.
+    public func panelSlot(at windowPoint: NSPoint) -> SlotID? {
+        guard isViewLoaded else { return nil }
+        if isPreviewPaneShown, contains(windowPoint, in: previewHostController.view) {
+            return nil
+        }
+        if isSidebarShown, contains(windowPoint, in: sidebarHostController.view) {
+            return nil
+        }
+        if layout.zoomedItem != nil {
+            return contains(windowPoint, in: zoomHost.view) ? layout.activePanel : nil
+        }
+        return slotControllers.first { contains(windowPoint, in: $0.value.view) }?.key
+    }
+
+    private func contains(_ windowPoint: NSPoint, in target: NSView) -> Bool {
+        !target.isHidden && target.bounds.contains(target.convert(windowPoint, from: nil))
     }
 
     /// Called after every redraw of the layout: a tab, the selection, or an item's title

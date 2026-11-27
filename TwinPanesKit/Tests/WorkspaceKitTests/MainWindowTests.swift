@@ -105,6 +105,30 @@ private final class ScopedResponderView: NSView, CommandScopeProviding, NSMenuIt
         #expect(received == [url])
     }
 
+    @Test func routesDropToTargetSlotAndRejectsOutsidePanels() {
+        let window = makeWindow()
+        let url = URL(fileURLWithPath: "/tmp/sample.bin")
+        let info = StubDraggingInfo(urls: [url])
+        var dropped: ([URL], SlotID)?
+        window.onDropFilesInSlot = { dropped = ($0, $1) }
+        window.dropSlotForPoint = { point in
+            if point.x < 100 { return .leftPanel }
+            if point.x < 200 { return .rightPanel }
+            return nil
+        }
+
+        info.draggingLocation = NSPoint(x: 250, y: 100)
+        #expect(window.draggingEntered(info) == [])
+        #expect(window.draggingUpdated(info) == [])
+        #expect(!window.performDragOperation(info))
+        #expect(dropped == nil)
+
+        info.draggingLocation = NSPoint(x: 150, y: 100)
+        #expect(window.draggingUpdated(info) == .copy)
+        #expect(window.performDragOperation(info))
+        #expect(dropped?.0 == [url] && dropped?.1 == .rightPanel)
+    }
+
     @Test func dispatcherFallsBackWhenInnerCandidateIsDisabled() {
         let registry = CommandRegistry()
         registry.register(

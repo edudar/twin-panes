@@ -318,9 +318,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         windowControllers.append(controller)
         if let mainWindow = controller.window as? MainWindow {
-            mainWindow.onDropFiles = { [weak self, weak controller] urls in
+            mainWindow.onDropFilesInSlot = { [weak self, weak controller] urls, slot in
                 guard let self, let controller else { return }
-                self.openDropped(urls, in: controller)
+                self.openDropped(urls, in: controller, slot: slot)
             }
             mainWindow.onFocusChange = { [weak self] window in
                 if let menu = NSApp.mainMenu { self?.menuUpdater.refresh(menu, for: window) }
@@ -483,20 +483,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: Opening files
 
     /// Handles items dropped onto `controller`: folders open in a browser tab (and save
-    /// their grant); regular files open in a hex editor tab.
-    func openDropped(_ urls: [URL], in controller: MainWindowController) {
-        openURLs(urls, in: controller)
+    /// their grant); regular files open in a hex editor tab in `slot` (default: active panel).
+    func openDropped(
+        _ urls: [URL], in controller: MainWindowController, slot: SlotID? = nil
+    ) {
+        openURLs(urls, in: controller, slot: slot)
     }
 
-    private func openURLs(_ urls: [URL], in target: MainWindowController?) {
+    private func openURLs(
+        _ urls: [URL], in target: MainWindowController?, slot: SlotID? = nil
+    ) {
         for url in urls {
             let resolved = url.resolvingSymlinksInPath()
             let values = try? resolved.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
             if values?.isDirectory == true, values?.isPackage != true {
                 try? folderGrants.add(resolved)
-                show(makeBrowser(at: resolved), in: target)
+                show(makeBrowser(at: resolved), in: target, slot: slot)
             } else {
-                openFile(resolved, in: target)
+                openFile(resolved, in: target, slot: slot)
             }
         }
     }
