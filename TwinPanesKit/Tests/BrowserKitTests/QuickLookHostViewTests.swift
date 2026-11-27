@@ -9,9 +9,11 @@ import TwinPanesCore
     final class FakeQuickLookViewer: QuickLookViewing {
         let view = NSView()
         var shown: [URL?] = []
+        var refreshCount = 0
         var closeCount = 0
 
         func show(_ url: URL?) { shown.append(url) }
+        func refresh() { refreshCount += 1 }
         func close() { closeCount += 1 }
     }
 
@@ -67,5 +69,26 @@ import TwinPanesCore
         let afterClose = show(url, in: host)
         #expect(afterClose.scope == nil)
         #expect(fake.shown == [url])
+    }
+
+    @Test func resizingSyncsFrameAndRefreshesWhenItemIsShown() async {
+        let fake = FakeQuickLookViewer()
+        let host = QuickLookHostView(viewer: fake, resizeDebounce: .zero)
+        host.frame = NSRect(x: 0, y: 0, width: 240, height: 300)
+        host.layoutSubtreeIfNeeded()
+        host.show(URL(fileURLWithPath: "/tmp/doc.pdf"), scope: nil)
+
+        host.frame = NSRect(x: 0, y: 0, width: 320, height: 420)
+        host.layoutSubtreeIfNeeded()
+        #expect(fake.view.frame == host.bounds)
+
+        await Task.yield()
+        #expect(fake.refreshCount == 1)
+
+        host.close()
+        host.frame = NSRect(x: 0, y: 0, width: 360, height: 460)
+        host.layoutSubtreeIfNeeded()
+        await Task.yield()
+        #expect(fake.refreshCount == 1)
     }
 }
