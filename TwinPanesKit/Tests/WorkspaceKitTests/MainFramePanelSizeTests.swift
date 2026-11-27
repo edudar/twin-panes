@@ -22,5 +22,10 @@ import Testing
                 panel.frame.width >= 240 && panel.frame.height >= 34,
                 "\(slot.rawValue) starts at \(panel.frame.size)")
         }
+        let minWidth = root.constraints.first {
+            $0.firstItem === root && $0.firstAttribute == .width
+                && $0.relation == .greaterThanOrEqual
+        }?.constant
+        #expect(minWidth == 481)
     }
 }

@@ -184,7 +184,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
             statusLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
             statusLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
             statusLabel.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -4),
-            root.widthAnchor.constraint(greaterThanOrEqualToConstant: 480),
+            root.widthAnchor.constraint(greaterThanOrEqualToConstant: 481),
             root.heightAnchor.constraint(greaterThanOrEqualToConstant: 320),
         ])
         view = root
@@ -314,9 +314,15 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
 
     private func sidePanesDidResize() {
         guard hasPlacedDivider, !isPlacingSidePanes else { return }
-        if !sidebarItem.isCollapsed {
-            let width = displayedSidebarWidth
-            if width >= 120 { sidebarWidth = min(width, 400) }
+        if sidebar != nil {
+            if !sidebarItem.isCollapsed {
+                let width = displayedSidebarWidth
+                if width >= 120 { sidebarWidth = min(width, 400) }
+            }
+            if isSidebarShown != wantsSidebarShown {
+                wantsSidebarShown = isSidebarShown
+                if !isSidebarShown { restoreFocusIfInside(sidebarHostController.view) }
+            }
         }
         if previewPane != nil {
             if !previewItem.isCollapsed {

@@ -108,4 +108,33 @@ import Testing
         #expect(frame.isSidebarShown)
         _ = windowController
     }
+
+    @Test func dragCollapsingSidebarUpdatesStateAndRestoresFocus() throws {
+        final class FocusableView: NSView {
+            override var acceptsFirstResponder: Bool { true }
+        }
+        let windowController = controller()
+        let frame = windowController.frameController
+        let window = try #require(windowController.window)
+        let sidebarVC = NSViewController()
+        sidebarVC.view = FocusableView()
+        frame.sidebar = sidebarVC
+        window.layoutIfNeeded()
+        frame.viewDidAppear()
+        window.makeFirstResponder(sidebarVC.view)
+        #expect(frame.isSidebarShown)
+        #expect((window.firstResponder as? NSView)?.isDescendant(of: sidebarVC.view) == true)
+
+        let splitVC = try #require(frame.children.first as? NSSplitViewController)
+        splitVC.splitView.setPosition(0, ofDividerAt: 0)
+        window.layoutIfNeeded()
+
+        #expect(!frame.isSidebarShown)
+        #expect((window.firstResponder as? NSView)?.isDescendant(of: sidebarVC.view) != true)
+
+        let replacement = NSViewController()
+        replacement.view = FocusableView()
+        frame.sidebar = replacement
+        #expect(!frame.isSidebarShown)
+    }
 }
