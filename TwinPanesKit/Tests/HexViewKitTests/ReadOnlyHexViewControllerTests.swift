@@ -431,14 +431,19 @@ private struct LocalFileSystem: FileSystem {
         let label = try #require(findView(in: root, identifier: "hexPlaceholder") as? NSTextField)
         button.performClick(nil)
 
-        await awaitState(on: viewer) { !cloud.startDownloadCalls.isEmpty }
+        await awaitState(on: viewer) {
+            !cloud.startDownloadCalls.isEmpty
+                && label.stringValue != "This file is in iCloud and not downloaded."
+        }
         #expect(label.stringValue == "Network offline")
         #expect(!button.isHidden)
         try #require(button.isEnabled)
 
         cloud.setStartDownloadError(nil)
         button.performClick(nil)
-        await awaitState(on: viewer) { cloud.startDownloadCalls.count == 2 }
+        await awaitState(on: viewer) {
+            cloud.startDownloadCalls.count == 2 && label.stringValue != "Network offline"
+        }
         #expect(label.stringValue == "Downloading from iCloud…")
         #expect(button.isHidden)
     }
