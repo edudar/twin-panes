@@ -86,17 +86,43 @@ private final class StatusLog: WorkspaceHost {
         defer { cleanUp() }
         let (item, _) = try makeItem()
         item.hexView.insertText("FF")
-        var asked: [String] = []
-        var answer = false
+        @MainActor final class RevertPrompt {
+            var asked: [String] = []
+            var allow = false
+        }
+        let prompt = RevertPrompt()
         item.controller.confirmRevert = { _, title in
-            asked.append(title)
-            return answer
+            prompt.asked.append(title)
+            return prompt.allow
         }
         await item.controller.revertToSaved()
-        #expect(asked == ["file.bin"] && item.isDirty)
-        answer = true
+        #expect(prompt.asked == ["file.bin"] && item.isDirty)
+        prompt.allow = true
         await item.controller.revertToSaved()
         #expect(try !item.isDirty && !item.canUndo && item.read(0..<1) == Data([0]))
+    }
+
+    @Test func saveSelectionWritesRangeOffMainThreadAndReportsErrors() async throws {
+        defer { cleanUp() }
+        let (item, log) = try makeItem()
+        item.hexView.insertText("AB")
+        let out = folder.appendingPathComponent("selection.bin")
+        await withCheckedContinuation { continuation in
+            item.controller.writeSelection(0..<4, of: item, to: out) {
+                continuation.resume()
+            }
+        }
+        #expect(try Data(contentsOf: out) == Data([0xAB, 1, 2, 3]))
+        #expect(log.messages.last == "Saved 4 bytes to selection.bin")
+
+        let badOut = folder.appendingPathComponent("missing-dir/selection.bin")
+        await withCheckedContinuation { continuation in
+            item.controller.writeSelection(0..<4, of: item, to: badOut) {
+                continuation.resume()
+            }
+        }
+        #expect(log.messages.last?.hasPrefix("Saving failed: ") == true)
+        #expect(!FileManager.default.fileExists(atPath: badOut.path))
     }
 
     /// Save As: the tab takes the new file's name, tells the app (recents), and a failure

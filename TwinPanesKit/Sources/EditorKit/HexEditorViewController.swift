@@ -35,6 +35,8 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
     let findBar = FindBarView(frame: NSRect(x: 0, y: 0, width: 600, height: 32))
     let inspector = InspectorView(frame: NSRect(x: 0, y: 0, width: 280, height: 400))
     private let divider = NSBox()
+    private let saveSelectionQueue = DispatchQueue(
+        label: "TwinPanes.HexEditorViewController.saveSelection", qos: .userInitiated)
     /// Switched by `applyVisibility()` as the find bar and inspector come and go.
     private var hexBelowTop: NSLayoutConstraint?
     private var hexBelowFindBar: NSLayoutConstraint?
@@ -271,20 +273,30 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self, let item = self.item, response == .OK, let destination = panel.url
             else { return }
-            item.host?.showStatus("Saving \(range.count.formatted()) bytes…")
-            let source = item.snapshot
-            let scope = item.scope
-            Task.detached(priority: .userInitiated) {
-                let error = withExtendedLifetime(scope) {
-                    Self.write(source, range: range, to: destination)
-                }
-                await MainActor.run { [weak self] in
+            self.writeSelection(range, of: item, to: destination)
+        }
+    }
+
+    func writeSelection(
+        _ range: Range<UInt64>, of item: HexEditorItem, to destination: URL,
+        completion: (@MainActor () -> Void)? = nil
+    ) {
+        item.host?.showStatus("Saving \(range.count.formatted()) bytes…")
+        let source = item.snapshot
+        let scope = item.scope
+        saveSelectionQueue.async {
+            let error = withExtendedLifetime(scope) {
+                Self.write(source, range: range, to: destination)
+            }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { [weak self] in
                     self?.item?.host?.showStatus(
                         error.map {
                             "Saving failed: \(($0 as? ByteSourceError)?.description ?? $0.localizedDescription)"
                         }
                             ?? "Saved \(range.count.formatted()) bytes to \(destination.lastPathComponent)"
                     )
+                    completion?()
                 }
             }
         }
