@@ -115,10 +115,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     lazy var itemRestorer: ItemRestorer = {
         var restorer = ItemRestorer()
         restorer.register(.browser, newestVersion: BrowserItem.stateVersion) { state in
+            weak var created: BrowserItem?
             let browser = BrowserItem.restored(from: state, grants: self.folderGrants) {
                 url, scope in
-                self.openFile(url, scope: scope)
+                if let created {
+                    self.openFileFromBrowser(created, url: url, scope: scope)
+                } else {
+                    self.openFile(url, scope: scope)
+                }
             }
+            created = browser
             if let browser { self.configureBrowser(browser) }
             return browser
         }
@@ -420,14 +426,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// A browser tab at `folder`, or the active browser's folder, or the real home.
     func makeBrowser(at folder: URL? = nil) -> BrowserItem {
         let current = activeController?.layout.focusedPanelItem as? BrowserItem
+        weak var created: BrowserItem?
         let browser = BrowserItem(
             folder: folder ?? current?.folder ?? DirectoryReader.realHomeDirectory,
             grants: folderGrants
         ) { [weak self] url, scope in
-            self?.openFile(url, scope: scope)
+            if let created {
+                self?.openFileFromBrowser(created, url: url, scope: scope)
+            } else {
+                self?.openFile(url, scope: scope)
+            }
         }
+        created = browser
         configureBrowser(browser)
         return browser
+    }
+
+    /// Opens a file triggered from `browser` in the opposite panel by default so the file
+    /// list stays visible alongside the editor.
+    func openFileFromBrowser(_ browser: BrowserItem, url: URL, scope: SecurityScope?) {
+        let controller = controller(containing: browser.id)
+        let opposite = controller?.layout.slot(of: browser.id)?.otherPanel
+        openFile(url, scope: scope, in: controller, slot: opposite)
     }
 
     func makeEditorSession() -> PlaceholderEditorSession {
@@ -445,12 +465,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         windowControllers.first { $0.layout.item(id) != nil }
     }
 
-    /// Adds an item to `target` (or the active window, opening one if needed) in its
-    /// active panel.
-    func show(_ item: any WorkspaceItem, in target: MainWindowController? = nil) {
+    /// Adds an item to `target` (or the active window, opening one if needed) in `slot`,
+    /// defaulting to the active panel.
+    func show(
+        _ item: any WorkspaceItem, in target: MainWindowController? = nil, slot: SlotID? = nil
+    ) {
         let controller = target ?? activeController ?? openMainWindow()
         if controller.layout.zoomedItem != nil { controller.layout.exitZoom() }
-        controller.layout.insert(item, in: controller.layout.activePanel)
+        controller.layout.insert(item, in: slot ?? controller.layout.activePanel)
         controller.window?.makeKeyAndOrderFront(nil)
     }
 
@@ -485,7 +507,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// own access for this run.
     @discardableResult
     func openFile(
-        _ url: URL, scope: SecurityScope? = nil, in target: MainWindowController? = nil
+        _ url: URL, scope: SecurityScope? = nil, in target: MainWindowController? = nil,
+        slot: SlotID? = nil
     ) -> HexEditorItem? {
         do {
             let (session, isNew) = try sessions.open(url, scope: scope)
@@ -499,7 +522,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
             let item = HexEditorItem(session: session)
             item.didSaveAs = { [weak self] url in self?.recentFiles.note(url) }
-            show(item, in: target)
+            show(item, in: target, slot: slot)
             return item
         } catch {
             presentOpenError(error, url: url, in: target)
