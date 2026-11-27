@@ -12,15 +12,25 @@ private final class FakeCloudDownloads: CloudDownloads {
     private struct State {
         var datalessPaths: Set<String> = []
         var startDownloadCalls: [URL] = []
+        var startDownloadError: (any Error)?
     }
     private let state = Mutex(State())
     func markDataless(_ url: URL) {
         state.withLock { _ = $0.datalessPaths.insert(url.standardizedFileURL.path) }
     }
+    func setStartDownloadError(_ error: (any Error)?) {
+        state.withLock { $0.startDownloadError = error }
+    }
     func isDataless(_ url: URL) -> Bool {
         state.withLock { $0.datalessPaths.contains(url.standardizedFileURL.path) }
     }
-    func startDownload(_ url: URL) throws { state.withLock { $0.startDownloadCalls.append(url) } }
+    func startDownload(_ url: URL) throws {
+        let error: (any Error)? = state.withLock {
+            $0.startDownloadCalls.append(url)
+            return $0.startDownloadError
+        }
+        if let error { throw error }
+    }
     var startDownloadCalls: [URL] { state.withLock(\.startDownloadCalls) }
 }
 
@@ -317,5 +327,203 @@ private struct LocalFileSystem: FileSystem {
             }
         }
         #expect(copied == payload)
+    }
+
+    @Test func showAfterSessionClosedWhileRetainedReloadsDiskBytes() async throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("retained-close.bin")
+        try Data([0x10, 0x20, 0x30, 0x40]).write(to: file)
+
+        let sessions = SessionRegistry()
+        let session = try EditorSession(url: file, saver: Saver(fileSystem: LocalFileSystem()))
+        sessions.adopt(session)
+        try session.overwrite(
+            Data([0xDE, 0xAD]), at: 1, selectionBefore: 1..<2, selectionAfter: 2..<3)
+
+        let viewer = ReadOnlyHexViewController(style: .regular, sessions: sessions)
+        _ = viewer.view
+        viewer.show(file, scope: nil)
+        #expect(viewer.showsUnsavedEdits)
+        #expect(try viewer.read(0..<4) == Data([0x10, 0xDE, 0xAD, 0x40]))
+
+        viewer.show(nil, scope: nil)
+        try Data([0x55, 0x66, 0x77, 0x88]).write(to: file)
+        session.close()
+
+        viewer.show(file, scope: nil)
+        await awaitState(on: viewer) {
+            (try? viewer.read(0..<4)) == Data([0x55, 0x66, 0x77, 0x88])
+        }
+        #expect(!viewer.showsUnsavedEdits)
+        #expect(viewer.modifiedRanges(in: 0..<4).isEmpty)
+        withExtendedLifetime(session) {}
+    }
+
+    @Test func sessionRevertAndSaveAsUpdateReadOnlyViewer() async throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file1 = dir.appendingPathComponent("original.bin")
+        let file2 = dir.appendingPathComponent("saved-as.bin")
+        try Data([0x10, 0x20, 0x30, 0x40]).write(to: file1)
+
+        let sessions = SessionRegistry()
+        let session = try EditorSession(url: file1, saver: Saver(fileSystem: LocalFileSystem()))
+        sessions.adopt(session)
+        try session.overwrite(
+            Data([0xDE, 0xAD]), at: 1, selectionBefore: 1..<2, selectionAfter: 2..<3)
+
+        let viewer = ReadOnlyHexViewController(style: .regular, sessions: sessions)
+        _ = viewer.view
+        viewer.show(file1, scope: nil)
+        #expect(viewer.showsUnsavedEdits)
+        #expect(viewer.modifiedRanges(in: 0..<4) == [1..<3])
+
+        session.revert()
+        #expect(!viewer.showsUnsavedEdits)
+        #expect(viewer.modifiedRanges(in: 0..<4).isEmpty)
+        #expect(try viewer.read(0..<4) == Data([0x10, 0x20, 0x30, 0x40]))
+
+        try session.overwrite(
+            Data([0xAA, 0xBB]), at: 0, selectionBefore: 0..<1, selectionAfter: 1..<2)
+        #expect(viewer.showsUnsavedEdits)
+        try await session.saveAs(to: file2)
+
+        await awaitState(on: viewer) {
+            (try? viewer.read(0..<4)) == Data([0x10, 0x20, 0x30, 0x40])
+        }
+        #expect(!viewer.showsUnsavedEdits)
+        #expect(viewer.modifiedRanges(in: 0..<4).isEmpty)
+
+        try session.overwrite(
+            Data([0xFF]), at: 0, selectionBefore: 0..<1, selectionAfter: 1..<2)
+        #expect(!viewer.showsUnsavedEdits)
+        #expect(try viewer.read(0..<4) == Data([0x10, 0x20, 0x30, 0x40]))
+    }
+
+    @Test func downloadErrorDisplaysLocalizedDescriptionAndRemainsRetryable() async throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("retry.bin")
+        try Data([0x01, 0x02]).write(to: file)
+
+        let sessions = SessionRegistry()
+        let cloud = FakeCloudDownloads()
+        cloud.markDataless(file)
+        cloud.setStartDownloadError(
+            NSError(
+                domain: "TestCloud", code: 42,
+                userInfo: [NSLocalizedDescriptionKey: "Network offline"]))
+
+        let viewer = ReadOnlyHexViewController(
+            style: .regular, sessions: sessions, cloudDownloads: cloud)
+        let root = viewer.view
+        viewer.show(file, scope: nil)
+
+        await awaitState(on: viewer) {
+            guard let label = findView(in: root, identifier: "hexPlaceholder") as? NSTextField
+            else { return false }
+            return !label.isHiddenOrHasHiddenAncestor
+                && label.stringValue == "This file is in iCloud and not downloaded."
+        }
+
+        let button = try #require(findButton(in: root, title: "Download"))
+        let label = try #require(findView(in: root, identifier: "hexPlaceholder") as? NSTextField)
+        button.performClick(nil)
+
+        await awaitState(on: viewer) { !cloud.startDownloadCalls.isEmpty }
+        #expect(label.stringValue == "Network offline")
+        #expect(!button.isHidden)
+        try #require(button.isEnabled)
+
+        cloud.setStartDownloadError(nil)
+        button.performClick(nil)
+        await awaitState(on: viewer) { cloud.startDownloadCalls.count == 2 }
+        #expect(label.stringValue == "Downloading from iCloud…")
+        #expect(button.isHidden)
+    }
+
+    @Test func readOnlyRejectsInsertTextAndDeleteBackward() async throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("readonly.bin")
+        try Data([0x10, 0x20, 0x30, 0x40]).write(to: file)
+
+        let sessions = SessionRegistry()
+        let viewer = ReadOnlyHexViewController(style: .regular, sessions: sessions)
+        _ = viewer.view
+        viewer.show(file, scope: nil)
+        await awaitState(on: viewer) { viewer.length == 4 }
+
+        viewer.hexView.insertText("FF")
+        viewer.hexView.deleteBackward(nil)
+        #expect(try viewer.read(0..<4) == Data([0x10, 0x20, 0x30, 0x40]))
+        #expect(!viewer.showsUnsavedEdits)
+
+        let (session, _) = try sessions.open(file)
+        viewer.hexView.insertText("AA")
+        viewer.hexView.deleteBackward(nil)
+        #expect(!session.isDirty)
+        #expect(!viewer.showsUnsavedEdits)
+        #expect(try viewer.read(0..<4) == Data([0x10, 0x20, 0x30, 0x40]))
+    }
+
+    @Test func retargetDoesNotEagerlyResetHexViewOrFlickerPlaceholder() async throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file1 = dir.appendingPathComponent("one.bin")
+        let file2 = dir.appendingPathComponent("two.bin")
+        let missing = dir.appendingPathComponent("missing.bin")
+        try Data([0x10, 0x20, 0x30, 0x40]).write(to: file1)
+        try Data([0xAA, 0xBB]).write(to: file2)
+
+        let sessions = SessionRegistry()
+        let viewer = ReadOnlyHexViewController(style: .regular, sessions: sessions)
+        let root = viewer.view
+
+        viewer.show(file1, scope: nil)
+        await awaitState(on: viewer) { viewer.length == 4 }
+        #expect(viewer.hexView.layout.length == 4)
+
+        viewer.show(file2, scope: nil)
+        #expect(viewer.hexView.layout.length == 4)
+        await awaitState(on: viewer) { viewer.length == 2 }
+        #expect(viewer.hexView.layout.length == 2)
+        #expect(try viewer.read(0..<2) == Data([0xAA, 0xBB]))
+
+        viewer.show(missing, scope: nil)
+        await awaitState(on: viewer) {
+            guard let label = findView(in: root, identifier: "hexPlaceholder") as? NSTextField
+            else { return false }
+            return !label.isHiddenOrHasHiddenAncestor && !label.stringValue.isEmpty
+        }
+
+        let label = try #require(findView(in: root, identifier: "hexPlaceholder") as? NSTextField)
+        viewer.show(file1, scope: nil)
+        #expect(viewer.hexView.isHidden)
+        #expect(!label.isHiddenOrHasHiddenAncestor)
+
+        await awaitState(on: viewer) { viewer.length == 4 }
+        #expect(!viewer.hexView.isHidden)
+        #expect(viewer.hexView.layout.length == 4)
+
+        viewer.show(nil, scope: nil)
+        #expect(!viewer.hexView.isHidden)
+        #expect(viewer.hexView.layout.length == 0)
+
+        let session = try EditorSession(url: file1, saver: Saver(fileSystem: LocalFileSystem()))
+        sessions.adopt(session)
+        try session.overwrite(
+            Data([0xFF]), at: 0, selectionBefore: 0..<1, selectionAfter: 1..<2)
+        viewer.show(file1, scope: nil)
+        #expect(viewer.showsUnsavedEdits)
+
+        var stateChanges = 0
+        viewer.onStateChange = { stateChanges += 1 }
+        viewer.show(file2, scope: nil)
+        #expect(!viewer.showsUnsavedEdits)
+        #expect(stateChanges == 1)
+        await awaitState(on: viewer) { viewer.length == 2 }
+        #expect(stateChanges == 2)
     }
 }

@@ -28,6 +28,8 @@ public final class ReadOnlyHexViewController: NSViewController, HexPreviewing, H
     nonisolated private let generation = Mutex<UInt64>(0)
     private let ioQueue = DispatchQueue(
         label: "TwinPanes.ReadOnlyHexViewController.io", qos: .userInitiated)
+    private let copyQueue = DispatchQueue(
+        label: "TwinPanes.ReadOnlyHexViewController.copy", qos: .userInitiated)
     private let placeholderStack: NSStackView
     private let placeholderLabel = NSTextField(wrappingLabelWithString: "")
     private let downloadButton: NSButton
@@ -101,11 +103,13 @@ public final class ReadOnlyHexViewController: NSViewController, HexPreviewing, H
             onStateChange?()
             return
         }
+        let hadUnsavedEdits = showsUnsavedEdits
         showsUnsavedEdits = false
-        presentHexView()
         if let url {
+            if hadUnsavedEdits { onStateChange?() }
             startDiskLoad(for: url, scope: scope, generation: requestGeneration)
         } else {
+            presentHexView()
             onStateChange?()
         }
     }
@@ -219,13 +223,18 @@ public final class ReadOnlyHexViewController: NSViewController, HexPreviewing, H
         runOnIOQueue(generation: requestGeneration, scope: scope) {
             do {
                 try cloud.startDownload(url)
-                return "Downloading from iCloud…"
+                return nil as String?
             } catch {
-                return "\(error)"
+                return (error as? ByteSourceError)?.description ?? error.localizedDescription
             }
-        } completion: { [weak self] message in
-            self?.presentPlaceholder(message: message)
-            self?.onStateChange?()
+        } completion: { [weak self] failureMessage in
+            guard let self else { return }
+            if let failureMessage {
+                self.presentDownloadPlaceholder(message: failureMessage)
+            } else {
+                self.presentPlaceholder(message: "Downloading from iCloud…")
+            }
+            self.onStateChange?()
         }
     }
 
@@ -251,7 +260,11 @@ public final class ReadOnlyHexViewController: NSViewController, HexPreviewing, H
     // MARK: View state
 
     private func presentDatalessPlaceholder() {
-        presentPlaceholder(message: Self.datalessMessage)
+        presentDownloadPlaceholder(message: Self.datalessMessage)
+    }
+
+    private func presentDownloadPlaceholder(message: String) {
+        presentPlaceholder(message: message)
         downloadButton.isHidden = false
         downloadButton.isEnabled = true
     }
@@ -325,9 +338,9 @@ public final class ReadOnlyHexViewController: NSViewController, HexPreviewing, H
         }
         if range.count <= Self.asyncCopyThreshold { return completion(readExact()) }
         let scope = self.scope ?? observedSession?.scope
-        Task.detached(priority: .userInitiated) {
+        copyQueue.async {
             let result = withExtendedLifetime(scope) { readExact() }
-            await MainActor.run { completion(result) }
+            DispatchQueue.main.async { MainActor.assumeIsolated { completion(result) } }
         }
     }
 
