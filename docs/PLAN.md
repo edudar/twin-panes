@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.27 (2026-11-24). Living document; requirements will keep growing.
+Status: draft v0.28 (2026-11-27). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -69,6 +69,11 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D53 | **One app-wide queue, progress in the window** (M6) | Copies and moves run one at a time, trash, delete, rename and new folder at once; each holds its folders' grants until it ends. Progress reaches the main actor at most every 100 ms and shows in a strip under the panels of the window that started it. See docs/plans/M6.md, D-e. |
 | D54 | **Undo and redo of file operations** (M6) | One app-wide history, as Finder's: each finished operation's undo is worked out from its result (copies trashed, items put back to their exact place), redo runs the request again, and a permanent delete is a barrier. Not kept across launches. See docs/plans/M6.md, D-g. |
 | D55 | **iCloud files that aren't downloaded** (M6) | A copy downloads them first (cancellable); rename, a move on one volume and trash never do. The editor's first edit of one starts the download and is refused until it's here, so the session never clones a file with no bytes. See docs/plans/M6.md, D-h. |
+| D56 | **Cross-kit viewer boundary in `WorkspaceKit`** (M7) | `WorkspaceKit` defines `HexViewerStyle`, `HexPreviewing` and `HexViewerFactory`. `HexViewKit` implements `ReadOnlyHexViewController` and `SessionHexViewerFactory`, and the `TwinPanes` app target links `HexViewKit` and injects the factory so `BrowserKit` never imports `HexViewKit` or `EditorKit`. See docs/plans/M7.md, D-a. |
+| D57 | **Read-only hex previews without sessions** (M7) | `ReadOnlyHexViewController` opens a read-only `ByteSource` off the main actor (`pageCapacity: 32`) and never creates an `EditorSession`. When `SessionRegistry` already has a dirty session for the file, it shows `session.snapshot` live with an unsaved-edits banner and reloads on save or close. Dataless iCloud files show a manual Download placeholder. See docs/plans/M7.md, D-b. |
+| D58 | **O(1) `FileMetadata` and `PreviewClassifier`** (M7) | `FileMetadata` reads POSIX stat/permissions/owner/group, symlink target, BSD flags and xattr names/sizes (capped at 64) in O(1) without reading file bytes. `PreviewClassifier` chooses Quick Look vs. hex vs. placeholder; a dirty open session always selects `.hex`. See docs/plans/M7.md, D-c. |
+| D59 | **Collapsible trailing preview pane** (M7) | Hosted in `MainFrameViewController` as a regular trailing `NSSplitViewItem` (never `inspectorWithViewController:`, avoiding `toggleInspector:` collisions with the hex Data Inspector). Toggled on `⇧⌘P` or the trailing toolbar button; `WindowState` persists `previewShown` and `previewWidth`; default window size is `1120x700`. Collapsed panes suspend loading and clear Quick Look resources. See docs/plans/M7.md, D-d. |
+| D60 | **QuickView (`F3` / `⇧F3`) and active-panel `F4`** (M7) | `F3` (`⌘Y` / `⌃⌘V`) opens or retargets a non-restorable `QuickViewItem` in the opposite panel without stealing focus, toggling closed when pressed again while frontmost; `⇧F3` (`⇧⌃⌘V`) opens a standalone pinned QuickView in the active panel. `F4` (`⌃⌘E`) opens `HexEditorItem` in the active panel for regular files only (disabled on folders, packages and `".."`) and promotes QuickView to an editor tab. See docs/plans/M7.md, D-e, D-f. |
 
 ## 3. Constraints that drive the design
 
@@ -93,12 +98,12 @@ content; the `M0` rows exist now.
 
 | Module | Folder | Milestone | Contents |
 |---|---|---|---|
-| app target | `TwinPanes/` | M0 | entry point, app delegate, main menu, command catalog and default bindings, recent files, window restoration, placeholder items, smoke test (`SmokeChild`), app icon. Later: preferences, and wiring the kits together (e.g. the hex-view factory for BrowserKit's preview pane) |
-| TwinPanesCore | `TwinPanesKit/Sources/TwinPanesCore` | M0: module only | the UI-free engine, no AppKit imports (components below) |
-| WorkspaceKit | `TwinPanesKit/Sources/WorkspaceKit` | M0, M5 | the single main frame, independent of item types: `WorkspaceItem`, `MainFrameLayout` and its view controller, main window and controller, tab bar (with tab dragging, M5), `WindowState` and `ItemRestorer` (M5), the hosted sidebar (M5), close workflow, workspace registry, command registry and dispatcher, focus chain, menu bindings (§4.8, §4.11) |
-| HexViewKit | `TwinPanesKit/Sources/HexViewKit` | M1 | virtualized hex/text view, selection, inspector UI |
+| app target | `TwinPanes/` | M0, M7 | entry point, app delegate, main menu, command catalog and default bindings, recent files, window restoration, placeholder items, smoke test (`SmokeChild`), app icon, and wiring the kits together (injecting `SessionHexViewerFactory` for BrowserKit's preview pane and QuickView). Later: preferences |
+| TwinPanesCore | `TwinPanesKit/Sources/TwinPanesCore` | M0: module only | the UI-free engine, no AppKit imports (components below, plus `FileMetadata` and `PreviewClassifier` in M7) |
+| WorkspaceKit | `TwinPanesKit/Sources/WorkspaceKit` | M0, M5, M7 | the single main frame, independent of item types: `WorkspaceItem`, `MainFrameLayout` and its view controller, main window and controller, tab bar (with tab dragging, M5), `WindowState` and `ItemRestorer` (M5), the hosted sidebar (M5), trailing preview pane host and `HexPreviewing` / `HexViewerFactory` boundary (M7), close workflow, workspace registry, command registry and dispatcher, focus chain, menu bindings (§4.8, §4.11) |
+| HexViewKit | `TwinPanesKit/Sources/HexViewKit` | M1, M7 | virtualized hex/text view, selection, inspector UI, `ReadOnlyHexViewController` and `SessionHexViewerFactory` (M7) |
 | EditorKit | `TwinPanesKit/Sources/EditorKit` | M1, M5 | the editor item: mode switcher, find bar, editor state restoration (M5); hosts the mode views over one `EditorSession` |
-| BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b, M4, M5 | the browser tab: async listing, sorting, hidden files, history, live updates, path bar, folder access (M1b, M4); the sidebar, path completion and the tab's saved state (M5); later (M6–M7) operations queue, preview pane |
+| BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b, M4–M7 | the browser tab: async listing, sorting, hidden files, history, live updates, path bar, folder access (M1b, M4); the sidebar, path completion and the tab's saved state (M5); file operations commands, sheets and progress strip (M6); `PreviewPaneViewController`, `PreviewMetadataView`, `QuickLookHostView` and `QuickViewItem` (M7) |
 | TextEditKit | `TwinPanesKit/Sources/TextEditKit` | M9 | plain-text and Markdown modes, large-text viewer |
 | SandboxProbe | `TwinPanesKit/Sources/SandboxProbe` | M0, M3c | Foundation-only probes for the sandbox spike (§5); only the app's Debug menu uses it. Stays until the M3c volume checks (external drives) are done, then goes away with that menu |
 
@@ -115,7 +120,7 @@ the dependency rules below are enforced by `Package.swift` from the first commit
 | HexViewKit, TextEditKit, BrowserKit | WorkspaceKit, TwinPanesCore |
 | EditorKit | HexViewKit, TextEditKit, WorkspaceKit, TwinPanesCore |
 | SandboxProbe | Foundation only |
-| app target | links WorkspaceKit, EditorKit, BrowserKit and SandboxProbe; imports those and TwinPanesCore (which comes with them) |
+| app target | links WorkspaceKit, EditorKit, HexViewKit, BrowserKit and SandboxProbe; imports those and TwinPanesCore (which comes with them) |
 
 No module imports one at its own level: HexViewKit, TextEditKit and BrowserKit never
 import each other. Anything that crosses kits (the preview pane's hex view, F4
@@ -703,6 +708,20 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   The smoke test drives F5 to ⇧F8 and undo with real keys and sheets, copies 10,000
   files with both panels watching (busiest gaps 8–29 ms) and deletes a shown 100k
   folder (22–28 ms), under the stall gate.
+- **As built (M7, docs/plans/M7.md):** D56–D60. `PreviewPaneViewController` pairs
+  `QuickLookHostView` (`shouldCloseWithWindow = false`, explicit `close()`) and lazy
+  `ReadOnlyHexViewController` above a scrollable `PreviewMetadataView`, coalescing rapid
+  selection changes on a 40 ms timer and clearing resources when collapsed.
+  `QuickViewItem` provides opposite-panel following QuickView on F3 (`⌘Y` / `⌃⌘V`)
+  without stealing focus, standalone pinned QuickView on `⇧F3` (`⇧⌃⌘V`), and F4
+  promotion to `HexEditorItem`; moving a following QuickView into its source browser's
+  panel auto-pins it. Wiring `BrowserItem.onSelectionChange` exposed a pre-existing
+  main-thread deallocation race in `BrowserViewController.selectionChanged()` (fixed by
+  wrapping replaced `ListingSelection` values in `Garbage(selection)`). The smoke test
+  verifies `⇧⌘P`, metadata xattrs, Quick Look vs. hex auto-selection, pinning, F3 /
+  `⇧F3`, active-panel F4, live dirty-session unsaved-edits markers, and a 1,000-file
+  cursor sweep with both preview pane and QuickView open (busiest gap 18–28 ms CPU on
+  the dev Mac, zero `EditorSession`s created).
 
 ### 4.8 Single main frame: workspace model (D7)
 
@@ -1337,3 +1356,10 @@ byte histogram.
   - *Smoke-test flakes on a loaded machine*: "listing 100k files" crossed its limit now
     and then, before M6 too, and the path-completion check hung twice after its second
     Tab. Both passed on reruns.
+- **From M7 (2026-11-27):**
+  - *`⇧⌘P` with Markdown preview (M9c)*: `⇧⌘P` toggles the trailing preview pane in
+    `.app` scope (D59). When M9c adds Markdown preview toggle on `⇧⌘P`, it will override
+    inside `.item(.editor)` while `.app` keeps `⇧⌘P` for the preview pane.
+  - *iCloud-evicted files in QuickView and the preview pane*: dataless-file placeholders
+    and manual Download triggers are unit-tested through `CloudDownloads`, while a real
+    evicted iCloud file is checked by hand (CI has no iCloud).

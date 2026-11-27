@@ -26,6 +26,11 @@ Twin Panes is early and changing quickly. Right now it offers:
   (F5, F6), rename (F2), new folder (F7), trash (F8) and delete (⇧F8) with an optional
   function-key bar, progress you can pause or cancel, conflict handling (replace,
   skip, keep both, merge) and undo, also across volumes and for iCloud files.
+- **Preview pane and Quick View:** A collapsible right preview pane (`⇧⌘P`) with Quick
+  Look, read-only hex for binary files, O(1) file metadata (permissions, flags, extended
+  attributes) and pinning, plus F3 Quick View in the opposite panel (and `⇧F3` in the
+  same panel) that follows the cursor without creating editor sessions and reflects
+  unsaved edits live.
 - **Responsive folder browsing:** Handles folders with 100,000+ files without
   stalling the UI, streaming rows as they load, tracking external changes live,
   and supporting sorting, history, type-to-select, and package inspection.
@@ -45,8 +50,7 @@ Twin Panes is early and changing quickly. Right now it offers:
 
 In rough order:
 
-1. **Daily-driver file manager:** A Quick Look preview pane and quick view, and
-   dragging files between panels and Finder.
+1. **Daily-driver file manager:** Dragging files between panels and Finder.
 2. **Full-featured editor:** Insert and delete bytes in hex, plus plain-text
    and Markdown editing modes with find and replace.
 3. **Power-user workspace:** Multiple windows, a built-in terminal, remote

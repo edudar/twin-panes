@@ -47,11 +47,12 @@ The smoke test drives the built app. It opens two windows, browses a real
 folder, and opens a 4 GiB sparse file to check open time, frame time and memory.
 It clicks, tabs and moves tabs between both panels, uses the sidebar and Tab
 completion in the path field with real key events, tests multi-selection and the
-function-key bar, runs file operations with real keys, sheets, conflicts and
-undo, tests a 10,000-file copy with cancel, and starts the app again as a
-sandboxed child process to check that a window comes back after a relaunch and
-that edits come back after a crash (`--smoke-child`; on macOS 26 and later, since
-macOS 15 can't start a sandboxed child).
+function-key bar, exercises the preview pane (`⇧⌘P`), F3/`⇧F3` Quick View, active-panel
+F4, live dirty-session sync and a 1,000-file cursor sweep with zero editor sessions,
+runs file operations with real keys, sheets, conflicts and undo, tests a 10,000-file
+copy with cancel, and starts the app again as a sandboxed child process to check that a
+window comes back after a relaunch and that edits come back after a crash
+(`--smoke-child`; on macOS 26 and later, since macOS 15 can't start a sandboxed child).
 
 It also creates a 100,000-file folder and fails if listing, sorting, filtering,
 scrolling, live-updating, completing a name or permanently deleting a shown
@@ -95,11 +96,11 @@ point one way only, enforced by `Package.swift`:
 
 | Module | Purpose | Depends on |
 |---|---|---|
-| `TwinPanesCore` | Byte source and page cache, search, the edit model (piece tree, add buffer, undo), editor sessions and saving, crash recovery at launch, directory listing, folder grants, security scopes, favorites and mounted volumes, path completion, file operations (copy, move, trash, delete, rename, conflicts, the queue and undo history), stall/gap timing. Foundation only. | none |
-| `WorkspaceKit` | The main window, both panels, tabs and tab dragging, window state for restoration, the hosted sidebar and bottom strip, the function-key bar, command registry and close workflow. | TwinPanesCore |
-| `HexViewKit` | The virtualized hex view, layout, selection and copy. | WorkspaceKit, TwinPanesCore |
+| `TwinPanesCore` | Byte source and page cache, search, the edit model (piece tree, add buffer, undo), editor sessions and saving, crash recovery at launch, directory listing, folder grants, security scopes, favorites and mounted volumes, path completion, file operations (copy, move, trash, delete, rename, conflicts, the queue and undo history), O(1) file metadata and preview classification, stall/gap timing. Foundation only. | none |
+| `WorkspaceKit` | The main window, both panels, tabs and tab dragging, window state for restoration, the hosted sidebar, trailing preview pane host and hex-viewer boundary, bottom strip, function-key bar, command registry and close workflow. | TwinPanesCore |
+| `HexViewKit` | The virtualized hex view, layout, selection, copy, and the read-only hex preview controller and factory. | WorkspaceKit, TwinPanesCore |
 | `TextEditKit` | Text and Markdown modes (later milestones). | WorkspaceKit, TwinPanesCore |
-| `BrowserKit` | The folder browser tab and file list, path completion, the sidebar, and the file operations' commands, sheets and progress strip. | WorkspaceKit, TwinPanesCore |
+| `BrowserKit` | The folder browser tab and file list, path completion, the sidebar, file operations' commands, sheets and progress strip, the preview pane and Quick View. | WorkspaceKit, TwinPanesCore |
 | `EditorKit` | The editor tab that hosts the hex and text modes. | HexViewKit, TextEditKit, WorkspaceKit, TwinPanesCore |
 | `SandboxProbe` | The sandbox capability spike (M0). | none |
 
