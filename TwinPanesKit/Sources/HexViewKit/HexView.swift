@@ -84,8 +84,14 @@ public final class HexView: NSView {
         didSet { if options != oldValue { relayout(keepingRow: true) } }
     }
 
-    public var font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular) {
-        didSet { relayout(keepingRow: true) }
+    private static let defaultFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+
+    public var font = HexView.defaultFont {
+        didSet {
+            guard font != oldValue else { return }
+            rebuildGlyphTable()
+            relayout(keepingRow: true)
+        }
     }
 
     public internal(set) var layout = HexLayout(options: HexViewOptions(), length: 0)
@@ -99,7 +105,8 @@ public final class HexView: NSView {
 
     var position = HexScrollPosition(rowCount: 1, rowHeight: 16, viewHeight: 0)
     var horizontalOffset: Double = 0
-    var glyphTable = HexGlyphTable(font: .monospacedSystemFont(ofSize: 13, weight: .regular))
+    var glyphTable = HexGlyphTable(font: HexView.defaultFont)
+    private(set) var glyphTableBuilds = 1
     var charWidth: Double = 8
     var rowHeight: Double = 16
     let inset = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 4)
@@ -130,6 +137,7 @@ public final class HexView: NSView {
         scroller.action = #selector(scrollerMoved(_:))
         horizontalScroller.action = #selector(horizontalScrollerMoved(_:))
         setAccessibilityRole(.textArea)
+        updateFontMetrics()
         relayout(keepingRow: false)
     }
 
@@ -188,11 +196,19 @@ public final class HexView: NSView {
         max(0, Double(bounds.height - horizontalScrollerHeight) - inset.top - inset.bottom)
     }
 
-    func relayout(keepingRow: Bool) {
+    private func rebuildGlyphTable() {
         glyphTable = HexGlyphTable(font: font)
+        glyphTableBuilds += 1
+        updateFontMetrics()
+    }
+
+    private func updateFontMetrics() {
         let ascent = Double(font.ascender), descent = Double(-font.descender)
         charWidth = glyphTable.advance
         rowHeight = (ascent + descent + Double(font.leading)).rounded(.up) + 3
+    }
+
+    func relayout(keepingRow: Bool) {
         let textWidth = viewportWidth - inset.left - inset.right
         let topOffset = keepingRow ? layout.rowStart(position.topRow) : 0
         layout = HexLayout(

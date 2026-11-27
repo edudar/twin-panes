@@ -88,4 +88,22 @@ import Testing
             width: 8 * view.charWidth, height: height)
         #expect(try inkedPixels(in: hex, appearance: .aqua) > 20)
     }
+
+    @Test func glyphTableRebuildsOnlyWhenFontChanges() {
+        #expect(view.glyphTableBuilds == 1)
+        let initialWidth = view.charWidth
+        let initialHeight = view.rowHeight
+
+        view.reloadData()
+        view.contentLengthDidChange()
+        view.options.bytesPerRow = .autoFit
+        view.setFrameSize(NSSize(width: 500, height: 300))
+        view.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        #expect(view.glyphTableBuilds == 1)
+
+        view.font = NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)
+        #expect(view.glyphTableBuilds == 2)
+        #expect(view.charWidth > initialWidth)
+        #expect(view.rowHeight > initialHeight)
+    }
 }
