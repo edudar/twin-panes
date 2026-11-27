@@ -167,6 +167,87 @@ import WorkspaceKit
         #expect(previewTop <= window.contentLayoutRect.maxY + 1)
         controller.tearDown()
     }
+
+    @Test func showSelectionHandlesEmptySingleAndMultiRowWithoutMetadataReads() async throws {
+        try await withTempDir { dir in
+            let readCounter = ReadCounter()
+            let (controller, fakeQL) = makeController { url in
+                readCounter.increment()
+                return Self.metadata(for: url)
+            }
+            let a = dir.appendingPathComponent("a.txt")
+            let b = dir.appendingPathComponent("b.txt")
+            let sub = dir.appendingPathComponent("sub", isDirectory: true)
+            let entries = [
+                makeEntry(url: a, size: 120),
+                makeEntry(url: b, size: 380),
+                DirectoryEntry(
+                    url: sub, name: "sub", isDirectory: true, isPackage: false,
+                    isSymbolicLink: false, isHidden: false, size: nil, modified: nil, type: .folder),
+            ]
+            let listing = FolderListing(order: ListingOrder(), showsHidden: false).merging(entries)
+
+            await waitForLoad(controller) { controller.show(selection: .none, scope: nil) }
+            #expect(controller.metadataView.messageText == "No Selection")
+
+            await waitForLoad(controller) {
+                controller.show(selection: ListingSelection(rows: [1], of: listing), scope: nil)
+            }
+            #expect(readCounter.count == 1 && fakeQL.shown.last == a)
+
+            await waitForLoad(controller) {
+                controller.show(
+                    selection: ListingSelection(rows: [0, 1, 2], of: listing), scope: nil)
+            }
+            #expect(readCounter.count == 1)
+            #expect(controller.metadataView.titleText == "3 items selected")
+            #expect(controller.metadataView.rows.first?.label == "Total Size")
+            #expect(controller.metadataView.rows.first?.value == "500 bytes")
+            controller.tearDown()
+        }
+    }
+
+    @Test func setActiveTrueFollowedByShowCancelsStaleUnscopedLoad() async throws {
+        try await withTempDir { dir in
+            let readURLs = ReadURLRecorder()
+            let (a, b) = (dir.appendingPathComponent("a.txt"), dir.appendingPathComponent("b.txt"))
+            let (controller, fakeQL) = makeController { url in
+                readURLs.append(url)
+                return Self.metadata(for: url)
+            }
+            let scope1 = SecurityScope(url: a)
+            let scope2 = SecurityScope(url: b)
+            await waitForLoad(controller) { controller.show(file: a, scope: scope1) }
+            #expect(readURLs.urls == [a])
+
+            controller.setActive(false)
+            await waitForLoad(controller) {
+                controller.setActive(true)
+                controller.show(file: b, scope: scope2)
+            }
+            #expect(readURLs.urls == [a, b])
+            #expect(fakeQL.shown.last == b)
+            controller.tearDown()
+        }
+    }
+
+    @Test func unchangedTargetWhileActiveSkipsDuplicateMetadataRead() async throws {
+        try await withTempDir { dir in
+            let readCounter = ReadCounter()
+            let a = dir.appendingPathComponent("a.txt")
+            let (controller, _) = makeController { url in
+                readCounter.increment()
+                return Self.metadata(for: url)
+            }
+            let scope = SecurityScope(url: a)
+            await waitForLoad(controller) { controller.show(file: a, scope: scope) }
+            #expect(readCounter.count == 1)
+
+            await waitForLoad(controller) { controller.show(file: a, scope: scope) }
+            #expect(readCounter.count == 1)
+            controller.tearDown()
+        }
+    }
 }
 
 private final class ReadCounter: @unchecked Sendable {
@@ -174,4 +255,11 @@ private final class ReadCounter: @unchecked Sendable {
     private var value = 0
     var count: Int { lock.withLock { value } }
     func increment() { lock.withLock { value += 1 } }
+}
+
+private final class ReadURLRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [URL] = []
+    var urls: [URL] { lock.withLock { recorded } }
+    func append(_ url: URL) { lock.withLock { recorded.append(url) } }
 }

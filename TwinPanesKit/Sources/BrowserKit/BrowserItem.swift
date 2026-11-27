@@ -166,6 +166,8 @@ public final class BrowserItem: WorkspaceItem {
     public var icon: NSImage? { IconCache.shared.folder }
     /// The lead selected entry, or nil when nothing or ".." is selected.
     public var selectedEntry: DirectoryEntry? { controller.selectedEntry }
+    /// The current selection, kept by row index without materializing entry structs.
+    public var currentSelection: ListingSelection { loadedController?.selection ?? .none }
     /// The security-scoped token covering the current folder, if one is active.
     public var activeScope: SecurityScope? { scope }
     public var viewController: NSViewController { controller }

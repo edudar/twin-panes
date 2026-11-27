@@ -1,20 +1,31 @@
 import AppKit
 import QuickLookUI
+import Synchronization
 import TwinPanesCore
 
 /// Collapsible trailing preview pane showing a compact Quick Look preview above O(1) file metadata
 /// (`docs/plans/M7.md`, D-d).
 @MainActor
 public final class PreviewPaneViewController: NSViewController {
+    private enum TargetKey: Equatable {
+        case none
+        case single(URL, scopeID: ObjectIdentifier?)
+        case multiple(Int, UInt64)
+    }
+
     private enum Target {
-        case none, single(URL, SecurityScope?), multiple(Int, UInt64)
-        var key: String {
+        case none, single(URL, SecurityScope?), multiple(Int, UInt64), selection(ListingSelection)
+
+        var key: TargetKey? {
             switch self {
-            case .none: ""
-            case .single(let url, _): "s:\(url.standardizedFileURL.path)"
-            case .multiple(let count, let bytes): "m:\(count):\(bytes)"
+            case .none: TargetKey.none
+            case .single(let url, let scope):
+                .single(url.standardizedFileURL, scopeID: scope.map(ObjectIdentifier.init))
+            case .multiple(let count, let bytes): .multiple(count, bytes)
+            case .selection: nil
             }
         }
+
         var withoutScope: Target {
             if case .single(let url, _) = self { .single(url, nil) } else { self }
         }
@@ -36,9 +47,10 @@ public final class PreviewPaneViewController: NSViewController {
     private var isActive = true
     private var isTornDown = false
     private var generation = 0
-    private var debounceTask: Task<Void, Never>?
+    private let debounceTask = Mutex<Task<Void, Never>?>(nil)
     private var latestTarget: Target = .none
-    private var displayedTarget: Target = .none
+    private var activeKey: TargetKey?
+    private var isLoadComplete = false
     private var currentScope: SecurityScope?
     var onLoadFinished: (() -> Void)?
 
@@ -67,6 +79,13 @@ public final class PreviewPaneViewController: NSViewController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    deinit {
+        debounceTask.withLock { task in
+            task?.cancel()
+            task = nil
+        }
+    }
 
     public override func loadView() {
         let root = NSView()
@@ -124,23 +143,35 @@ public final class PreviewPaneViewController: NSViewController {
         enqueue(.multiple(valid.count, valid.reduce(0) { $0 &+ ($1.size ?? 0) }))
     }
 
+    /// Updates the preview pane for a `ListingSelection` without materializing selected entries
+    /// on the main actor.
+    public func show(selection: ListingSelection, scope: SecurityScope?) {
+        let count = selection.count
+        if count == 0 { return enqueue(.none) }
+        if count == 1, let first = selection.rows.first {
+            return enqueue(.single(selection.listing.rows[first].url, scope))
+        }
+        enqueue(.selection(selection))
+    }
+
     /// Updates the preview pane for a single file URL, or clears it when `url` is `nil`.
     public func show(file url: URL?, scope: SecurityScope?) {
         enqueue(url.map { .single($0, scope) } ?? .none)
     }
 
     /// Suspends loading and releases preview resources when collapsed (`false`), or resumes and
-    /// immediately loads the latest target when shown (`true`).
+    /// schedules the latest target when shown (`true`).
     public func setActive(_ active: Bool) {
         guard !isTornDown, active != isActive else { return }
         isActive = active
         guard active else {
             cancelPending()
             latestTarget = latestTarget.withoutScope
-            displayedTarget = .none
+            activeKey = nil
+            isLoadComplete = false
             return clearDisplayedContent()
         }
-        loadNow(latestTarget)
+        enqueue(latestTarget)
     }
 
     /// Releases Quick Look XPC resources and pending background tasks.
@@ -150,15 +181,18 @@ public final class PreviewPaneViewController: NSViewController {
         isActive = false
         cancelPending()
         latestTarget = .none
-        displayedTarget = .none
+        activeKey = nil
+        isLoadComplete = false
         clearDisplayedContent()
         quickLookHost?.close()
         quickLookHost = nil
     }
 
     private func cancelPending() {
-        debounceTask?.cancel()
-        debounceTask = nil
+        debounceTask.withLock { task in
+            task?.cancel()
+            task = nil
+        }
         generation += 1
     }
 
@@ -166,29 +200,50 @@ public final class PreviewPaneViewController: NSViewController {
         guard !isTornDown else { return }
         guard isActive else { return latestTarget = target.withoutScope }
         latestTarget = target
+        let hasPending = debounceTask.withLock { $0 != nil }
+        if let key = target.key, activeKey == key {
+            if hasPending { cancelPending() }
+            if isLoadComplete { onLoadFinished?() }
+            return
+        }
         cancelPending()
         let expected = generation
         let delay = debounce
-        debounceTask = Task { @MainActor [weak self] in
+        let task = Task { @MainActor [weak self] in
             if delay > .zero { try? await Task.sleep(for: delay) } else { await Task.yield() }
             guard let self, !Task.isCancelled, self.generation == expected, self.isActive
             else { return }
+            self.debounceTask.withLock { $0 = nil }
             self.loadNow(target)
         }
+        debounceTask.withLock { $0 = task }
     }
 
     private func loadNow(_ target: Target) {
-        displayedTarget = target
+        activeKey = target.key
+        isLoadComplete = false
         switch target {
         case .none:
             clearDisplayedContent(placeholder: "No Selection")
             metadataView.showMessage("No Selection")
+            isLoadComplete = true
             onLoadFinished?()
         case .multiple(let count, let totalBytes):
-            let title = count == 1 ? "1 item selected" : "\(count) items selected"
-            clearDisplayedContent(placeholder: title)
-            metadataView.showMultiSelection(count: count, totalBytes: totalBytes)
-            onLoadFinished?()
+            finishLoadingMultiple(count: count, totalBytes: totalBytes)
+        case .selection(let selection):
+            let count = selection.count
+            let expected = generation
+            currentScope = nil
+            metadataQueue.async { [weak self] in
+                let totalBytes = selection.rows.reduce(UInt64(0)) {
+                    $0 &+ (selection.listing.rows[$1].size ?? 0)
+                }
+                Task { @MainActor [weak self] in
+                    guard let self, !self.isTornDown, self.isActive, self.generation == expected
+                    else { return }
+                    self.finishLoadingMultiple(count: count, totalBytes: totalBytes)
+                }
+            }
         case .single(let url, let scope):
             let expected = generation
             currentScope = scope
@@ -201,6 +256,14 @@ public final class PreviewPaneViewController: NSViewController {
                 }
             }
         }
+    }
+
+    private func finishLoadingMultiple(count: Int, totalBytes: UInt64) {
+        let title = count == 1 ? "1 item selected" : "\(count) items selected"
+        clearDisplayedContent(placeholder: title)
+        metadataView.showMultiSelection(count: count, totalBytes: totalBytes)
+        isLoadComplete = true
+        onLoadFinished?()
     }
 
     private func finishLoadingSingle(
@@ -225,6 +288,7 @@ public final class PreviewPaneViewController: NSViewController {
                 host.show(metadata.url, scope: currentScope)
             }
         }
+        isLoadComplete = true
         onLoadFinished?()
     }
 

@@ -75,10 +75,13 @@ import WorkspaceKit
 
     @Test func severalRowsAreSelectedInRowOrder() async throws {
         defer { cleanUp() }
+        let unviewed = BrowserItem(folder: folder, grants: grants) { _, _ in }
+        #expect(unviewed.currentSelection.isEmpty)
         let item = await browser(at: folder)
         defer { item.willClose() }
         try select(["c.png", "a.txt", "sub"], in: item)
         #expect(selected(item) == ["sub", "a.txt", "c.png"])
+        #expect(item.currentSelection.entries.map(\.name) == ["sub", "a.txt", "c.png"])
     }
 
     @Test func theParentRowNeverJoinsOtherRows() async throws {
