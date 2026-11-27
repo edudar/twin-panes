@@ -241,9 +241,9 @@ enum DefaultCommands {
         registry.bind(KeyChord("v", controlCommand), to: .browserView, in: browser)
         registry.bind(.function(3), to: .browserView, in: browser)
         registry.bind(
-            KeyChord(KeyChord.function(3).key, .shift), to: .browserViewInSamePanel, in: browser)
-        registry.bind(
             KeyChord("v", [.control, .command, .shift]), to: .browserViewInSamePanel, in: browser)
+        registry.bind(
+            KeyChord(KeyChord.function(3).key, .shift), to: .browserViewInSamePanel, in: browser)
         registry.bind(KeyChord("e", controlCommand), to: .browserEdit, in: browser)
         registry.bind(.function(4), to: .browserEdit, in: browser)
         registry.bind(KeyChord("e", controlCommand), to: .browserEdit, in: quickView)

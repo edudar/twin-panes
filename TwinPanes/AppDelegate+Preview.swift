@@ -6,28 +6,23 @@ import WorkspaceKit
 
 /// Preview pane and Quick View wiring for `AppDelegate` (`docs/plans/M7.md`, D-d, D-e).
 extension AppDelegate {
-    /// Attaches the trailing preview pane and wires layout updates for auto-pinning
-    /// following Quick View tabs and refreshing the preview pane.
+    /// Attaches the trailing preview pane and wires its visibility and teardown callbacks.
     func attachPreviewPane(to controller: MainWindowController) {
         let preview = PreviewPaneViewController()
         let frame = controller.frameController
         frame.onPreviewVisibilityChange = { [weak self, weak preview, weak controller] shown in
-            preview?.setActive(shown)
-            if shown, let controller { self?.updatePreviewPane(in: controller) }
+            if shown {
+                preview?.setActive(true)
+                if let controller { self?.updatePreviewPane(in: controller) }
+            } else {
+                preview?.setActive(false)
+            }
         }
         frame.previewPane = preview
         preview.setActive(frame.isPreviewPaneShown)
         frame.onWillClose = { [weak preview, weak self, weak controller] in
             preview?.tearDown()
             if let controller { self?.dropQuickViewSources(in: controller) }
-        }
-        frame.onUpdate = { [weak self, weak controller] in
-            guard let self, let controller else { return }
-            let active = controller.layout.zoomedItem ?? controller.layout.focusedPanelItem
-            (controller.frameController.sidebar as? SidebarViewController)?.highlight(
-                (active as? BrowserItem)?.folder)
-            self.pinMovedQuickViews(in: controller)
-            self.updatePreviewPane(in: controller)
         }
     }
 
@@ -43,18 +38,21 @@ extension AppDelegate {
 
     func browserSelectionChanged(_ browser: BrowserItem) {
         guard let controller = controller(containing: browser.id) else { return }
+        let scope = browser.needsAccess ? nil : browser.activeScope
         if controller.frameController.isPreviewPaneShown,
             (controller.layout.zoomedItem ?? controller.layout.focusedPanelItem)?.id == browser.id
         {
-            previewController(in: controller)?.show(
-                entries: browser.selectedEntries, scope: browser.activeScope)
+            let selection: ListingSelection =
+                browser.needsAccess ? .none : browser.currentSelection
+            previewController(in: controller)?.show(selection: selection, scope: scope)
         }
+        let entry = browser.needsAccess ? nil : browser.selectedEntry
         for item in controller.layout.allItems {
             guard let quickView = item as? QuickViewItem,
                 quickView.isFollowing, !quickView.isPinned,
                 quickViewSources[quickView.id] == browser.id
             else { continue }
-            quickView.retarget(to: browser.selectedEntry, scope: browser.activeScope)
+            quickView.retarget(to: entry, scope: scope)
         }
     }
 
@@ -82,12 +80,12 @@ extension AppDelegate {
             }
             let quickView = makeQuickView(isFollowing: true, in: controller)
             quickViewSources[quickView.id] = browser.id
-            controller.layout.insertInBackground(quickView, in: targetPanel)
             quickView.show(entry, scope: browser.activeScope)
+            controller.layout.insertInBackground(quickView, in: targetPanel)
         case .samePanel:
             let quickView = makeQuickView(isFollowing: false, in: controller)
-            controller.layout.insert(quickView, in: sourceSlot)
             quickView.show(entry, scope: browser.activeScope)
+            controller.layout.insert(quickView, in: sourceSlot)
         }
     }
 
@@ -97,7 +95,9 @@ extension AppDelegate {
         else { return }
         let active = controller.layout.zoomedItem ?? controller.layout.focusedPanelItem
         if let browser = active as? BrowserItem {
-            preview.show(entries: browser.selectedEntries, scope: browser.activeScope)
+            preview.show(
+                selection: browser.needsAccess ? .none : browser.currentSelection,
+                scope: browser.needsAccess ? nil : browser.activeScope)
         } else if let editor = active as? HexEditorItem {
             preview.show(file: editor.url, scope: editor.session.scope)
         } else if let quickView = active as? QuickViewItem {
@@ -136,18 +136,21 @@ extension AppDelegate {
             .first { $0.isFollowing && !$0.isPinned && quickViewSources[$0.id] == browserID }
     }
 
-    /// Pins any following Quick View tab moved into its source browser's panel, or whose
-    /// source browser was closed (docs/plans/M7.md, D-e).
-    private func pinMovedQuickViews(in controller: MainWindowController) {
+    /// Permanently detaches any following Quick View tab moved into its source browser's
+    /// panel, or whose source browser was closed (docs/plans/M7.md, D-e), and prunes closed
+    /// Quick View entries.
+    func pinMovedQuickViews(in controller: MainWindowController) {
+        let liveIDs = Set(workspace.allItems.map(\.id))
+        quickViewSources = quickViewSources.filter { liveIDs.contains($0.key) }
         for item in controller.layout.allItems {
             guard let quickView = item as? QuickViewItem,
-                quickView.isFollowing, !quickView.isPinned,
+                quickView.isFollowing,
                 let sourceID = quickViewSources[quickView.id]
             else { continue }
             let quickViewSlot = controller.layout.slot(of: quickView.id)
             let sourceSlot = controller.layout.slot(of: sourceID)
             if sourceSlot == nil || quickViewSlot == sourceSlot {
-                quickView.pin()
+                quickView.detachFromSource()
                 quickViewSources.removeValue(forKey: quickView.id)
             }
         }

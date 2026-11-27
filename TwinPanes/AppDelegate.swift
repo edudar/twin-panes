@@ -332,6 +332,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             window.identifier = MainWindowRestoration.identifier
         }
         addSidebar(to: controller)
+        attachPreviewPane(to: controller)
+        wireFrameUpdates(for: controller)
         if let saved {
             controller.frameController.restore(saved, using: itemRestorer)
         } else {
@@ -369,9 +371,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         controller.frameController.sidebar = sidebar
         controller.frameController.isFunctionKeyBarShown = isFunctionKeyBarShown
         controller.frameController.bottomAccessory = fileOperations.makeStrip(for: controller)
-        attachPreviewPane(to: controller)
         sidebar.show(volumes: volumes)
         volumeWatcher.start()
+    }
+
+    /// Wires layout updates to sync the sidebar highlight, Quick View following state, and
+    /// the trailing preview pane.
+    private func wireFrameUpdates(for controller: MainWindowController) {
+        controller.frameController.onUpdate = { [weak self, weak controller] in
+            guard let self, let controller else { return }
+            let active = controller.layout.zoomedItem ?? controller.layout.focusedPanelItem
+            (controller.frameController.sidebar as? SidebarViewController)?.highlight(
+                (active as? BrowserItem)?.folder)
+            self.pinMovedQuickViews(in: controller)
+            self.updatePreviewPane(in: controller)
+        }
     }
 
     /// The volumes the sidebars show, kept current for all windows.
@@ -520,6 +534,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             if !isNew, let item = editorItem(showing: session),
                 let controller = controller(containing: item.id)
             {
+                if controller.layout.zoomedItem != nil { controller.layout.exitZoom() }
                 controller.layout.select(item.id)
                 controller.window?.makeKeyAndOrderFront(nil)
                 return item
