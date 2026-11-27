@@ -64,6 +64,40 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: out.path))
     }
 
+    @Test func largeCopyReadsAsynchronouslyWithoutFillingPageCache() async throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        let size = 300 * 1024
+        let item = try item(bytes: size)
+        try item.buffer.overwrite(at: 100, with: Data([0xDE, 0xAD]))
+
+        @MainActor final class CopyState {
+            var insideCall = true
+            var completedSynchronously = false
+        }
+        let state = CopyState()
+        let copied: Result<Data, Error> = await withCheckedContinuation { continuation in
+            item.readForCopy(0..<UInt64(size)) { result in
+                if state.insideCall { state.completedSynchronously = true }
+                continuation.resume(returning: result)
+            }
+            state.insideCall = false
+        }
+
+        #expect(!state.completedSynchronously)
+        let data = try copied.get()
+        #expect(data.count == size)
+        #expect(data[100..<102] == Data([0xDE, 0xAD]))
+        #expect(item.source.cachedPageCount == 0)
+
+        try FileHandle(forWritingTo: url).truncate(atOffset: 100)
+        let truncated: Result<Data, Error> = await withCheckedContinuation { continuation in
+            item.readForCopy(0..<UInt64(size)) { result in
+                continuation.resume(returning: result)
+            }
+        }
+        #expect(throws: ByteSourceError.self) { _ = try truncated.get() }
+    }
+
     /// Everything the tab reads (view, copy, Save Selection, search) sees the edits.
     @Test func readsGoThroughTheCurrentSnapshot() async throws {
         defer { try? FileManager.default.removeItem(at: url) }

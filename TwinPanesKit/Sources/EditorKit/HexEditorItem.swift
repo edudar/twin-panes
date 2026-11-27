@@ -15,6 +15,10 @@ extension ItemKind {
 /// session's current snapshot.
 @MainActor
 public final class HexEditorItem: WorkspaceItem {
+    private static let asyncCopyThreshold = 256 * 1024
+    private let copyQueue = DispatchQueue(
+        label: "TwinPanes.HexEditorItem.copy", qos: .userInitiated)
+
     public let id = ItemID()
     public let kind: ItemKind = .editor
     public let preferredSlot: SlotID = .leftPanel
@@ -157,14 +161,14 @@ extension HexEditorItem: HexViewDataSource {
             }
         }
         let source = snapshot
-        if range.count <= 256 * 1024 {
+        if range.count <= Self.asyncCopyThreshold {
             completion(readExact(source))
             return
         }
         let scope = self.scope
-        Task.detached(priority: .userInitiated) {
+        copyQueue.async {
             let result = withExtendedLifetime(scope) { readExact(source) }
-            await MainActor.run { completion(result) }
+            DispatchQueue.main.async { MainActor.assumeIsolated { completion(result) } }
         }
     }
 }
