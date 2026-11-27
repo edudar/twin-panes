@@ -47,7 +47,15 @@ final class RecentFiles: NSObject, NSMenuDelegate {
 
     /// Removes the temporary preferences domain and folder created by `isolated()`.
     func cleanUp() {
-        if let isolatedSuite { UserDefaults().removePersistentDomain(forName: isolatedSuite) }
+        if let isolatedSuite {
+            UserDefaults().removePersistentDomain(forName: isolatedSuite)
+            if !isolatedSuite.hasPrefix("/"),
+                let prefs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)
+                    .first?.appendingPathComponent("Preferences/\(isolatedSuite).plist")
+            {
+                try? FileManager.default.removeItem(at: prefs)
+            }
+        }
         if let isolatedFolder { try? FileManager.default.removeItem(at: isolatedFolder) }
     }
 
