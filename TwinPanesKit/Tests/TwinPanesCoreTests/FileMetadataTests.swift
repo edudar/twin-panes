@@ -146,4 +146,64 @@ import UniformTypeIdentifiers
             }
         }
     }
+
+    @Test func specialPermissionBitsInFormattedPermissions() {
+        func metadata(posixMode: UInt16) -> FileMetadata {
+            FileMetadata(
+                url: URL(fileURLWithPath: "/tmp/perms.bin"), name: "perms.bin", kind: "Document",
+                typeIdentifier: UTType.data.identifier, isDirectory: false, isPackage: false,
+                isSymbolicLink: false, isDataless: false, size: 1, allocatedSize: 512,
+                created: nil, modified: nil, accessed: nil, posixMode: posixMode, owner: "root",
+                group: "wheel", hardLinkCount: 1, flags: [], symlinkTarget: nil,
+                extendedAttributes: [], hasMoreExtendedAttributes: false)
+        }
+        for (mode, expected) in [
+            (0o4755 as UInt16, "rwsr-xr-x (4755)"),
+            (0o4644, "rwSr--r-- (4644)"),
+            (0o2755, "rwxr-sr-x (2755)"),
+            (0o2644, "rw-r-Sr-- (2644)"),
+            (0o1755, "rwxr-xr-t (1755)"),
+            (0o1644, "rw-r--r-T (1644)"),
+            (0o7777, "rwsrwsrwt (7777)"),
+        ] {
+            #expect(metadata(posixMode: mode).formattedPermissions == expected)
+        }
+    }
+
+    @Test func extendedAttributesExact64Boundary() throws {
+        try withTempDir { dir in
+            let file = dir.appendingPathComponent("boundary-xattr.bin")
+            try Data("x".utf8).write(to: file)
+            let baseline = try FileMetadata.read(url: file).extendedAttributes.count
+            let toAdd = FileMetadata.maxExtendedAttributes - baseline
+            for index in 0..<toAdd {
+                var byte = UInt8(index)
+                let name = String(format: "com.tp.exact.%02d", index)
+                #expect(setxattr(file.path, name, &byte, 1, 0, XATTR_NOFOLLOW) == 0)
+            }
+
+            let exact = try FileMetadata.read(url: file)
+            #expect(exact.extendedAttributes.count == FileMetadata.maxExtendedAttributes)
+            #expect(!exact.hasMoreExtendedAttributes)
+
+            var extra = UInt8(0xFF)
+            #expect(setxattr(file.path, "com.tp.exact.overflow", &extra, 1, 0, XATTR_NOFOLLOW) == 0)
+            let over = try FileMetadata.read(url: file)
+            #expect(over.extendedAttributes.count == FileMetadata.maxExtendedAttributes)
+            #expect(over.hasMoreExtendedAttributes)
+        }
+    }
+
+    @Test func pre1970ModificationDateIsPreserved() throws {
+        try withTempDir { dir in
+            let file = dir.appendingPathComponent("retro.bin")
+            try Data("retro".utf8).write(to: file)
+            let targetDate = Date(timeIntervalSince1970: -86_400)
+            try FileManager.default.setAttributes(
+                [.modificationDate: targetDate], ofItemAtPath: file.path)
+            let meta = try FileMetadata.read(url: file)
+            let modified = try #require(meta.modified)
+            #expect(abs(modified.timeIntervalSince1970 - targetDate.timeIntervalSince1970) < 1)
+        }
+    }
 }

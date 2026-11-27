@@ -25,8 +25,11 @@ public final class SessionRegistry {
 
     /// The live session editing the file at `url`, if there is one.
     public func session(for url: URL) -> EditorSession? {
-        guard let key = try? FileIdentity(url: url).key else { return nil }
-        return entries[key]?.session
+        guard let key = try? FileIdentity(url: url).key,
+            let session = entries[key]?.session,
+            !session.isClosed
+        else { return nil }
+        return session
     }
 
     /// The live session for `url`, or a new one, registered. `isNew` tells which.
@@ -49,19 +52,33 @@ public final class SessionRegistry {
     /// now. A session whose file is gone, or whose file another live session already
     /// edits, isn't found by opening the file.
     public func adopt(_ session: EditorSession) {
-        guard let key = try? FileIdentity(url: session.url).key, entries[key]?.session == nil
-        else { return }
+        guard !session.isClosed, let key = try? FileIdentity(url: session.url).key else { return }
+        if let existing = entries[key]?.session, !existing.isClosed { return }
         register(session, key: key)
     }
 
     private func register(_ session: EditorSession, key: FileIdentity.Key) {
-        entries = entries.filter { $0.value.session != nil }
+        entries = entries.filter { $0.value.session.map { !$0.isClosed } ?? false }
         entries[key] = Entry(session: session)
-        // A save replaces the file, giving it a new inode: follow the session there.
+        // A save replaces the file, giving it a new inode: follow the session there;
+        // closing drops it from the registry immediately, before deallocation.
         session.observe(self) { [weak self, weak session] change in
-            guard change == .saved, let self, let session else { return }
-            self.entries = self.entries.filter { $0.value.session.map { $0 !== session } ?? false }
-            self.entries[session.identity.key] = Entry(session: session)
+            guard let self, let session else { return }
+            switch change {
+            case .saved:
+                self.entries = self.entries.filter {
+                    $0.value.session.map { $0 !== session } ?? false
+                }
+                if !session.isClosed {
+                    self.entries[session.identity.key] = Entry(session: session)
+                }
+            case .closed:
+                self.entries = self.entries.filter {
+                    $0.value.session.map { $0 !== session } ?? false
+                }
+            case .edited, .saving, .fileChanged:
+                break
+            }
         }
         notifyObservers(session)
     }
@@ -79,5 +96,10 @@ public final class SessionRegistry {
     }
 
     /// Live sessions, for tests and the quit workflow.
-    public var sessions: [EditorSession] { entries.values.compactMap(\.session) }
+    public var sessions: [EditorSession] {
+        entries.values.compactMap { entry in
+            guard let session = entry.session, !session.isClosed else { return nil }
+            return session
+        }
+    }
 }

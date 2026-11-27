@@ -155,6 +155,25 @@ import UniformTypeIdentifiers
                 && broken.type == .symbolicLink)
     }
 
+    @Test func brokenSymbolicLinkDistinguishesBrokenFromValidAndRegular() throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fm = FileManager.default
+        let file = dir.appendingPathComponent("file10.bin")
+        let validLink = dir.appendingPathComponent("valid-file-link")
+        let brokenLink = dir.appendingPathComponent("broken-file-link")
+        try fm.createSymbolicLink(at: validLink, withDestinationURL: file)
+        try fm.createSymbolicLink(
+            at: brokenLink, withDestinationURL: dir.appendingPathComponent("does-not-exist"))
+
+        let entries = try DirectoryReader.entries(of: dir)
+        let regular = try #require(entries.first { $0.name == "file10.bin" })
+        let valid = try #require(entries.first { $0.name == "valid-file-link" })
+        let broken = try #require(entries.first { $0.name == "broken-file-link" })
+        #expect(!regular.isBrokenSymbolicLink)
+        #expect(!valid.isBrokenSymbolicLink)
+        #expect(broken.isBrokenSymbolicLink)
+    }
+
     @Test func grantsPickTheMostSpecificFolder() throws {
         defer { try? FileManager.default.removeItem(at: dir) }
         // An absolute-path suite keeps the plist in `dir`, which the test removes; a named

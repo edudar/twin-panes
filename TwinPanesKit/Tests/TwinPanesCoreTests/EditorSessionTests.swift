@@ -113,4 +113,26 @@ import Testing
         try session.overwrite(Data([2]), at: 1, selectionBefore: 1..<2, selectionAfter: 2..<3)
         #expect(calls == 1)
     }
+
+    @Test func notifySkipsObserverWhoseOwnerWasReleasedByEarlierObserver() throws {
+        defer { cleanUp() }
+        let session = try session()
+        let firstOwner = Counter()
+        var secondOwner: Counter? = Counter()
+        var firstCalls = 0
+        var secondCalls = 0
+
+        session.observe(firstOwner) { _ in
+            firstCalls += 1
+            secondOwner = nil
+        }
+        session.observe(secondOwner!) { _ in
+            secondCalls += 1
+        }
+
+        try withExtendedLifetime(firstOwner) {
+            try session.overwrite(Data([1]), at: 0, selectionBefore: 0..<1, selectionAfter: 1..<2)
+        }
+        #expect(firstCalls == 1 && secondCalls == 0)
+    }
 }

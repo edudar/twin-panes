@@ -17,7 +17,7 @@ public struct FileMetadata: Equatable, Sendable {
     }
 
     private typealias ClassifiedTarget = (
-        isDirectory: Bool, isPackage: Bool, type: UTType,
+        isDirectory: Bool, isPackage: Bool, isDataless: Bool, type: UTType,
         size: UInt64?, allocatedSize: UInt64?, symlinkTarget: String?
     )
 
@@ -59,7 +59,7 @@ public struct FileMetadata: Equatable, Sendable {
         }
         let isSymlink = (info.st_mode & S_IFMT) == S_IFLNK
         let classified = classify(url: url, lstatInfo: info, isLink: isSymlink)
-        let isDataless = (info.st_flags & UInt32(SF_DATALESS)) != 0
+        let isDataless = classified.isDataless
         let (xattrs, hasMore) = readExtendedAttributes(at: path)
 
         return FileMetadata(
@@ -111,13 +111,15 @@ public struct FileMetadata: Equatable, Sendable {
         let target = readSymlinkTarget(at: url.path)
         var targetInfo = stat()
         guard stat(url.path, &targetInfo) == 0 else {
-            return (false, false, .symbolicLink, nil, nil, target)
+            let isDataless = (lstatInfo.st_flags & UInt32(SF_DATALESS)) != 0
+            return (false, false, isDataless, .symbolicLink, nil, nil, target)
         }
         return classifyTarget(
             url: url.resolvingSymlinksInPath(), info: targetInfo, target: target)
     }
 
     private static func classifyTarget(url: URL, info: stat, target: String?) -> ClassifiedTarget {
+        let isDataless = (info.st_flags & UInt32(SF_DATALESS)) != 0
         let fileType = info.st_mode & S_IFMT
         if fileType == S_IFDIR {
             var clean = url
@@ -125,13 +127,16 @@ public struct FileMetadata: Equatable, Sendable {
             let isPackage = (try? clean.resourceValues(forKeys: [.isPackageKey]).isPackage) ?? false
             let utType = TypeNames.type(
                 named: url.lastPathComponent, folder: !isPackage, package: isPackage)
-            return (!isPackage, isPackage, utType, nil, nil, target)
+            return (!isPackage, isPackage, isDataless, utType, nil, nil, target)
         }
         let utType = TypeNames.type(named: url.lastPathComponent, folder: false, package: false)
-        guard fileType == S_IFREG else { return (false, false, utType, nil, nil, target) }
+        guard fileType == S_IFREG else {
+            return (false, false, isDataless, utType, nil, nil, target)
+        }
         let size = info.st_size >= 0 ? UInt64(info.st_size) : 0
-        let allocated = info.st_blocks >= 0 ? UInt64(info.st_blocks) * 512 : 0
-        return (false, false, utType, size, allocated, target)
+        let blocks = UInt64(max(0, info.st_blocks)).multipliedReportingOverflow(by: 512)
+        let allocated: UInt64? = blocks.overflow ? nil : blocks.partialValue
+        return (false, false, isDataless, utType, size, allocated, target)
     }
 
     private static func readSymlinkTarget(at path: String) -> String? {
@@ -142,7 +147,7 @@ public struct FileMetadata: Equatable, Sendable {
     }
 
     private static func date(from spec: timespec) -> Date? {
-        guard spec.tv_sec > 0 || spec.tv_nsec > 0 else { return nil }
+        guard spec.tv_sec != 0 || spec.tv_nsec != 0 else { return nil }
         return Date(
             timeIntervalSince1970: TimeInterval(spec.tv_sec) + TimeInterval(spec.tv_nsec)
                 / 1_000_000_000)
@@ -176,10 +181,16 @@ public struct FileMetadata: Equatable, Sendable {
     }
 
     private static func readExtendedAttributes(at path: String) -> ([ExtendedAttribute], Bool) {
-        let totalBytes = listxattr(path, nil, 0, XATTR_NOFOLLOW)
-        guard totalBytes > 0 else { return ([], false) }
-        var buffer = [CChar](repeating: 0, count: totalBytes)
-        let bytesRead = listxattr(path, &buffer, totalBytes, XATTR_NOFOLLOW)
+        var buffer: [CChar] = []
+        var bytesRead = 0
+        for _ in 0..<4 {
+            let totalBytes = listxattr(path, nil, 0, XATTR_NOFOLLOW)
+            guard totalBytes > 0 else { return ([], false) }
+            buffer = [CChar](repeating: 0, count: totalBytes)
+            bytesRead = listxattr(path, &buffer, totalBytes, XATTR_NOFOLLOW)
+            if bytesRead >= 0 { break }
+            if errno != ERANGE { return ([], false) }
+        }
         guard bytesRead > 0 else { return ([], false) }
 
         let names = buffer[..<bytesRead].split(separator: 0).compactMap { slice -> String? in

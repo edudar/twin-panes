@@ -118,4 +118,68 @@ import Testing
         fresh.adopt(recovered)
         #expect(fresh.session(for: a) === recovered)
     }
+
+    @Test func closedSessionsLeaveRegistryImmediatelyAndDuringClosedNotification() throws {
+        defer { cleanUp() }
+        final class Observer {
+            var events: [EditorSession.Change] = []
+        }
+
+        let registry = SessionRegistry()
+        let a = try file("a.bin")
+        let (session, _) = try open(registry, a)
+
+        let lateObserver = Observer()
+        var seenInLateCallback: (closed: Bool, lookupNil: Bool, empty: Bool)?
+        session.observe(lateObserver) { change in
+            lateObserver.events.append(change)
+            if change == .closed {
+                seenInLateCallback = (
+                    session.isClosed,
+                    registry.session(for: a) == nil,
+                    registry.sessions.isEmpty
+                )
+            }
+        }
+
+        session.close()
+        session.close()  // idempotent
+        #expect(session.isClosed)
+        #expect(lateObserver.events == [.closed])
+        #expect(seenInLateCallback?.closed == true)
+        #expect(seenInLateCallback?.lookupNil == true)
+        #expect(seenInLateCallback?.empty == true)
+        #expect(registry.session(for: a) == nil)
+        #expect(registry.sessions.isEmpty)
+
+        // An observer attached before SessionRegistry.adopt runs before SessionRegistry's
+        // observer; it must still see the session as closed and absent from the registry.
+        let b = try file("b.bin")
+        let adopted = try EditorSession(url: b, addDirectory: folder.appendingPathComponent("add"))
+        let earlyObserver = Observer()
+        var seenInEarlyCallback: (closed: Bool, lookupNil: Bool, empty: Bool)?
+        adopted.observe(earlyObserver) { change in
+            earlyObserver.events.append(change)
+            if change == .closed {
+                seenInEarlyCallback = (
+                    adopted.isClosed,
+                    registry.session(for: b) == nil,
+                    registry.sessions.isEmpty
+                )
+            }
+        }
+        registry.adopt(adopted)
+        #expect(registry.session(for: b) === adopted)
+
+        adopted.close()
+        #expect(earlyObserver.events == [.closed])
+        #expect(seenInEarlyCallback?.closed == true)
+        #expect(seenInEarlyCallback?.lookupNil == true)
+        #expect(seenInEarlyCallback?.empty == true)
+        #expect(registry.session(for: b) == nil)
+        #expect(registry.sessions.isEmpty)
+
+        registry.adopt(adopted)
+        #expect(registry.session(for: b) == nil && registry.sessions.isEmpty)
+    }
 }

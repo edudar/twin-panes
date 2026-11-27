@@ -27,6 +27,9 @@ public struct DirectoryEntry: Hashable, Sendable {
     /// An app, whose icon is its own rather than its type's.
     public let isApplication: Bool
 
+    /// True when the entry is a symbolic link whose target could not be resolved.
+    public var isBrokenSymbolicLink: Bool { isSymbolicLink && type == .symbolicLink }
+
     /// `kind` is the type's description unless given.
     public init(
         url: URL, name: String, isDirectory: Bool, isPackage: Bool, isSymbolicLink: Bool,

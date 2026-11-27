@@ -83,6 +83,8 @@ public final class EditorSession {
     var lastOutsideChange: FileIdentity?
     /// Came back from a crash (its tab says so while the edits are unsaved).
     public private(set) var wasRecovered = false
+    /// True once `close()` has run.
+    public internal(set) var isClosed = false
     /// The operation journal in `folder`; nil before the first edit, or after it failed
     /// to write (edits go on, unprotected).
     var journal: SessionJournal?
@@ -246,6 +248,6 @@ public final class EditorSession {
 
     func notify(_ change: Change) {
         observers.removeAll { $0.owner == nil }
-        for observer in observers { observer.handler(change) }
+        for observer in observers where observer.owner != nil { observer.handler(change) }
     }
 }

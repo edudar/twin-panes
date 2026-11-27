@@ -88,6 +88,8 @@ extension EditorSession {
     /// is marked closed and deleted, and observers learn the session closed. Snapshots
     /// still reading the clone keep their open descriptors.
     public func close() {
+        guard !isClosed else { return }
+        isClosed = true
         closeFolder()
         notify(.closed)
     }
