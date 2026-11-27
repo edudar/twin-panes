@@ -199,11 +199,32 @@ private final class ScopedResponderView: NSView, CommandScopeProviding, NSMenuIt
             dispatcher: CommandDispatcher(registry: CommandRegistry()),
             closeCoordinator: CloseCoordinator(openItems: { [] }) { _ in .discard })
         let window = try #require(controller.window)
+        #expect(
+            window.contentRect(forFrameRect: window.frame).size == NSSize(width: 1120, height: 700))
         #expect(window.styleMask.contains(.fullSizeContentView))
         #expect(window.titleVisibility == .hidden)
         #expect(window.toolbarStyle == .unified)
         let toolbar = try #require(window.toolbar)
         let ids = toolbar.items.map(\.itemIdentifier)
-        #expect(ids == [.toggleSidebar])
+        #expect(ids == [.toggleSidebar, .flexibleSpace, .togglePreviewPane])
+        let previewItem = try #require(
+            toolbar.items.first { $0.itemIdentifier == .togglePreviewPane })
+        #expect(previewItem.label == "Preview")
+        #expect(previewItem.toolTip == "Show or hide the preview pane")
+        #expect(previewItem.isBordered)
+        #expect(previewItem.action == #selector(MainFrameViewController.togglePreviewPane(_:)))
+    }
+
+    @Test func windowWillCloseNotifiesFrameController() {
+        let layout = MainFrameLayout(filler: .testBrowsers)
+        layout.fillEmptyPanels()
+        let controller = MainWindowController(
+            layout: layout, workspace: WorkspaceRegistry(),
+            dispatcher: CommandDispatcher(registry: CommandRegistry()),
+            closeCoordinator: CloseCoordinator(openItems: { [] }) { _ in .discard })
+        var closed = 0
+        controller.frameController.onWillClose = { closed += 1 }
+        controller.closeWithoutAsking()
+        #expect(closed == 1)
     }
 }

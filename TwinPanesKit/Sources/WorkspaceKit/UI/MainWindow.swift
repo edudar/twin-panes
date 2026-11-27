@@ -92,7 +92,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
         frameController = MainFrameViewController(
             layout: layout, closeCoordinator: closeCoordinator, dispatcher: dispatcher)
         let window = MainWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 700),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
         window.title = "Twin Panes"
@@ -102,7 +102,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.tabbingMode = .disallowed  // per-panel tabs, not system window tabs (§4.9)
         window.dispatcher = dispatcher
         window.contentViewController = frameController
-        window.setContentSize(NSSize(width: 900, height: 600))
+        window.setContentSize(NSSize(width: 1120, height: 700))
         super.init(window: window)
         window.delegate = self
         window.onFirstResponderChange = { [weak frameController] responder in
@@ -150,6 +150,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate {
             item.host = nil
             item.onChange = nil
         }
+        frameController.onWillClose?()
         onClose?(self)
     }
 }
@@ -166,27 +167,45 @@ private final class MainToolbar: NSToolbar, NSToolbarDelegate {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar]
+        [.toggleSidebar, .flexibleSpace, .togglePreviewPane]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar]
+        [.toggleSidebar, .flexibleSpace, .togglePreviewPane]
     }
 
     func toolbar(
         _ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
-        guard itemIdentifier == .toggleSidebar else { return nil }
-        let item = NSToolbarItem(itemIdentifier: .toggleSidebar)
-        item.label = "Sidebar"
-        item.paletteLabel = "Toggle Sidebar"
-        item.toolTip = "Show or hide the sidebar"
-        item.image = NSImage(
-            systemSymbolName: "sidebar.leading", accessibilityDescription: "Toggle Sidebar")
+        switch itemIdentifier {
+        case .toggleSidebar:
+            makeToggleItem(
+                .toggleSidebar, label: "Sidebar", palette: "Toggle Sidebar",
+                toolTip: "Show or hide the sidebar", symbol: "sidebar.leading",
+                action: #selector(MainFrameViewController.toggleSidebarShown(_:)))
+        case .togglePreviewPane:
+            makeToggleItem(
+                .togglePreviewPane, label: "Preview", palette: "Toggle Preview",
+                toolTip: "Show or hide the preview pane", symbol: "sidebar.trailing",
+                action: #selector(MainFrameViewController.togglePreviewPane(_:)))
+        default:
+            nil
+        }
+    }
+
+    private func makeToggleItem(
+        _ id: NSToolbarItem.Identifier, label: String, palette: String, toolTip: String,
+        symbol: String, action: Selector
+    ) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: id)
+        item.label = label
+        item.paletteLabel = palette
+        item.toolTip = toolTip
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: palette)
         item.isBordered = true
         item.target = nil
-        item.action = #selector(MainFrameViewController.toggleSidebarShown(_:))
+        item.action = action
         return item
     }
 }
