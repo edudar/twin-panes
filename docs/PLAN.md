@@ -22,7 +22,7 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D6 | File-manager core features: 2 panels, multiple tabs per panel, Norton Commander-style F-key hotkeys, hidden files, Finder-like collapsible left sidebar, collapsible right preview pane | See §4.7. |
 | D7 | **Single main frame.** Viewing, editing, previewing, terminals and similar features never open new windows; they live inside the main window. Dialogs (sheets/alerts/modal panels) stay dialogs. | See §4.8. The editor uses a custom `EditorSession` instead of `NSDocument` (rationale in §4). |
 | D8 | Multiple main windows are allowed but low priority (tabs cover most needs). Requires **Merge All Windows**: left-panel tabs from all windows merge into the target's left panel, right into right. | See §4.9. Data model must not assume one window. |
-| D9 | Keep §4.8 defaults for now: F3 → quick view in the opposite panel, F4 → editor tab in the active panel (mode picked by file type, §4.10; hex only until M9a), terminal → bottom drawer + Ctrl+O | Revisit once in daily use; all key bindings stay configurable (command registry, §4.11). |
+| D9 | Keep §4.8 defaults for now: F3 → quick view in the opposite panel, F4 → editor tab in the opposite panel from a browser (or Quick View's panel from Quick View; mode picked by file type, §4.10; hex only until M9a), terminal → bottom drawer + Ctrl+O | Revisit once in daily use; all key bindings stay configurable (command registry, §4.11). |
 | D10 | Build order: hex editor to its first usable version (M3b), then the browser, then back to hex polish. A basic real browser (M1b) comes right after the read-only viewer, so every later milestone works on files you navigate to | See §6. M1b was added 2026-11-21: without it the only ways to real files were File › Open, drops and Open With. |
 | D11 | Bundle ID `io.github.edudar.twinpanes` (was `io.github.edudar.filer` until 2026-11-20) | Fixed once on the App Store. The app's name is Twin Panes (D25). |
 | D12 | The editor has three modes — **Hex, Plain text, Markdown** — with find/replace inside the file being edited in every mode | See §4.10. Text editing needs insert/delete, so insert/delete (M8) must land before the text modes (M9a). |
@@ -73,7 +73,7 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D57 | **Read-only hex previews without sessions** (M7) | `ReadOnlyHexViewController` opens a read-only `ByteSource` off the main actor (`pageCapacity: 32`) and never creates an `EditorSession`. When `SessionRegistry` already has a dirty session for the file, it shows `session.snapshot` live with an unsaved-edits banner and reloads on save or close. Dataless iCloud files show a manual Download placeholder. See docs/plans/M7.md, D-b. |
 | D58 | **O(1) `FileMetadata` and `PreviewClassifier`** (M7) | `FileMetadata` reads POSIX stat/permissions/owner/group, symlink target, BSD flags and xattr names/sizes (capped at 64) in O(1) without reading file bytes. `PreviewClassifier` chooses Quick Look vs. hex vs. placeholder; a dirty open session always selects `.hex`. See docs/plans/M7.md, D-c. |
 | D59 | **Collapsible trailing preview pane** (M7) | Hosted in `MainFrameViewController` as a regular trailing `NSSplitViewItem` (never `inspectorWithViewController:`, avoiding `toggleInspector:` collisions with the hex Data Inspector). Toggled on `⇧⌘P` or the trailing toolbar button; `WindowState` persists `previewShown` and `previewWidth`; default window size is `1120x700`. Collapsed panes suspend loading and clear Quick Look resources. See docs/plans/M7.md, D-d. |
-| D60 | **QuickView (`F3` / `⇧F3`) and active-panel `F4`** (M7) | `F3` (`⌘Y` / `⌃⌘V`) opens or retargets a non-restorable `QuickViewItem` in the opposite panel without stealing focus, toggling closed when pressed again while frontmost; `⇧F3` (`⇧⌃⌘V`) opens a standalone pinned QuickView in the active panel. `F4` (`⌃⌘E`) opens `HexEditorItem` in the active panel for regular files only (disabled on folders, packages and `".."`) and promotes QuickView to an editor tab. See docs/plans/M7.md, D-e, D-f. |
+| D60 | **QuickView (`F3` / `⇧F3`) and opposite-panel `F4`** (M7) | `F3` (`⌘Y` / `⌃⌘V`) opens or retargets a non-restorable `QuickViewItem` in the opposite panel without stealing focus (surfacing it if buried, toggling closed when frontmost); `⇧F3` (`⇧⌃⌘V`) opens a standalone `Keep`-detached QuickView in the active panel. Browser file opens (`F4` / `⌃⌘E`, `Return`, double-click) open `HexEditorItem` in the opposite panel by default (disabled on folders, packages, `".."` and broken symlinks); `F4` from QuickView opens or focuses the editor in QuickView's panel, and opening an already-open file exits zoom and focuses its tab. See docs/plans/M7.md, D-e, D-f. |
 
 ## 3. Constraints that drive the design
 
@@ -98,7 +98,7 @@ content; the `M0` rows exist now.
 
 | Module | Folder | Milestone | Contents |
 |---|---|---|---|
-| app target | `TwinPanes/` | M0, M7 | entry point, app delegate, main menu, command catalog and default bindings, recent files, window restoration, placeholder items, smoke test (`SmokeChild`), app icon, and wiring the kits together (injecting `SessionHexViewerFactory` for BrowserKit's preview pane and QuickView). Later: preferences |
+| app target | `TwinPanes/` | M0, M7 | entry point, app delegate, main menu, command catalog and default bindings, recent files, window restoration, placeholder items, smoke test (`SmokeChild`), app icon, and wiring the kits together (injecting `SessionHexViewerFactory` for BrowserKit's QuickView). Later: preferences |
 | TwinPanesCore | `TwinPanesKit/Sources/TwinPanesCore` | M0: module only | the UI-free engine, no AppKit imports (components below, plus `FileMetadata` and `PreviewClassifier` in M7) |
 | WorkspaceKit | `TwinPanesKit/Sources/WorkspaceKit` | M0, M5, M7 | the single main frame, independent of item types: `WorkspaceItem`, `MainFrameLayout` and its view controller, main window and controller, tab bar (with tab dragging, M5), `WindowState` and `ItemRestorer` (M5), the hosted sidebar (M5), trailing preview pane host and `HexPreviewing` / `HexViewerFactory` boundary (M7), close workflow, workspace registry, command registry and dispatcher, focus chain, menu bindings (§4.8, §4.11) |
 | HexViewKit | `TwinPanesKit/Sources/HexViewKit` | M1, M7 | virtualized hex/text view, selection, inspector UI, `ReadOnlyHexViewController` and `SessionHexViewerFactory` (M7) |
@@ -158,8 +158,10 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `OperationControl`, `FileOperationQueue`, `QueuedOperation` | M6 | pause and cancel, the app-wide queue, and an operation's request, state and result (D53) |
 | `FileOperationHistory`, `FileChange` | M6 | undo and redo of file operations (D54) |
 | `CloudDownloads` | M6 | whether a file's bytes are only in iCloud, and asking for them (D55) |
+| `FileMetadata` | M7 | O(1) POSIX stat, permissions, BSD flags, symlink target and capped xattrs without reading bytes (D58) |
+| `PreviewClassifier` | M7 | picks Quick Look vs. hex vs. placeholder; dirty sessions always select hex (D58) |
 
-**BrowserKit components** (M1b, M4, M5, M6)
+**BrowserKit components** (M1b, M4–M7)
 
 | Component | Milestone | Role |
 |---|---|---|
@@ -171,13 +173,15 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `StepTiming`, `StepRecorder` | M4 | main-actor step timing for smoke-test stall diagnostics |
 | `BrowserItem+FileCommands` | M6 | F2–⇧F8 and Undo/Redo sent to the app's handler (D52, D54) |
 | `OperationsStripViewController`, `OperationTexts` | M6 | the progress strip and what its rows say (D53) |
-| `TextSheet`, `DeleteConfirmation`, `ConflictSheet` | M6 | the sheets that confirm file operations and settle conflicts (D52)
+| `TextSheet`, `DeleteConfirmation`, `ConflictSheet` | M6 | the sheets that confirm file operations and settle conflicts (D52) |
+| `PreviewPaneViewController`, `PreviewMetadataView`, `QuickLookHostView` | M7 | collapsible right preview pane: frame-sized Quick Look host with resize refresh above O(1) metadata (D59) |
+| `QuickViewItem` | M7 | F3/`⇧F3` read-only QuickView tab (`QuickViewViewController`) with Quick Look \| Hex toggle, `Keep`, dirty banner and F4 promotion (D57, D60) |
 
 - **Project layout (D20):**
 
   | Path | What |
   |---|---|
-  | `TwinPanes.xcodeproj` | the thin app target, scheme `TwinPanes`; links the package's `WorkspaceKit`, `EditorKit`, `BrowserKit` and `SandboxProbe` products |
+  | `TwinPanes.xcodeproj` | `TwinPanes` app; links `WorkspaceKit`, `EditorKit`, `HexViewKit`, `BrowserKit`, `SandboxProbe` |
   | `TwinPanes/` | app sources and `AppIcon.icon`; a synchronized folder, so new files need no project edit |
   | `Config/` | `Project.xcconfig`, `TwinPanes.xcconfig` (build settings), `TwinPanes.entitlements` |
   | `TwinPanesKit/` | the Swift package: every library target under `Sources/`, tests under `Tests/` |
@@ -574,11 +578,12 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   NC-style marking (Insert/Space, +/−/`*`) and drive switching are later candidates.
 - **Hidden files:** toggle ⌘⇧. (Finder's shortcut) per panel, with a global default
   in Preferences.
-- **Preview pane (right, collapsible):** `QLPreviewView` for the selected file plus
-  metadata (size, dates, permissions, xattrs). For files Quick Look can't show, offer
-  a hex view. BrowserKit doesn't import HexViewKit: it asks a viewer factory
-  (protocol in WorkspaceKit, implementation injected by the TwinPanes app target). The hex view here
-  follows the quick-view rules in §4.8 (read-only `ByteSource`, no session).
+- **Preview pane (right, collapsible):** compact `QLPreviewView` above O(1) file
+  metadata (size, dates, permissions, flags, xattrs) for the selected file; multi-
+  selection shows item count and total size computed off the main actor. Hex viewing
+  and `Keep` pinning live in QuickView (`F3` / `⇧F3`, §4.8), where BrowserKit asks a
+  viewer factory (protocol in WorkspaceKit, implementation injected by TwinPanes) for
+  a read-only `ByteSource` view with no session.
 - **Norton Commander-style keys + bottom function bar:**
   F3 View (quick view, §4.8), F4 Edit (editor tab; hex only until M9a, then mode by
   file type per §4.10), F5 Copy to other panel, F6 Move/Rename, F7 New folder, F8
@@ -708,20 +713,28 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   The smoke test drives F5 to ⇧F8 and undo with real keys and sheets, copies 10,000
   files with both panels watching (busiest gaps 8–29 ms) and deletes a shown 100k
   folder (22–28 ms), under the stall gate.
-- **As built (M7, docs/plans/M7.md):** D56–D60. `PreviewPaneViewController` pairs
-  `QuickLookHostView` (`shouldCloseWithWindow = false`, explicit `close()`) and lazy
-  `ReadOnlyHexViewController` above a scrollable `PreviewMetadataView`, coalescing rapid
-  selection changes on a 40 ms timer and clearing resources when collapsed.
-  `QuickViewItem` provides opposite-panel following QuickView on F3 (`⌘Y` / `⌃⌘V`)
-  without stealing focus, standalone pinned QuickView on `⇧F3` (`⇧⌃⌘V`), and F4
-  promotion to `HexEditorItem`; moving a following QuickView into its source browser's
-  panel auto-pins it. Wiring `BrowserItem.onSelectionChange` exposed a pre-existing
-  main-thread deallocation race in `BrowserViewController.selectionChanged()` (fixed by
-  wrapping replaced `ListingSelection` values in `Garbage(selection)`). The smoke test
-  verifies `⇧⌘P`, metadata xattrs, Quick Look vs. hex auto-selection, pinning, F3 /
-  `⇧F3`, active-panel F4, live dirty-session unsaved-edits markers, and a 1,000-file
-  cursor sweep with both preview pane and QuickView open (busiest gap 18–28 ms CPU on
-  the dev Mac, zero `EditorSession`s created).
+- **As built (M7, docs/plans/M7.md, docs/reviews/M7.md):** D56–D60.
+  `PreviewPaneViewController` stacks a frame-sized `QuickLookHostView`
+  (`shouldCloseWithWindow = false`, explicit `close()`, 60 ms coalesced resize refresh)
+  above a scrollable `PreviewMetadataView` (45/55 vertical split), coalescing rapid
+  selection changes on a 40 ms timer, summing multi-selection sizes off `@MainActor`,
+  and clearing resources when collapsed. `QuickViewItem` provides opposite-panel
+  following QuickView on F3 (`⌘Y` / `⌃⌘V`) without stealing focus (or surfaces a buried
+  tab), standalone `Keep`-detached QuickView on `⇧F3` (`⇧⌃⌘V`), a Quick Look | Hex
+  toggle via `HexViewerFactory`, a live dirty-session banner, and F4 promotion in
+  QuickView's panel; moving a following QuickView into its source panel or closing its
+  source permanently detaches it (`detachFromSource()`). Browser file opens (`F4`,
+  `Return`, double-click) open in the opposite panel by default, focus an existing
+  editor tab (exiting zoom), and disable `F4` on broken symlinks (shown with a warning
+  icon, tooltip, status, and QuickView placeholder). Wiring `BrowserItem.onSelectionChange`
+  exposed a pre-existing main-thread deallocation race in
+  `BrowserViewController.selectionChanged()` (fixed by wrapping replaced
+  `ListingSelection` values in `Garbage(selection)`). The smoke test verifies `⇧⌘P`
+  split-ratio preservation, metadata xattrs, Quick Look vs. hex auto-selection, `Keep`,
+  F3 / `⇧F3`, opposite-panel and QuickView F4, panel drop routing, live dirty-session
+  markers, and a 1,000-file cursor sweep with both preview pane and QuickView open
+  (busiest gap 18–28 ms CPU on the dev Mac, zero `EditorSession`s created, no `/dev/fd`
+  leak).
 
 ### 4.8 Single main frame: workspace model (D7)
 
@@ -757,7 +770,7 @@ QuickView, Terminal, later Compare/Search results. An item can be hosted in any
 | Slot | What goes there | Notes |
 |---|---|---|
 | Panel tabs (left/right) | Any item; Browser is the default | Tab bar shows item type icon and dirty dot. Tabs drag between panels. |
-| Preview pane (right) | Read-only, follows the selection | Quick Look, metadata, hex view for unknown types. Can be "pinned" to stop following. |
+| Preview pane (right) | Read-only, follows the selection | Compact Quick Look above O(1) file metadata (no hex view or pinning; those live in QuickView). |
 | Bottom drawer | Terminal (later: operations queue, log, search results) | Toggle ⌃\`. Follows the active panel's directory unless detached. |
 | Zoom | Any item, full frame | Like Far's Ctrl+O / hiding panels. Toggle and Esc return to the previous layout. |
 
@@ -765,7 +778,8 @@ QuickView, Terminal, later Compare/Search results. An item can be hosted in any
 - **F3 View** → quick view in the *opposite* panel as a new tab (Far Ctrl+Q style):
   the file list stays visible, moving the cursor updates the view. ⇧F3 opens it in
   the same panel.
-- **F4 Edit** → editor tab in the active panel; zoom (⌘⇧↩) for full frame.
+- **F4 Edit** → editor tab in the opposite panel from a browser (or QuickView's own
+  panel from QuickView); zoom (⌘⇧↩) for full frame.
 - **Terminal** → bottom drawer, plus Ctrl+O full-frame toggle for the
   Far/mc/Nimble muscle memory; can also be opened as a panel tab. Note ⌃O is the
   Cocoa "open line" text binding — when a text editor has focus, Ctrl+O must either
@@ -778,12 +792,13 @@ QuickView, Terminal, later Compare/Search results. An item can be hosted in any
   location backed by a security-scoped bookmark. Unsaved edits survive a crash via
   the session journal (D15, §4.2).
 
-**QuickView is not an editor.** The F3 quick view (and the preview pane's hex view)
-retargets on every cursor move, so it reads through a lightweight read-only
-`ByteSource` and never creates an `EditorSession`. If `SessionRegistry` already has a
-dirty session for that file, the quick view shows the session's bytes (via a
-snapshot) with a marker that the view includes unsaved edits. "Edit" from a quick
-view (F4) opens or focuses the real editor item.
+**QuickView is not an editor.** The F3 quick view (holding the Quick Look | Hex toggle,
+`Keep` button, and live dirty-session banner) retargets on every cursor move, so it
+reads through a lightweight read-only `ByteSource` and never creates an
+`EditorSession`. If `SessionRegistry` already has a dirty session for that file,
+QuickView shows the session's bytes (via a snapshot) with a marker that the view
+includes unsaved edits. "Edit" from a quick view (F4) opens or focuses the real
+editor item in QuickView's panel, exiting zoom if needed.
 
 **State restoration (D23).** AppKit's restoration APIs:
 - Each main window has a `restorationClass` and identifier; its controller encodes
@@ -1010,8 +1025,10 @@ Built in M0 with hard-coded default bindings; user-editable bindings arrive in M
 so primary shortcuts (e.g. `⌘G` ahead of `F3` on Find Next) appear in menus.
 Dual panels came in M5 as `panel.switch` (Tab and ⇧Tab, bound in the file list's
 scope only) and `panel.moveTab` (Window › Move Tab to Other Panel, no default key).
-Dropping a file on a window opens a hex tab in that window; dropping a folder opens a
-browser tab there and saves its grant.
+Dropping a file on a window opens a hex tab in the panel under the cursor (rejecting
+drops over the sidebar or preview pane); dropping a folder opens a browser tab there
+and saves its grant. Toggling the preview pane (`⇧⌘P`) preserves the inner panel
+split ratio.
 M6 added the file commands in the browser's scope, each with an F-key and a ⌘ shortcut
 (F2 ⌘R, F5 ⇧⌘C, F6 ⇧⌘M, F7 ⇧⌘N, F8 ⌘⌫, ⇧F8 ⌥⌘⌫) and a File menu item,
 and the function-key bar, whose labels are those commands' titles (D51). After M6 the
@@ -1135,7 +1152,7 @@ starts; this table stays the summary.
 | M4 | Browser foundation | Builds on M1b: async listing that never blocks the UI, back/forward history, sorting by column, hidden-files toggle, live updates (FSEvents), per-volume access flow informed by the M0 spike | Browse a 100k-file folder without UI stalls |
 | M5 | Dual panels + tabs | Second panel, active-panel focus, per-panel tab bar, tab restore on relaunch via AppKit restoration (D23), collapsible sidebar (Favorites, Locations), shell-style path completion in the path field (§4.7), a relaunch smoke test that also checks crash recovery (from M3c, §9) | Daily navigation possible without Finder |
 | M6 | NC keys + file operations | Function-key bar, F2–F8 actions with ⌘ equivalents, operations queue (copy/move/trash/new folder/rename) with progress and conflict handling, cross-volume move with per-item failure reporting, iCloud dataless files in operations and at the editor's first edit (from M3c, §9) | Copy/move large trees reliably with cancel and conflicts |
-| M7 | Preview pane + hex integration | Collapsible right pane with Quick Look + metadata, viewer factory injected by the TwinPanes app target, QuickView item (F3 quick view in opposite panel, read-only `ByteSource`, unsaved-edits marker), F4 editor tab (hex), hex view in preview for unsupported types | Hex editor reachable entirely from the file manager; moving the cursor through 1,000 files in quick view creates no sessions |
+| M7 | Preview pane + hex integration | Collapsible right pane with Quick Look + O(1) metadata, viewer factory injected by TwinPanes, QuickView item (F3/`⇧F3` with Quick Look \| Hex toggle, `Keep`, read-only `ByteSource`, unsaved-edits banner), F4 editor tab (opposite panel from browser, QuickView's panel from QuickView) | Hex editor reachable entirely from the file manager; moving the cursor through 1,000 files in quick view creates no sessions |
 | M8 | Insert/delete | PieceTable insert/delete exposed, insert-mode toggle in hex, paste/delete ranges, strategy A with a streamed rewrite (inode re-keying, new backing generation, metadata preservation), free-space check, refusal or copy-based path on strategy-B-only volumes | Random edit sequences round-trip byte-exact through save; xattrs/tags survive |
 | M9a | Text mode + find/replace | Mode switcher, encoding detection, lossless invalid-byte mapping, TextKit sync layer, TextKit 2 text mode (after the spike in §4.10 passes; 16 MB threshold profiled separately), unencodable-input handling + Convert to UTF-8, line endings, inline find/replace in hex (any length) and text modes | Switch modes mid-edit with no data loss; replace-all on a 15 MB text file is one undo step; text-mode memory stays within its budget at the threshold |
 | M9b | Large-text viewer | Virtualized read-only text view over snapshots, sparse background line index scanning in code units (UTF-8/Latin-1/UTF-16), `Searcher`-based find | Open and scroll a 4 GB log file (and a UTF-16 file) smoothly; line index stays within tens of MB |
