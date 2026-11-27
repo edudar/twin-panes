@@ -326,17 +326,20 @@ struct SmokeTest {
                 == true,
             "a package lists as a file")
         table?.selectRowIndexes([1], byExtendingSelection: false)
-        for (chord, label) in [(KeyChord.returnKey, "Return"), (.function(4), "F4")] {
-            check(dispatch(chord, in: window), "\(label) on a package dispatched")
-            if let sheet = window.attachedSheet {
-                window.endSheet(sheet)
-                await settle()
-            }
-            check(
-                browser.folder.lastPathComponent == "sub"
-                    && app.workspace.allItems.allSatisfy { !($0 is HexEditorItem) },
-                "\(label) does not open a package as a hex editor tab")
+        check(dispatch(.returnKey, in: window), "Return on a package dispatched")
+        if let sheet = window.attachedSheet {
+            window.endSheet(sheet)
+            await settle()
         }
+        check(
+            browser.folder.lastPathComponent == "sub"
+                && app.workspace.allItems.allSatisfy { !($0 is HexEditorItem) },
+            "Return does not open a package as a hex editor tab")
+        check(!dispatch(.function(4), in: window), "F4 is disabled on a package")
+        check(
+            browser.folder.lastPathComponent == "sub"
+                && app.workspace.allItems.allSatisfy { !($0 is HexEditorItem) },
+            "F4 does not open a package as a hex editor tab")
         let down = KeyChord(
             String(Character(UnicodeScalar(NSDownArrowFunctionKey)!)), [.command, .option])
         check(dispatch(down, in: window), "⌥⌘↓ dispatched")
