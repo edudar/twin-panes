@@ -217,6 +217,32 @@ step does.
   and saw it pass. If a check could not run or was skipped (for example, sandbox limits,
   no GUI, or a docs-only change), state which check was skipped and why.
 
+### Verifying in a sandboxed worker
+
+A worker running under Seatbelt (a sandboxed or headless subagent) can't reach some
+system services the full set needs, such as security-scoped bookmarks
+(ScopedBookmarksAgent) and the pasteboard server, and can't write caches outside its
+folder. Unfiltered runs there fail or hang for reasons unrelated to the change. A worker
+runs this reduced set instead:
+
+- The lint and x86_64 build commands above, unchanged.
+- `swift test` and `swift test --sanitize=thread` filtered to the test targets of the
+  modules it changed, with SwiftPM's own sandbox off (it can't nest inside Seatbelt) and
+  temp and module caches in the gitignored `build/` folder:
+
+  ```bash
+  mkdir -p build/tmp && TMPDIR="$PWD/build/tmp" CLANG_MODULE_CACHE_PATH="$PWD/build/tmp/ModuleCache" swift test --disable-sandbox --filter TwinPanesCoreTests --package-path TwinPanesKit
+  ```
+
+- Every build or test command gets a timeout from the worker's tool (`swift test` has no
+  timeout flag). When one fires, stop the process and report the tail of its log; don't
+  rerun it unchanged.
+
+The unfiltered `swift test --parallel`, `xcodebuild` and `--smoke-test` stay with the
+unsandboxed coordinator, which runs the full set above before any commit. The worker's
+handoff names each check it skipped or filtered. A test that fails only because a service
+is denied is reported, not changed to pass in the worker.
+
 ## Commits and pushing
 
 - **Commit only when the maintainer says "commit"; push only when they say "push"**
