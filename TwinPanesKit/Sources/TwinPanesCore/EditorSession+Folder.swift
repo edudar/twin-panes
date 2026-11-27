@@ -75,8 +75,11 @@ extension EditorSession {
     }
 
     /// Reads the file afresh: a new edit model, the file's current identity, no history.
+    /// Closes any old session folder only after opening the new file succeeds, so a failed
+    /// reload never destroys the crash journal or clone.
     func reloadFromDisk() throws {
         let source = try ByteSource(url: url)
+        closeFolder()
         buffer = EditBuffer(original: source)
         identity = source.identity
         savedTree = buffer.tree

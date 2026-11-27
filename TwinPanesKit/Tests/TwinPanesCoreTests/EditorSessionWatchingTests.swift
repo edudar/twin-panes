@@ -150,4 +150,25 @@ import Testing
         #expect(!session.isDirty && !session.canUndo && session.fileState == .unchanged)
         #expect(session.folder == nil && !FileManager.default.fileExists(atPath: made.url.path))
     }
+
+    @Test func failedReloadPreservesUnsavedEditsAndCrashJournal() throws {
+        defer { cleanUp() }
+        let session = try session()
+        defer {
+            session.stopWatching()
+            session.close()
+        }
+        try type(session, 0xAA, at: 5)
+        let made = try #require(session.folder)
+        #expect(session.journal != nil)
+
+        try FileManager.default.removeItem(at: url)
+        #expect(throws: ByteSourceError.self) { try session.reloadDiscardingEdits() }
+
+        #expect(session.isDirty)
+        #expect(try session.snapshot.read(4..<7) == Data([4, 0xAA, 6]))
+        #expect(session.folder?.url == made.url)
+        #expect(session.journal != nil)
+        #expect(FileManager.default.fileExists(atPath: made.url.path))
+    }
 }

@@ -30,7 +30,6 @@ extension EditorSession {
         }
         guard !now.isUnchanged(from: identity) else { return }  // our own save, or a touch
         guard isDirty else {
-            closeFolder()  // the clone and journal were of the old contents
             try? reloadFromDisk()
             fileState = .unchanged
             return
@@ -44,7 +43,6 @@ extension EditorSession {
     /// Drops the unsaved edits and reads the file as it is now (Reload in the sheet).
     public func reloadDiscardingEdits() throws {
         guard !isSaving else { throw EditorSessionError.saveInProgress }
-        closeFolder()
         try reloadFromDisk()
         fileState = .unchanged
         lastOutsideChange = nil
