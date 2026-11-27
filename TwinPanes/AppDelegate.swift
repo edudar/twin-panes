@@ -58,9 +58,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 ? baseFolder.appendingPathComponent("grants", isDirectory: true) : baseFolder
             try? FileManager.default.createDirectory(
                 at: grantsDir, withIntermediateDirectories: true)
-            let suite = grantsDir.appendingPathComponent("defaults").path
+            let suitePrefix = "io.github.edudar.twinpanes.\(baseFolder.lastPathComponent)"
+            let suite = "\(suitePrefix).grants"
             guard let defaults = UserDefaults(suiteName: suite) else {
-                preconditionFailure("Unable to create isolated UserDefaults suite at \(suite)")
+                preconditionFailure("Unable to create isolated UserDefaults suite \(suite)")
             }
             isolatedGrantsFolder = grantsDir
             isolatedGrantsSuite = suite
@@ -71,10 +72,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             let recentsDir = baseFolder.appendingPathComponent("recents", isDirectory: true)
             try? FileManager.default.createDirectory(
                 at: recentsDir, withIntermediateDirectories: true)
-            let recentsSuite = recentsDir.appendingPathComponent("defaults").path
+            let recentsSuite = "\(suitePrefix).recents"
             guard let recentsDefaults = UserDefaults(suiteName: recentsSuite) else {
                 preconditionFailure(
-                    "Unable to create isolated UserDefaults suite at \(recentsSuite)")
+                    "Unable to create isolated UserDefaults suite \(recentsSuite)")
             }
             recentFiles = RecentFiles(
                 defaults: recentsDefaults,
@@ -249,6 +250,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         recentFiles.cleanUp()
         if let isolatedGrantsSuite {
             UserDefaults().removePersistentDomain(forName: isolatedGrantsSuite)
+            if let prefs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)
+                .first?.appendingPathComponent("Preferences/\(isolatedGrantsSuite).plist")
+            {
+                try? FileManager.default.removeItem(at: prefs)
+            }
         }
         if let isolatedGrantsFolder {
             try? FileManager.default.removeItem(at: isolatedGrantsFolder)
@@ -370,7 +376,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         controller.frameController.sidebar = sidebar
         controller.frameController.isFunctionKeyBarShown = isFunctionKeyBarShown
-        controller.frameController.bottomAccessory = fileOperations.makeStrip(for: controller)
+        controller.frameController.operationsPopoverContent = fileOperations.makePopover(
+            for: controller)
         sidebar.show(volumes: volumes)
         volumeWatcher.start()
     }

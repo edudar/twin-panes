@@ -66,10 +66,8 @@ extension SmokeTest {
         right.go(to: rightFolder)
         await left.listed()
         await right.listed()
-        let strip = controller.frameController.bottomAccessory?.view
-        for _ in 0..<250 where (strip?.fittingSize.height ?? 0) >= 1 {
-            await settle(milliseconds: 20)
-        }
+        controller.frameController.hideOperationsPopover()
+        await settle(milliseconds: 50)
     }
 
     /// `folders` folders of `filesEach` 4 KB files.

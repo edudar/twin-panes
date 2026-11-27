@@ -103,7 +103,7 @@ content; the `M0` rows exist now.
 | WorkspaceKit | `TwinPanesKit/Sources/WorkspaceKit` | M0, M5, M7 | the single main frame, independent of item types: `WorkspaceItem`, `MainFrameLayout` and its view controller, main window and controller, tab bar (with tab dragging, M5), `WindowState` and `ItemRestorer` (M5), the hosted sidebar (M5), trailing preview pane host and `HexPreviewing` / `HexViewerFactory` boundary (M7), close workflow, workspace registry, command registry and dispatcher, focus chain, menu bindings (§4.8, §4.11) |
 | HexViewKit | `TwinPanesKit/Sources/HexViewKit` | M1, M7 | virtualized hex/text view, selection, inspector UI, `ReadOnlyHexViewController` and `SessionHexViewerFactory` (M7) |
 | EditorKit | `TwinPanesKit/Sources/EditorKit` | M1, M5 | the editor item: mode switcher, find bar, editor state restoration (M5); hosts the mode views over one `EditorSession` |
-| BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b, M4–M7 | the browser tab: async listing, sorting, hidden files, history, live updates, path bar, folder access (M1b, M4); the sidebar, path completion and the tab's saved state (M5); file operations commands, sheets and progress strip (M6); `PreviewPaneViewController`, `PreviewMetadataView`, `QuickLookHostView` and `QuickViewItem` (M7) |
+| BrowserKit | `TwinPanesKit/Sources/BrowserKit` | M1b, M4–M7 | the browser tab: async listing, sorting, hidden files, history, live updates, path bar, folder access (M1b, M4); the sidebar, path completion and the tab's saved state (M5); file operations commands, sheets and toolbar activity popover (M6); `PreviewPaneViewController`, `PreviewMetadataView`, `QuickLookHostView` and `QuickViewItem` (M7) |
 | TextEditKit | `TwinPanesKit/Sources/TextEditKit` | M9 | plain-text and Markdown modes, large-text viewer |
 | SandboxProbe | `TwinPanesKit/Sources/SandboxProbe` | M0, M3c | Foundation-only probes for the sandbox spike (§5); only the app's Debug menu uses it. Stays until the M3c volume checks (external drives) are done, then goes away with that menu |
 
@@ -172,7 +172,7 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `AccessRequest` | M4 | sandbox access prompt targeting (volume, home folder, or lost grant) |
 | `StepTiming`, `StepRecorder` | M4 | main-actor step timing for smoke-test stall diagnostics |
 | `BrowserItem+FileCommands` | M6 | F2–⇧F8 and Undo/Redo sent to the app's handler (D52, D54) |
-| `OperationsStripViewController`, `OperationTexts` | M6 | the progress strip and what its rows say (D53) |
+| `OperationsPopoverViewController`, `OperationTexts` | M6 | toolbar activity popover (4 visible, 20 retained, status icons, pause/cancel) and row text (D53) |
 | `TextSheet`, `DeleteConfirmation`, `ConflictSheet` | M6 | the sheets that confirm file operations and settle conflicts (D52) |
 | `PreviewPaneViewController`, `PreviewMetadataView`, `QuickLookHostView` | M7 | collapsible right preview pane: frame-sized Quick Look host with resize refresh above O(1) metadata (D59) |
 | `QuickViewItem` | M7 | F3/`⇧F3` read-only QuickView tab (`QuickViewViewController`) with Quick Look \| Hex toggle, `Keep`, dirty banner and F4 promotion (D57, D60) |

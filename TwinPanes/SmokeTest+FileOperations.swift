@@ -53,18 +53,25 @@ extension SmokeTest {
         await runFileOperations(
             check, left: left, source: source, destination: destination, window: window, base: base)
         await finishAndCleanTrash(on: window)
-        // The checks after these expect the window as it was, and the progress strip empty
-        // again (finished rows linger a few seconds).
+        let toolbarHasActivity =
+            window.toolbar?.items.contains { $0.itemIdentifier == .toggleOperations } ?? false
+        check(toolbarHasActivity, "the toolbar has the activity popover button")
+        controller.frameController.hideOperationsPopover()
+        await settle(milliseconds: 50)
+        controller.frameController.toggleOperationsPopover(nil)
+        await settle(milliseconds: 50)
+        check(
+            controller.frameController.isOperationsPopoverShown,
+            "the activity toolbar button reopens the operations popover")
+        controller.frameController.hideOperationsPopover()
+        await settle(milliseconds: 50)
+        // The checks after these expect the window as it was.
         left.go(to: leftFolder)
         right.go(to: rightFolder)
         await left.listed()
         await right.listed()
         layout.activate(activePanel)
         window.makeFirstResponder(left.preferredFirstResponder)
-        let strip = controller.frameController.bottomAccessory?.view
-        for _ in 0..<250 where (strip?.fittingSize.height ?? 0) >= 1 {
-            await settle(milliseconds: 20)
-        }
     }
 
     private func runFileOperations(

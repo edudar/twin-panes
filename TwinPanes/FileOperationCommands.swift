@@ -15,7 +15,7 @@ final class FileOperationCommands: FileCommandHandling {
     private let windows: () -> [MainWindowController]
     /// The window each operation was started from, held weakly.
     private var origins: [QueuedOperation.ID: () -> MainWindowController?] = [:]
-    private var strips: [() -> OperationsStripViewController?] = []
+    private var popovers: [() -> OperationsPopoverViewController?] = []
     private nonisolated(unsafe) var windowCloseObserver: (any NSObjectProtocol)?
     private var isUndoingOrRedoing = false
     private var isQuitting = false
@@ -44,21 +44,30 @@ final class FileOperationCommands: FileCommandHandling {
         }
     }
 
-    /// The progress strip for `controller`'s window: its own operations, and those of
+    /// The activity popover for `controller`'s window: its own operations, and those of
     /// windows that have closed when it's the first window.
-    func makeStrip(for controller: MainWindowController) -> OperationsStripViewController {
-        let strip = OperationsStripViewController(
+    func makePopover(for controller: MainWindowController) -> OperationsPopoverViewController {
+        let popover = OperationsPopoverViewController(
             queue: queue,
             shows: { [weak self, weak controller] operation in
                 guard let self, let controller else { return false }
                 return self.window(of: operation) === controller
             },
-            onDismiss: { [weak self] id in
+            onDiscard: { [weak self] id in
                 self?.queue.removeFinished(id)
                 self?.origins.removeValue(forKey: id)
             })
-        strips.append { [weak strip] in strip }
-        return strip
+        let frame = controller.frameController
+        popover.onRequestShow = { [weak frame] in frame?.showOperationsPopover() }
+        popover.onRequestHide = { [weak frame] in frame?.hideOperationsPopover() }
+        popover.onIndicatorChange = { [weak frame] state in
+            frame?.operationsIndicatorState = state
+        }
+        popover.hostWindow = { [weak controller] in controller?.window }
+        frame.onOperationsPopoverUserOpen = { [weak popover] in popover?.noteUserOpened() }
+        frame.onOperationsPopoverClose = { [weak popover] in popover?.noteClosed() }
+        popovers.append { [weak popover] in popover }
+        return popover
     }
 
     var hasRunningOperations: Bool { queue.operations.contains { $0.result == nil } }
@@ -428,8 +437,8 @@ final class FileOperationCommands: FileCommandHandling {
     }
 
     private func refreshStripsAfterWindowClose() {
-        strips.removeAll { $0() == nil }
-        for ref in strips { ref()?.refresh() }
+        popovers.removeAll { $0() == nil }
+        for ref in popovers { ref()?.refresh() }
     }
 
     /// The other panel's folder: its front tab if that's a browser, otherwise its

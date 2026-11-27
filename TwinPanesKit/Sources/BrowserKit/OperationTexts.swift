@@ -1,9 +1,27 @@
 import Foundation
 import TwinPanesCore
 
-/// What a progress row says about an operation (docs/plans/M6.md, D-e).
+/// Visual status of an operation row in the activity popover.
+enum OperationStatus: Sendable, Equatable {
+    case inProgress
+    case paused
+    case success
+    case error
+    case cancelled
+}
+
+/// What an activity row says about an operation.
 @MainActor
 enum OperationTexts {
+    static func status(of operation: QueuedOperation) -> OperationStatus {
+        if let result = operation.result {
+            if !result.failures.isEmpty || result.refusal != nil { return .error }
+            if result.wasCancelled { return .cancelled }
+            return .success
+        }
+        return operation.isPaused ? .paused : .inProgress
+    }
+
     /// "Copying “a.txt” to “Backup”", "Couldn't copy 2 items", "Copied 3 items".
     static func title(of operation: QueuedOperation) -> String {
         let (doing, did, what, destination) = words(for: operation.request)
@@ -18,13 +36,13 @@ enum OperationTexts {
         return "\(did) \(what)\(place)"
     }
 
-    /// "Queued", "Waiting for your answer", "1.2 MB of 5 MB · 30 of 120 items".
-    static func detail(of operation: QueuedOperation) -> String {
+    /// Secondary progress or error line; `nil` for succeeded and cancelled operations whose
+    /// status is already shown by their icon and title.
+    static func detail(of operation: QueuedOperation) -> String? {
         if let result = operation.result {
             if !result.failures.isEmpty { return "\(count(result.failures.count)) failed" }
             if result.refusal != nil { return "Refused" }
-            if result.wasCancelled { return "Stopped" }
-            return "Done"
+            return nil
         }
         if case .waitingForAnswer = operation.state { return "Waiting for your answer" }
         if operation.isPaused { return "Paused" }

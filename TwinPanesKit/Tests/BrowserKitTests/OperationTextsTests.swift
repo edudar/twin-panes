@@ -4,7 +4,7 @@ import TwinPanesCore
 
 @testable import BrowserKit
 
-/// What a progress row says (docs/plans/M6.md, D-e, step 13).
+/// What an activity row says and its status.
 @MainActor
 @Suite struct OperationTextsTests {
     let root = FileManager.default.temporaryDirectory
@@ -34,48 +34,56 @@ import TwinPanesCore
         }
     }
 
-    @Test func aRunningCopySaysWhatAndWhere() async {
+    @Test func aRunningCopyTracksStatusAndDetail() async {
         defer { cleanUp() }
         let waiting = copy("a.txt")
         await held.asked()
         let queued = copy("b.txt")
+        #expect(OperationTexts.status(of: waiting) == .inProgress)
         #expect(OperationTexts.title(of: waiting) == "Copying “a.txt” to “dest”")
         #expect(OperationTexts.detail(of: waiting) == "Waiting for your answer")
+        #expect(OperationTexts.status(of: queued) == .inProgress)
         #expect(OperationTexts.detail(of: queued) == "Queued")
         queued.pause()
+        #expect(OperationTexts.status(of: queued) == .paused)
         #expect(OperationTexts.detail(of: queued) == "Paused")
         queued.resume()
+        #expect(OperationTexts.status(of: queued) == .inProgress)
         #expect(OperationTexts.detail(of: queued) == "Queued")
         queued.cancel()
         held.answer(ConflictAnswer(.skip))
         _ = await queued.finished()
+        #expect(OperationTexts.status(of: queued) == .cancelled)
         #expect(OperationTexts.title(of: queued) == "Stopped copying “b.txt”")
-        #expect(OperationTexts.detail(of: queued) == "Stopped")
+        #expect(OperationTexts.detail(of: queued) == nil)
     }
 
-    @Test func aFinishedCopySaysDone() async {
+    @Test func aFinishedCopyHasSuccessStatusAndNoDoneDetail() async {
         defer { cleanUp() }
         let operation = copy("b.txt")
         _ = await operation.finished()
+        #expect(OperationTexts.status(of: operation) == .success)
         #expect(OperationTexts.title(of: operation) == "Copied “b.txt” to “dest”")
-        #expect(OperationTexts.detail(of: operation) == "Done")
+        #expect(OperationTexts.detail(of: operation) == nil)
     }
 
-    @Test func failuresAreCounted() async {
+    @Test func failuresHaveErrorStatusAndCount() async {
         defer { cleanUp() }
         let missing = [source.appendingPathComponent("x"), source.appendingPathComponent("y")]
         let operation = queue.add(.trash(missing), scopes: []) { _, _ in ConflictAnswer(.stop) }
         _ = await operation.finished()
+        #expect(OperationTexts.status(of: operation) == .error)
         #expect(OperationTexts.title(of: operation) == "Couldn't move 2 items to the Trash")
         #expect(OperationTexts.detail(of: operation) == "2 items failed")
     }
 
-    @Test func refusedNameShowsRefusedInsteadOfRenamed() async {
+    @Test func refusedNameHasErrorStatus() async {
         defer { cleanUp() }
         let operation = queue.add(
             .rename(source.appendingPathComponent("a.txt"), to: "b.txt"), scopes: []
         ) { _, _ in ConflictAnswer(.stop) }
         _ = await operation.finished()
+        #expect(OperationTexts.status(of: operation) == .error)
         #expect(OperationTexts.title(of: operation) == "Couldn't rename “a.txt” to “b.txt”")
         #expect(OperationTexts.detail(of: operation) == "Refused")
     }
