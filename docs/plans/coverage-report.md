@@ -1,8 +1,8 @@
 # Coverage report plan: our own pages from llvm-cov's export
 
 _Status: approved 2026-11-27 (Swift package under `Tools/`; hit counts on every line;
-step 5 decided later; totals count distinct lines). Steps 1 to 3 done; step 4
-next._
+step 5 decided later; totals count distinct lines). Steps 1 to 3 and 4a done;
+step 4b next._
 
 ## Context
 
@@ -127,9 +127,15 @@ Each step builds, passes all checks, and stays under 250 changed lines.
      Tests for grouping, thresholds, totals and the Markdown.
    - **3b, the look:** index styles in the shared stylesheet, the sort and filter
      script.
-4. **CI: use the tool for the coverage report.** `test-report.sh` switches from
-   `llvm-cov show` to the tool; lint and test commands gain the package; AGENTS.md,
-   DEVELOPMENT.md and PLAN.md §7 updated.
+4. **CI: use the tool for the coverage report**, in three commits:
+   - **4a, Tools: build the site from an export.** Every page, the stylesheet and
+     the job summary as values, with paths made relative to the sources folder; the
+     check that each source file is as long as its segments reach.
+   - **4b, Tools: the `coverage-report` command.** Argument parsing (no
+     ArgumentParser dependency) and writing the files.
+   - **4c, CI: switch the report to the tool.** `test-report.sh` switches from
+     `llvm-cov show` to the tool; lint and test commands gain the package;
+     AGENTS.md, DEVELOPMENT.md and PLAN.md §7 updated.
 5. **(Optional, D-e) Tools: render the test results page.** Then delete the XSL.
 
 ## Verification
