@@ -194,7 +194,7 @@ build/DerivedData/Build/Products/Debug/Twin\ Panes.app/Contents/MacOS/Twin\ Pane
 ```
 
 The smoke test passes only if it prints `SMOKE OK`. A `swift test` run passes only if
-every test target printed its `Test run with N tests` line: save its output and run
+every test process printed its `Test run with N tests` line: save its output and run
 `scripts/check-test-runs.sh <log>`, as CI does. When `Config/` or the Xcode
 project changes, also check the signed entitlements the way CI's "Check entitlements"
 step does.
