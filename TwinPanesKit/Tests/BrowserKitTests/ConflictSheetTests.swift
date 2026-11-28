@@ -90,8 +90,10 @@ import Testing
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.close() }
+        let shown = NotificationCenter.default.notifications(
+            named: NSWindow.willBeginSheetNotification, object: window)
         async let answer = sheet.ask(on: window)
-        await Task.yield()
+        for await _ in shown { break }  // dismiss ignores a sheet not yet attached
         sheet.dismiss(on: window)
         #expect(await answer == ConflictAnswer(.stop))
     }
