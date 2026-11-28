@@ -33,8 +33,12 @@ public final class ConflictSheet {
 
     /// Shows the sheet on `window` and returns the answer once a button is clicked.
     public func ask(on window: NSWindow) async -> ConflictAnswer {
-        let response = await alert.beginSheetModal(for: window)
-        return answer(
+        answer(for: await alert.beginSheetModal(for: window))
+    }
+
+    /// The answer a sheet that ended with `response` gives.
+    func answer(for response: NSApplication.ModalResponse) -> ConflictAnswer {
+        answer(
             forButtonAt: response.rawValue
                 - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue)
     }

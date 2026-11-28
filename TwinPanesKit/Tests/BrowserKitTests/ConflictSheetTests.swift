@@ -67,21 +67,18 @@ import Testing
         #expect(sheet.alert.buttons.map(\.title) == ["Keep Both", "Skip", "Stop"])
     }
 
-    @Test func applyToAllGoesWithTheChoice() async throws {
+    /// The sheet's response, not a click on a shown sheet: an alert button's action stops
+    /// the main run loop, which ends a test process early.
+    @Test func applyToAllGoesWithTheChoice() throws {
         defer { cleanUp() }
         let sheet = ConflictSheet(try conflict("src/a.txt", "dest/a.txt"))
-        #expect(sheet.answer(forButtonAt: 2) == ConflictAnswer(.keepBoth))
+        #expect(sheet.answer(for: .alertThirdButtonReturn) == ConflictAnswer(.keepBoth))
         sheet.applyToAll.state = .on
-        #expect(sheet.answer(forButtonAt: 1) == ConflictAnswer(.skip, applyToAll: true))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        defer { window.close() }
-        async let answer = sheet.ask(on: window)
-        await Task.yield()
-        sheet.alert.buttons[0].performClick(nil)
-        #expect(await answer == ConflictAnswer(.replace, applyToAll: true))
+        #expect(
+            sheet.answer(for: .alertSecondButtonReturn) == ConflictAnswer(.skip, applyToAll: true))
+        #expect(
+            sheet.answer(for: .alertFirstButtonReturn) == ConflictAnswer(.replace, applyToAll: true)
+        )
     }
 
     @Test func dismissEndsAttachedSheetWithStop() async throws {
