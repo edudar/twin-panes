@@ -58,6 +58,9 @@ public final class SidebarViewController: NSViewController, NSMenuItemValidation
     private var volumeNodes: [SidebarNode] = []
     private var isTrashListable = false
     var validatedDrag: (sequence: Int, hasFolder: Bool)?
+    /// The event the context menu came up for. Tests stand in for it: posting a real event
+    /// through `NSApp` stops the main run loop, which ends a test process early.
+    var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
 
     public override func loadView() {
         // One column as wide as the sidebar: left at its default 100 pt, every name was

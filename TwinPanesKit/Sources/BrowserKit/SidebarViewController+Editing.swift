@@ -81,7 +81,7 @@ extension SidebarViewController {
     /// the menu came up from the keyboard.
     private var menuRow: Int {
         if outlineView.clickedRow >= 0 { return outlineView.clickedRow }
-        if let event = NSApp.currentEvent, Self.isContextClick(event) {
+        if let event = currentEvent(), Self.isContextClick(event) {
             return -1
         }
         return outlineView.selectedRow

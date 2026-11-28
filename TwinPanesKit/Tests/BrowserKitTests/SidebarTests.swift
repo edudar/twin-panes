@@ -302,27 +302,13 @@ import Testing
 
     @Test func emptySpaceRightClickDisablesRemoveFromSidebarEvenWithSelection() throws {
         defer { cleanUp() }
-        _ = NSApplication.shared
         outline.selectRowIndexes([try row("Downloads")], byExtendingSelection: false)
         let rightClick = try #require(
             NSEvent.mouseEvent(
                 with: .rightMouseDown, location: .zero, modifierFlags: [],
                 timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
                 clickCount: 1, pressure: 1))
-        NSApp.postEvent(rightClick, atStart: true)
-        _ = NSApp.nextEvent(
-            matching: .rightMouseDown, until: .distantPast, inMode: .default, dequeue: true)
-        defer {
-            if let reset = NSEvent.otherEvent(
-                with: .applicationDefined, location: .zero, modifierFlags: [],
-                timestamp: 0, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0)
-            {
-                NSApp.postEvent(reset, atStart: true)
-                _ = NSApp.nextEvent(
-                    matching: .applicationDefined, until: .distantPast, inMode: .default,
-                    dequeue: true)
-            }
-        }
+        sidebar.currentEvent = { rightClick }
         let removeItem = try #require(
             outline.menu?.items.first {
                 $0.action == #selector(SidebarViewController.removeClickedFavorite(_:))
