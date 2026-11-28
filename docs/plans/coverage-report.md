@@ -1,8 +1,8 @@
 # Coverage report plan: our own pages from llvm-cov's export
 
 _Status: approved 2026-11-27 (Swift package under `Tools/`; hit counts on every line;
-step 5 decided later; totals count distinct lines). Steps 1, 2 and 3a done; step
-3b next._
+step 5 decided later; totals count distinct lines). Steps 1 to 3 done; step 4
+next._
 
 ## Context
 

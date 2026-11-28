@@ -27,6 +27,8 @@ public enum SiteStylesheet {
           }
         }
         * { box-sizing: border-box; }
+        /* Rows set their own display, which would otherwise win over the attribute. */
+        [hidden] { display: none !important; }
         body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--sans); }
         a { color: var(--accent); }
 
@@ -77,5 +79,61 @@ public enum SiteStylesheet {
         .minimap .mark { position: absolute; left: 1px; right: 1px; min-height: 3px; }
         .minimap .mark.missed { background: var(--miss); }
         .minimap .mark.partly { background: var(--partial); }
+
+        .index-page h1 { margin: 0; font-size: 17px; font-weight: 600; }
+        .index-page main { max-width: 980px; margin: 0 auto; padding: 16px 0 48px; }
+        .legend, .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+        .legend { margin: 0; padding: 0 16px 10px; color: var(--muted); font-size: 13px; }
+        .legend .key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: -8px; }
+        .key.high, .fill.high { background: var(--hit); }
+        .key.medium, .fill.medium { background: var(--partial); }
+        .key.low, .fill.low { background: var(--miss); }
+        .toolbar { padding: 0 16px 12px; }
+        #filter {
+          width: min(320px, 100%); padding: 6px 10px; font: inherit;
+          color: var(--fg); background: var(--surface);
+          border: 1px solid var(--line); border-radius: 6px;
+        }
+        #filter:focus-visible, .columns button:focus-visible, summary:focus-visible {
+          outline: 2px solid var(--accent); outline-offset: 1px;
+        }
+
+        /* One grid for the header, module and file rows, so their columns line up. */
+        .row {
+          display: grid; align-items: center; gap: 12px;
+          grid-template-columns: minmax(0, 1fr) 120px 64px 64px 72px;
+          padding: 6px 16px; font-variant-numeric: tabular-nums;
+        }
+        .row > :not(.name):not(.bar) { text-align: right; }
+        .row .name { overflow-wrap: anywhere; }
+        .columns { border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+        .columns button {
+          padding: 0; font: inherit; color: inherit; background: none; border: 0; cursor: pointer;
+        }
+        /* Buttons keep their own width in a grid cell, so they are placed, not aligned. */
+        .columns button { justify-self: end; }
+        .columns button[data-sort="name"] { justify-self: start; }
+        .columns button[data-direction="ascending"]::after { content: " ↑"; }
+        .columns button[data-direction="descending"]::after { content: " ↓"; }
+        .module { border-bottom: 1px solid var(--line); }
+        .module > summary { cursor: pointer; list-style: none; font-weight: 600; }
+        .module > summary::-webkit-details-marker { display: none; }
+        .module > summary .name::before {
+          content: "▸"; display: inline-block; width: 1em; color: var(--muted);
+          transition: transform 0.15s;
+        }
+        .module[open] > summary .name::before { transform: rotate(90deg); }
+        .row.file { color: var(--fg); text-decoration: none; font-size: 13px; }
+        .row.file .name { padding-left: 1em; font-family: var(--mono); font-size: 12.5px; }
+        .module > summary:hover, .row.file:hover { background: var(--target); }
+        .bar { height: 6px; border-radius: 3px; overflow: hidden; background: var(--line); }
+        .columns .bar { background: none; }
+        .fill { display: block; height: 100%; }
+        @media (prefers-reduced-motion: reduce) { .module > summary .name::before { transition: none; } }
+        /* Phones: drop the bars and narrow the number columns. */
+        @media (max-width: 560px) {
+          .row { grid-template-columns: minmax(0, 1fr) 56px 48px 56px; gap: 8px; }
+          .row .bar { display: none; }
+        }
         """
 }

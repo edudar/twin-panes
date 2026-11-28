@@ -35,8 +35,21 @@ public struct IndexPage: Sendable {
         \(headlineMarkup)
         </header>
         <main>
+        <p class="legend"><span class="key high"></span>90% and up \
+        <span class="key medium"></span>75% and up <span class="key low"></span>below 75%</p>
+        <div class="toolbar" data-needs-script hidden>
+        <input id="filter" type="search" placeholder="Filter files" aria-label="Filter files">
+        </div>
+        <div class="row columns" data-needs-script hidden>\
+        <button type="button" data-sort="name" data-first="ascending">File</button><span class="bar"></span>\
+        <button type="button" data-sort="percent" data-first="ascending">Lines</button>\
+        <button type="button" data-sort="missed" data-first="descending">Missed</button>\
+        <button type="button" data-sort="lines" data-first="descending">Total</button></div>
+        <div class="modules">
         \(modules.map(Self.moduleMarkup).joined(separator: "\n"))
+        </div>
         </main>
+        <script>\(Self.sortAndFilterScript)</script>
         </body>
         </html>
 
@@ -61,6 +74,56 @@ public struct IndexPage: Sendable {
         }
         return #"<p class="totals">"# + parts.joined(separator: " · ") + "</p>"
     }
+
+    /// Shows the controls, sorts modules and the files inside each by the clicked column
+    /// (a second click reverses it), and filters files by path, opening the modules
+    /// that still have matches. Without scripts the modules still fold out by hand.
+    private static let sortAndFilterScript = """
+        (() => {
+          const list = document.querySelector(".modules");
+          const modules = [...list.querySelectorAll("details.module")];
+          const buttons = [...document.querySelectorAll("button[data-sort]")];
+          const filter = document.getElementById("filter");
+          document.querySelectorAll("[data-needs-script]").forEach(element => element.hidden = false);
+          let key = "name";
+          let ascending = true;
+          const value = row => key === "name" ? row.dataset.name.toLowerCase() : parseFloat(row.dataset[key]);
+          const order = (a, b) => {
+            const [x, y] = [value(a), value(b)];
+            return (x < y ? -1 : x > y ? 1 : 0) * (ascending ? 1 : -1);
+          };
+          const sort = () => {
+            for (const module of modules.sort(order)) {
+              module.append(...[...module.querySelectorAll("a.file")].sort(order));
+              list.append(module);
+            }
+            for (const button of buttons) {
+              button.dataset.direction = button.dataset.sort === key ? (ascending ? "ascending" : "descending") : "";
+            }
+          };
+          for (const button of buttons) {
+            button.addEventListener("click", () => {
+              ascending = button.dataset.sort === key ? !ascending : button.dataset.first === "ascending";
+              key = button.dataset.sort;
+              sort();
+            });
+          }
+          filter.addEventListener("input", () => {
+            const query = filter.value.trim().toLowerCase();
+            for (const module of modules) {
+              let hasMatch = false;
+              for (const file of module.querySelectorAll("a.file")) {
+                const path = (module.dataset.name + "/" + file.dataset.name).toLowerCase();
+                file.hidden = query !== "" && !path.includes(query);
+                hasMatch = hasMatch || !file.hidden;
+              }
+              module.hidden = !hasMatch;
+              module.open = query !== "" && hasMatch;
+            }
+          });
+          sort();
+        })();
+        """
 
     /// A `<details>` per module, so its files fold out without any script.
     private static func moduleMarkup(_ module: ModuleTotals) -> String {

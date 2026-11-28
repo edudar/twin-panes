@@ -85,3 +85,37 @@ import Testing
 
     #expect(markdown.hasPrefix("### Coverage\n\nLine coverage of"))
 }
+
+@Test func columnHeadersSortWorstFirstForNumbers() {
+    let html = IndexPage(files: sampleFiles, tests: nil, commit: nil).html
+
+    #expect(html.contains(#"<button type="button" data-sort="name" data-first="ascending">"#))
+    #expect(html.contains(#"<button type="button" data-sort="percent" data-first="ascending">"#))
+    #expect(html.contains(#"<button type="button" data-sort="missed" data-first="descending">"#))
+    #expect(html.contains(#"<button type="button" data-sort="lines" data-first="descending">"#))
+}
+
+@Test func controlsThatNeedTheScriptStartHidden() {
+    let html = IndexPage(files: sampleFiles, tests: nil, commit: nil).html
+
+    #expect(html.contains(#"<div class="toolbar" data-needs-script hidden>"#))
+    #expect(html.contains(#"<div class="row columns" data-needs-script hidden>"#))
+    #expect(html.contains(#"<input id="filter" type="search""#))
+}
+
+@Test func theLegendStatesTheThresholds() {
+    let html = IndexPage(files: sampleFiles, tests: nil, commit: nil).html
+
+    #expect(html.contains("90% and up"))
+    #expect(html.contains("75% and up"))
+    #expect(html.contains("below 75%"))
+}
+
+@Test func modulesSitInOneListTheScriptCanReorder() {
+    let html = IndexPage(files: sampleFiles, tests: nil, commit: nil).html
+
+    let list = html.range(of: #"<div class="modules">"#)
+    let firstModule = html.range(of: #"<details class="module""#)
+    #expect(list != nil)
+    #expect((list?.upperBound ?? html.endIndex) <= (firstModule?.lowerBound ?? html.startIndex))
+}
