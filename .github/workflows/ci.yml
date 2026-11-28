@@ -38,7 +38,7 @@ jobs:
     env:
       APP: build/DerivedData/Build/Products/Debug/Twin Panes.app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Toolchain
         run: |
