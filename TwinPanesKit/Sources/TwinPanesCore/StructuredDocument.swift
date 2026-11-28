@@ -91,6 +91,15 @@ public enum StructuredPreviewLoader {
                 isPrettified: formatted.isPrettified, isTruncated: isTruncated,
                 notice: formatted.notice ?? notice)
         }
+        if pretty, format == .csv || format == .tsv {
+            let delimiter: Character = format == .tsv ? "\t" : ","
+            let formatted = DelimitedFormatter.format(
+                text, delimiter: delimiter, pretty: true, isTruncated: isTruncated)
+            return StructuredDocument(
+                text: formatted.text, tokens: formatted.tokens,
+                isPrettified: formatted.isPrettified, isTruncated: isTruncated,
+                notice: isTruncated ? notice : formatted.notice)
+        }
         let tokens: [SyntaxToken] =
             switch (pretty, format) {
             case (true, .properties): PropertiesTokenizer.tokenize(text)
