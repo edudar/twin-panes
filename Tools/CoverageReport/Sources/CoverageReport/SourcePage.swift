@@ -47,7 +47,7 @@ public struct SourcePage: Sendable {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>\(path) · Twin Panes coverage</title>
-            <link rel="stylesheet" href="\(root)report.css">
+            <link rel="stylesheet" href="\(root)\(SiteStylesheet.fileName)">
             </head>
             <body class="source-page">
             <header class="page-header">
@@ -61,6 +61,8 @@ public struct SourcePage: Sendable {
             </tbody>
             </table>
             </main>
+            \(minimapMarkup)
+            <script>\(Self.missNavigationScript)</script>
             </body>
             </html>
 
@@ -83,8 +85,7 @@ public struct SourcePage: Sendable {
 
     private var rowsMarkup: String {
         sourceLines.indices.map { index in
-            let line =
-                index < coverage.count ? coverage[index] : LineCoverage(state: .notCode, count: nil)
+            let line = lineCoverage(at: index)
             let number = index + 1
             return """
                 <tr id="L\(number)" class="\(Self.rowClass(of: line.state))">\
@@ -94,6 +95,68 @@ public struct SourcePage: Sendable {
                 """
         }.joined(separator: "\n")
     }
+
+    private func lineCoverage(at index: Int) -> LineCoverage {
+        index < coverage.count ? coverage[index] : LineCoverage(state: .notCode, count: nil)
+    }
+
+    /// A mark down the right edge for each run of missed or partly covered lines, placed
+    /// and sized by where the run sits in the file; red if any line in it never ran.
+    private var minimapMarkup: String {
+        let total = sourceLines.count
+        var marks: [String] = []
+        var index = 0
+        while index < total {
+            let start = index
+            var isAnyLineMissed = false
+            while index < total, lineCoverage(at: index).isMiss {
+                isAnyLineMissed = isAnyLineMissed || lineCoverage(at: index).state == .missed
+                index += 1
+            }
+            guard index > start else {
+                index += 1
+                continue
+            }
+            let position = String(
+                format: "top: %.2f%%; height: %.2f%%", Double(start) * 100 / Double(total),
+                Double(index - start) * 100 / Double(total))
+            let state = isAnyLineMissed ? "missed" : "partly"
+            marks.append(
+                ##"<a class="mark \##(state)" href="#L\##(start + 1)" style="\##(position)"></a>"##)
+        }
+        guard !marks.isEmpty else { return "" }
+        return #"<nav class="minimap" aria-label="Missed lines">"# + marks.joined() + "</nav>"
+    }
+
+    /// Measures the sticky header so linked lines land below it, and makes `n` and `p`
+    /// scroll to the next and previous run of misses. Without scripts the page still
+    /// reads; linked lines may sit under a wrapped header and the keys are lost.
+    private static let missNavigationScript = """
+        (() => {
+          const header = document.querySelector(".page-header");
+          const measureHeader = () =>
+            document.documentElement.style.setProperty("--header-height", header.offsetHeight + "px");
+          measureHeader();
+          addEventListener("resize", measureHeader);
+          if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
+          const isMiss = row => row && (row.classList.contains("missed") || row.classList.contains("partly"));
+          const runs = [...document.querySelectorAll("tr.missed, tr.partly")]
+            .filter(row => !isMiss(row.previousElementSibling));
+          document.addEventListener("keydown", event => {
+            if (event.metaKey || event.ctrlKey || event.altKey || (event.key !== "n" && event.key !== "p")) return;
+            // Rows land a little below the sticky header, and "next" means below that spot,
+            // so pressing n again moves on instead of finding the same row.
+            const spot = header.getBoundingClientRect().bottom + 24;
+            const target = event.key === "n"
+              ? runs.find(row => row.getBoundingClientRect().top > spot + 2)
+              : runs.findLast(row => row.getBoundingClientRect().top < spot - 2);
+            if (!target) return;
+            event.preventDefault();
+            window.scrollBy(0, target.getBoundingClientRect().top - spot);
+            history.replaceState(null, "", "#" + target.id);
+          });
+        })();
+        """
 
     private static func rowClass(of state: LineState) -> String {
         switch state {
@@ -140,4 +203,8 @@ public struct SourcePage: Sendable {
         }
         return markup + text(cursor..<bytes.count)
     }
+}
+
+extension LineCoverage {
+    fileprivate var isMiss: Bool { state == .missed || state == .partlyCovered }
 }

@@ -143,3 +143,37 @@ private func page(
 @Test func escapingCoversTheCharactersHTMLGivesMeaningTo() {
     #expect(escapingHTML(#"<a href="x">&"#) == "&lt;a href=&quot;x&quot;&gt;&amp;")
 }
+
+@Test func theMinimapMarksEachRunOfMissesWhereItSitsInTheFile() {
+    var coverage = Array(repeating: LineCoverage(state: .covered, count: 1), count: 10)
+    coverage[2] = LineCoverage(state: .missed, count: 0)
+    coverage[5] = LineCoverage(
+        state: .partlyCovered, count: 1, missedSpans: [ColumnSpan(start: 1, end: nil)])
+    coverage[6] = LineCoverage(state: .missed, count: 0)
+
+    let html = page(String(repeating: "x\n", count: 10), coverage).html
+
+    #expect(
+        html.contains(##"<a class="mark missed" href="#L3" style="top: 20.00%; height: 10.00%">"##))
+    #expect(
+        html.contains(##"<a class="mark missed" href="#L6" style="top: 50.00%; height: 20.00%">"##))
+    #expect(html.components(separatedBy: #"class="mark"#).count == 3)
+}
+
+@Test func aRunOfOnlyPartlyCoveredLinesIsMarkedPartly() {
+    let html = page(
+        "x\n",
+        [
+            LineCoverage(
+                state: .partlyCovered, count: 1, missedSpans: [ColumnSpan(start: 1, end: nil)])
+        ]
+    ).html
+
+    #expect(html.contains(##"<a class="mark partly" href="#L1""##))
+}
+
+@Test func aFileWithNothingMissedHasNoMinimap() {
+    let html = page("x\n", [LineCoverage(state: .covered, count: 1)]).html
+
+    #expect(!html.contains(#"class="minimap""#))
+}
