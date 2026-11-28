@@ -47,13 +47,57 @@ final class SessionJournal {
         replaceCount = UInt64(records.count { if case .replace = $0 { true } else { false } })
     }
 
-    /// Records what changed between `old` and `new` (an edit, undo, redo or revert).
+    /// Records what changed between `old` and `new` (an edit, undo, redo or revert): a
+    /// record per changed range when the length stays, else one record for the stretch
+    /// between what both share at the start and at the end (docs/plans/M8.md, D-c).
     func record(from old: PieceTree, to new: PieceTree) throws {
-        for range in SavePlan.changedRanges(from: old, to: new) {
-            try append(.replace(range, new.pieces(in: range)))
-            replaceCount += 1
+        guard old.length != new.length else {
+            for range in SavePlan.changedRanges(from: old, to: new) {
+                try append(.replace(range, new.pieces(in: range)))
+                replaceCount += 1
+            }
+            return flushSoon()
         }
+        let (prefix, suffix) = Self.sharedEnds(old, new)
+        try append(
+            .replace(
+                prefix..<(old.length - suffix), new.pieces(in: prefix..<(new.length - suffix))))
+        replaceCount += 1
         flushSoon()
+    }
+
+    /// How many bytes `a` and `b` take from the same places at their start and, after
+    /// that, at their end.
+    static func sharedEnds(_ a: PieceTree, _ b: PieceTree) -> (prefix: UInt64, suffix: UInt64) {
+        let (piecesA, piecesB) = (a.pieces(in: 0..<a.length), b.pieces(in: 0..<b.length))
+        let prefix = sharedRun(piecesA, piecesB) { $0.offset + $1 }
+        let suffix = sharedRun(piecesA.reversed(), piecesB.reversed()) {
+            $0.offset + $0.length - $1
+        }
+        return (prefix, min(suffix, min(a.length, b.length) - prefix))
+    }
+
+    /// Walks two piece lists side by side from their first pieces while each step takes
+    /// its bytes from the same source and place, and returns how many bytes that is.
+    /// `place` gives where a piece's byte lies `into` bytes from the walk's side.
+    private static func sharedRun(
+        _ a: some Sequence<Piece>, _ b: some Sequence<Piece>,
+        place: (Piece, UInt64) -> UInt64
+    ) -> UInt64 {
+        var (iteratorA, iteratorB) = (a.makeIterator(), b.makeIterator())
+        var (pieceA, pieceB) = (iteratorA.next(), iteratorB.next())
+        var intoA: UInt64 = 0, intoB: UInt64 = 0, shared: UInt64 = 0
+        while let pa = pieceA, let pb = pieceB, pa.source == pb.source,
+            place(pa, intoA) == place(pb, intoB)
+        {
+            let step = min(pa.length - intoA, pb.length - intoB)
+            shared += step
+            intoA += step
+            intoB += step
+            if intoA == pa.length { (pieceA, intoA) = (iteratorA.next(), 0) }
+            if intoB == pb.length { (pieceB, intoB) = (iteratorB.next(), 0) }
+        }
+        return shared
     }
 
     /// Records that the version after `replaceCount` replace records is on disk, and
