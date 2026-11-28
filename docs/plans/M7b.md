@@ -1,6 +1,6 @@
 # M7b plan: structured QuickView (coloring, prettifying, and format overrides)
 
-_Status: in progress (2026-11-27); commits 1–3 complete, commits 4–8 remaining._
+_Status: in progress (2026-11-27); commits 1–4 complete, commits 5–8 remaining._
 
 ## Context
 

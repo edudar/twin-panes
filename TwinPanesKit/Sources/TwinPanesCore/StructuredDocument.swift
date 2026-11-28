@@ -82,6 +82,15 @@ public enum StructuredPreviewLoader {
                 isPrettified: formatted.isPrettified, isTruncated: isTruncated,
                 notice: isTruncated ? notice : formatted.notice)
         }
+        if let format, format == .xml || format == .plist {
+            let formatted = XMLFormatter.format(
+                data: rawData, text: text, format: format, pretty: pretty,
+                isTruncated: isTruncated)
+            return StructuredDocument(
+                text: formatted.text, tokens: formatted.tokens,
+                isPrettified: formatted.isPrettified, isTruncated: isTruncated,
+                notice: formatted.notice ?? notice)
+        }
         let tokens = (pretty && format == .properties) ? PropertiesTokenizer.tokenize(text) : []
         return StructuredDocument(
             text: text, tokens: tokens, isPrettified: false, isTruncated: isTruncated,
