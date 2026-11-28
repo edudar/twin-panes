@@ -123,6 +123,22 @@ package runs fail if a test process ends without its summary line
 (`scripts/check-test-runs.sh`). A failed smoke check shows as an annotation on the
 run page.
 
+The macOS 27 job also records coverage and JUnit XML, and `scripts/test-report.sh`
+builds an HTML report from them: test counts and per-module line coverage in the job
+summary, the report as run artifacts, and on pushes to `main` the same report on
+GitHub Pages (https://edudar.github.io/twin-panes/). To build it locally:
+
+```bash
+mkdir -p build/report && swift test --parallel --enable-code-coverage --xunit-output build/report/tests.xml --package-path TwinPanesKit
+```
+
+```bash
+scripts/test-report.sh build/report build/report/site
+```
+
+Coverage pages are filed under absolute source paths, so publish only reports built
+on CI.
+
 ## Commits
 
 Commit size, approval and verification rules are in [AGENTS.md](../AGENTS.md), along

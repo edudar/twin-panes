@@ -1199,6 +1199,12 @@ byte histogram.
     behaviour. The relaunch checks (window restoration, bookmarks resolving after a
     relaunch, crash recovery) run on macOS 26 and 27 only (§9, "From M5").
     Lint runs only on the newest image, so its rules match the current swift-format.
+  - Test report: the macOS 27 job also records coverage and JUnit XML, and
+    `scripts/test-report.sh` turns them into HTML (test results via `xsltproc`,
+    coverage via `llvm-cov show`) with only what Xcode and macOS ship. Every run puts
+    counts and per-module line coverage in its job summary and uploads the report as
+    artifacts; pushes to `main` also publish it to GitHub Pages
+    (https://edudar.github.io/twin-panes/), replaced on every push.
   - Background: GitHub retired hosted macOS 14 runners on 2026-11-02
     (actions/runner-images#13518), which is why the minimum moved to macOS 15. Watch
     for the macOS 15 image's retirement notice; when it comes, raise the minimum
