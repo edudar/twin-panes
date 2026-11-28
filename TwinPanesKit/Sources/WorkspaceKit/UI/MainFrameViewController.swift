@@ -953,6 +953,14 @@ private final class SidebarSplitViewController: NSSplitViewController {
     @objc override func toggleSidebar(_ sender: Any?) {
         onToggleSidebar?(sender)
     }
+
+    /// D59: the preview pane is a regular item, so there is no inspector to toggle. macOS 15
+    /// still validates `toggleInspector:` here (macOS 26 doesn't), which would enable the
+    /// hex editor's Show Inspector with no editor focused.
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        guard item.action != #selector(toggleInspector(_:)) else { return false }
+        return super.validateUserInterfaceItem(item)
+    }
 }
 
 @MainActor
