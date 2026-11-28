@@ -1,7 +1,8 @@
 # Coverage report plan: our own pages from llvm-cov's export
 
 _Status: approved 2026-11-27 (Swift package under `Tools/`; hit counts on every line;
-step 5 decided later). Step 1 done; open question 4 added. Step 2 next._
+step 5 decided later; totals count distinct lines). Steps 1 and 2a done; step 2b
+next._
 
 ## Context
 
@@ -108,9 +109,14 @@ Each step builds, passes all checks, and stays under 250 changed lines.
    Swift Testing tests: hand-built segment cases (gap regions, a region running over
    several lines, a partly covered line) and the summary cross-check on a small
    fixture export.
-2. **Tools: render the source pages.** HTML for one file from its line states and
-   source text, escaping, the shared stylesheet with both themes. Tests check the
-   markup facts (state class per line, escaped text, relative links), not snapshots.
+2. **Tools: render the source pages**, in two commits to stay under the size limit:
+   - **2a, the markup:** HTML for one file from its line states and source text:
+     state class and anchor per line, counts (large ones shortened, overflowed ones
+     left out), never-run spans cut at llvm-cov's UTF-8 columns, escaping, the
+     header with totals and relative links. Tests check these markup facts, not
+     snapshots.
+   - **2b, the look:** the shared stylesheet with both themes, the minimap of
+     misses, and the `n` / `p` script.
 3. **Tools: render the index and summary.** Module grouping, sorting and filter
    script, `summary.md`. Tests for grouping, thresholds and totals.
 4. **CI: use the tool for the coverage report.** `test-report.sh` switches from
@@ -133,5 +139,5 @@ Each step builds, passes all checks, and stays under 250 changed lines.
 1. A Swift package under `Tools/` (recommended) or a Python script?
 2. Show hit counts on every line (lcov, Istanbul) or only on hover?
 3. Include step 5 (the test results page) in this piece of work?
-4. Headline totals: distinct lines, matching what the pages mark (recommended), or
-   llvm-cov's per-function sums, matching `llvm-cov report`?
+4. ~~Headline totals~~: decided 2026-11-27, distinct lines, matching what the pages
+   mark. They will differ slightly from `llvm-cov report`.
