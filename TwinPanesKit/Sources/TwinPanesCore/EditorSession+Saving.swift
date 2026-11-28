@@ -107,7 +107,7 @@ extension EditorSession {
         let plan = SavePlan(
             saved: savedTree, current: version,
             diskMatchesSaved: onDisk?.isUnchanged(from: identity) ?? false)
-        if plan.ranges.isEmpty, !plan.writesWholeFile {
+        if plan.changesNothing {
             savedTree = version  // same bytes in the same places: nothing to write
             journalSaved(after: journaled)
             return notify(.saved)

@@ -38,21 +38,60 @@ struct SavePlanTests {
         #expect(SavePlan(saved: saved, current: partly, diskMatchesSaved: true).ranges == [12..<13])
     }
 
-    @Test func aChangedDiskOrLengthWritesTheWholeFile() {
+    @Test func aChangedDiskWritesTheWholeFile() {
         let current = typed(opened, at: 50, add: 0)
         let changed = SavePlan(saved: opened, current: current, diskMatchesSaved: false)
         #expect(changed.writesWholeFile && changed.ranges == [0..<100])
-        let longer = opened.inserting(Piece(.add, offset: 0, length: 3), at: 10)
-        let grown = SavePlan(saved: opened, current: longer, diskMatchesSaved: true)
-        #expect(grown.writesWholeFile && grown.ranges == [0..<103] && grown.length == 103)
-        let empty = SavePlan(saved: opened, current: PieceTree(), diskMatchesSaved: true)
-        #expect(empty.writesWholeFile && empty.ranges.isEmpty && empty.length == 0)
+        let empty = SavePlan(saved: opened, current: PieceTree(), diskMatchesSaved: false)
+        #expect(empty.writesWholeFile && empty.ranges.isEmpty && !empty.changesNothing)
     }
 
-    /// Random edits, jumps through the history (undo and redo), saves and outside changes
-    /// to the file, against a byte model of the file on disk. After every save the disk
-    /// holds the current bytes, and a ranged plan writes exactly where the two versions
-    /// take their bytes from different places.
+    /// The bytes after an insert sit at new offsets, so everything from it on is written.
+    @Test func anInsertWritesFromItToTheEnd() {
+        let longer = opened.inserting(Piece(.add, offset: 0, length: 3), at: 10)
+        let plan = SavePlan(saved: opened, current: longer, diskMatchesSaved: true)
+        #expect(!plan.writesWholeFile && plan.ranges == [10..<103] && plan.length == 103)
+        let atStart = opened.inserting(Piece(.add, offset: 0, length: 1), at: 0)
+        #expect(
+            SavePlan(saved: opened, current: atStart, diskMatchesSaved: true).ranges == [0..<101])
+    }
+
+    /// An append writes only the new bytes; an edit before it is its own range.
+    @Test func anAppendWritesOnlyTheNewBytes() {
+        let appended = opened.inserting(Piece(.add, offset: 0, length: 4), at: 100)
+        let plan = SavePlan(saved: opened, current: appended, diskMatchesSaved: true)
+        #expect(plan.ranges == [100..<104] && plan.byteCount == 4)
+        let both = typed(appended, at: 20, add: 4)
+        #expect(
+            SavePlan(saved: opened, current: both, diskMatchesSaved: true).ranges == [
+                20..<21, 100..<104,
+            ])
+        // An edit on the last shared byte joins the tail.
+        let touching = typed(appended, at: 99, add: 5)
+        #expect(
+            SavePlan(saved: opened, current: touching, diskMatchesSaved: true).ranges == [99..<104])
+    }
+
+    /// A delete in the middle shifts the rest back; one at the end only truncates, which
+    /// is still something to save.
+    @Test func aDeleteWritesTheShiftedRestOrOnlyTruncates() {
+        let middle = SavePlan(
+            saved: opened, current: opened.removing(40..<50), diskMatchesSaved: true)
+        #expect(middle.ranges == [40..<90] && middle.length == 90 && !middle.changesNothing)
+        let end = SavePlan(
+            saved: opened, current: opened.removing(90..<100), diskMatchesSaved: true)
+        #expect(end.ranges.isEmpty && end.length == 90 && !end.writesWholeFile)
+        #expect(!end.changesNothing)
+        let emptied = SavePlan(saved: opened, current: PieceTree(), diskMatchesSaved: true)
+        #expect(emptied.ranges.isEmpty && emptied.length == 0 && !emptied.changesNothing)
+        #expect(SavePlan(saved: opened, current: opened, diskMatchesSaved: true).changesNothing)
+    }
+
+    /// Random overwrites, inserts and deletes, jumps through the history (undo and redo),
+    /// saves and outside changes to the file, against a byte model of the file on disk.
+    /// After every save the disk holds the current bytes, and a ranged plan writes
+    /// exactly where the two versions take their bytes from different places over the
+    /// length they share, and all of the current version past it.
     @Test func randomSavesKeepTheDiskInStep() {
         let seed: UInt64 = 0x5A7E_5EED_0000_0003
         var rng = SplitMix64(seed: seed)
@@ -76,24 +115,43 @@ struct SavePlanTests {
             var diskMatches = true
             for step in 0..<80 {
                 let context: Comment = "seed \(seed), round \(round), step \(step)"
-                switch Int.random(in: 0..<10, using: &rng) {
-                case 0..<5 where length > 0:
-                    let offset = Int.random(in: 0..<length, using: &rng)
-                    let count = Int.random(in: 1...min(6, length - offset), using: &rng)
+                let size = Int(current.length)
+                switch Int.random(in: 0..<12, using: &rng) {
+                case 0..<3 where size > 0:
+                    let offset = Int.random(in: 0..<size, using: &rng)
+                    let count = Int.random(in: 1...min(6, size - offset), using: &rng)
                     let piece = Piece(.add, offset: UInt64(add.count), length: UInt64(count))
                     add += (0..<count).map { _ in UInt8.random(in: 0...255, using: &rng) }
                     current = current.overwriting(at: UInt64(offset), with: piece)
                     history.append(current)
-                case 5, 6:
+                case 3, 4:
+                    let offset = Int.random(in: 0...size, using: &rng)
+                    let count = Int.random(in: 1...6, using: &rng)
+                    let piece = Piece(.add, offset: UInt64(add.count), length: UInt64(count))
+                    add += (0..<count).map { _ in UInt8.random(in: 0...255, using: &rng) }
+                    current = current.inserting(piece, at: UInt64(offset))
+                    history.append(current)
+                case 5 where size > 0:
+                    let offset = Int.random(in: 0..<size, using: &rng)
+                    let count = Int.random(in: 1...min(6, size - offset), using: &rng)
+                    current = current.removing(UInt64(offset)..<UInt64(offset + count))
+                    history.append(current)
+                case 6, 7:
                     current = history[Int.random(in: 0..<history.count, using: &rng)]
-                case 7 where length > 0:
-                    disk[Int.random(in: 0..<length, using: &rng)] &+= 1
+                case 8 where !disk.isEmpty:
+                    disk[Int.random(in: 0..<disk.count, using: &rng)] &+= 1
                     diskMatches = false
                 default:
                     let plan = SavePlan(
                         saved: saved, current: current, diskMatchesSaved: diskMatches)
                     let wanted = bytes(current)
                     #expect(plan.writesWholeFile == !diskMatches, context)
+                    #expect(
+                        plan.changesNothing
+                            == (disk == wanted && plan.ranges.isEmpty && diskMatches), context)
+                    if disk.count < wanted.count {
+                        disk += [UInt8](repeating: 0, count: wanted.count - disk.count)
+                    }
                     var previous: UInt64?
                     for range in plan.ranges {
                         #expect(!range.isEmpty && range.upperBound <= plan.length, context)
@@ -103,10 +161,12 @@ struct SavePlanTests {
                             Int(range.lowerBound)..<Int(range.upperBound),
                             with: wanted[Int(range.lowerBound)..<Int(range.upperBound)])
                     }
+                    disk.removeSubrange(wanted.count...)
                     if !plan.writesWholeFile {
-                        for at in 0..<UInt64(length) {
+                        let shared = min(saved.length, current.length)
+                        for at in 0..<current.length {
                             let written = plan.ranges.contains { $0.contains(at) }
-                            let same = place(saved, at) == place(current, at)
+                            let same = at < shared && place(saved, at) == place(current, at)
                             #expect(written == !same, "\(context), offset \(at)")
                         }
                     }

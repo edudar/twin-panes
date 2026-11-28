@@ -72,7 +72,7 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
         header.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
         header.translatesAutoresizingMaskIntoConstraints = false
 
-        let divider = NSBox()
+        let divider = NSBox(frame: NSRect(x: 0, y: 0, width: 100, height: 1))
         divider.boxType = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
 
@@ -88,6 +88,7 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
             divider.topAnchor.constraint(equalTo: header.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            divider.heightAnchor.constraint(equalToConstant: 1),
             bodyContainer.topAnchor.constraint(equalTo: divider.bottomAnchor),
             bodyContainer.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             bodyContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor),

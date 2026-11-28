@@ -117,9 +117,18 @@ public final class PreviewPaneViewController: NSViewController {
         splitView.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         splitView.setHoldingPriority(.defaultLow, forSubviewAt: 1)
 
+        let titlebarSeparator = NSBox(frame: NSRect(x: 0, y: 0, width: 100, height: 1))
+        titlebarSeparator.boxType = .separator
+        titlebarSeparator.translatesAutoresizingMaskIntoConstraints = false
+
+        root.addSubview(titlebarSeparator)
         root.addSubview(splitView)
         NSLayoutConstraint.activate([
-            splitView.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            titlebarSeparator.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            titlebarSeparator.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            titlebarSeparator.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            titlebarSeparator.heightAnchor.constraint(equalToConstant: 1),
+            splitView.topAnchor.constraint(equalTo: titlebarSeparator.bottomAnchor),
             splitView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             splitView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             splitView.bottomAnchor.constraint(equalTo: root.bottomAnchor),

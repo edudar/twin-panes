@@ -133,13 +133,24 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.setAccessibilityIdentifier("statusLine")
 
+        let titlebarSeparator = NSBox(frame: NSRect(x: 0, y: 0, width: 100, height: 1))
+        titlebarSeparator.boxType = .separator
+        titlebarSeparator.translatesAutoresizingMaskIntoConstraints = false
+        titlebarSeparator.setAccessibilityIdentifier("titlebarSeparator")
+
         let contentView = contentController.view
         contentView.addSubview(split)
         contentView.addSubview(zoomHost.view)
+        contentView.addSubview(titlebarSeparator)
         NSLayoutConstraint.activate([
+            titlebarSeparator.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            titlebarSeparator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            titlebarSeparator.topAnchor.constraint(
+                equalTo: contentView.safeAreaLayoutGuide.topAnchor),
+            titlebarSeparator.heightAnchor.constraint(equalToConstant: 1),
             split.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             split.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            split.topAnchor.constraint(equalTo: contentView.safeAreaLayoutGuide.topAnchor),
+            split.topAnchor.constraint(equalTo: titlebarSeparator.bottomAnchor),
             split.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             zoomHost.view.leadingAnchor.constraint(equalTo: split.leadingAnchor),
             zoomHost.view.trailingAnchor.constraint(equalTo: split.trailingAnchor),
@@ -874,9 +885,39 @@ private final class FrontItemHost: WorkspaceHost {
 }
 
 @MainActor
+@MainActor
+final class SidebarSplitView: NSSplitView {
+    /// Clips the trailing preview-pane divider so it starts below the unified toolbar
+    /// rather than cutting through the titlebar; the leading sidebar divider stays full height.
+    func clippedDividerRect(for rect: NSRect) -> NSRect {
+        guard isVertical, arrangedSubviews.count >= 3,
+            !arrangedSubviews[2].isHidden,
+            rect.minX >= arrangedSubviews[1].frame.maxX - 1
+        else { return rect }
+        let top = safeAreaInsets.top
+        guard top > 0, rect.height > top else { return rect }
+        return NSRect(
+            x: rect.minX, y: rect.minY + top, width: rect.width, height: rect.height - top)
+    }
+
+    override func drawDivider(in rect: NSRect) {
+        super.drawDivider(in: clippedDividerRect(for: rect))
+    }
+}
+
 private final class SidebarSplitViewController: NSSplitViewController {
     var onResize: (() -> Void)?
     var onToggleSidebar: ((Any?) -> Void)?
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        let custom = SidebarSplitView()
+        custom.isVertical = true
+        splitView = custom
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     override func splitViewDidResizeSubviews(_ notification: Notification) {
         super.splitViewDidResizeSubviews(notification)

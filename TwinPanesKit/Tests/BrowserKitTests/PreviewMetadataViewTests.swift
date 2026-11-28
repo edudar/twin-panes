@@ -61,7 +61,19 @@ import TwinPanesCore
             #expect(strings.contains("sample.txt"))
             #expect(strings.contains("rw-r----- (0640)"))
             #expect(strings.contains("com.tp.test"))
+
+            view.layoutSubtreeIfNeeded()
+            let separator = try #require(findSeparator(in: view))
+            #expect(separator.alignmentRect(forFrame: separator.frame).height == 1)
         }
+    }
+
+    private func findSeparator(in view: NSView) -> NSBox? {
+        if let box = view as? NSBox, box.boxType == .separator { return box }
+        for subview in view.subviews {
+            if let found = findSeparator(in: subview) { return found }
+        }
+        return nil
     }
 
     @Test func symlinkTargetAndExtendedAttributeOverflowIndicator() throws {

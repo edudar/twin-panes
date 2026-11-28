@@ -429,6 +429,29 @@ import WorkspaceKit
         #expect(labels.contains("Broken symbolic link — target not found"))
     }
 
+    @Test func layoutKeepsHeaderDividerHorizontalAndGivesBodyRealHeight() throws {
+        defer { cleanUp() }
+        let (item, quickLook, _) = makeItem()
+        defer { item.willClose() }
+        let txt = try makeFileEntry(name: "LICENSE.txt", content: Data("Apache License".utf8))
+        item.show(txt, scope: nil)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 500),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.contentViewController = item.viewController
+        window.setContentSize(NSSize(width: 320, height: 500))
+        window.layoutIfNeeded()
+
+        let rootView = item.viewController.view
+        let divider = try #require(
+            rootView.subviews.compactMap { $0 as? NSBox }.first { $0.boxType == .separator })
+        #expect(divider.alignmentRect(forFrame: divider.frame).height == 1)
+        #expect(divider.frame.width == 320)
+        #expect(quickLook.view.frame.width == 320)
+        #expect(quickLook.view.frame.height > 400)
+    }
+
     private func allTextFields(in view: NSView) -> [NSTextField] {
         var result = (view as? NSTextField).map { [$0] } ?? []
         for subview in view.subviews { result += allTextFields(in: subview) }

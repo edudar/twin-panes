@@ -142,8 +142,9 @@ public final class PreviewMetadataView: NSView {
             addRowView(makeKeyValueRow(label: row.label, value: row.value))
         }
         guard !extendedAttributeRows.isEmpty else { return }
-        let divider = NSBox()
+        let divider = NSBox(frame: NSRect(x: 0, y: 0, width: 100, height: 1))
         divider.boxType = .separator
+        divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
         addRowView(divider)
         addLabel(
             "Extended Attributes",

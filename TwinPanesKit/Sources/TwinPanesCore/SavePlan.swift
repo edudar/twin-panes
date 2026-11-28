@@ -1,6 +1,6 @@
-/// What a save has to write (docs/plans/M3b.md, D-c): the ranges of the current version
-/// that differ from the version on disk, or the whole file when the disk can't be trusted
-/// to hold the saved version any more.
+/// What a save has to write (docs/plans/M3b.md, D-c; docs/plans/M8.md, D-b): the ranges
+/// of the current version that differ from the version on disk, or the whole file when
+/// the disk can't be trusted to hold the saved version any more.
 public struct SavePlan: Equatable, Sendable {
     /// Ranges of the current version to write over the file, ascending, non-empty and
     /// not touching each other. For a whole-file save, `0..<length` (none when empty).
@@ -9,24 +9,40 @@ public struct SavePlan: Equatable, Sendable {
     public let writesWholeFile: Bool
     /// The length of the current version, which the file has after the save.
     public let length: UInt64
+    /// Nothing to save: no ranges to write and the file keeps its length.
+    public let changesNothing: Bool
 
-    /// The plan for saving `current` over a file that holds `saved`. A stretch is written
-    /// where the two versions take their bytes from different places (another piece
-    /// source or offset); stretches both take from the same place hold the same bytes.
-    /// That covers new edits and edits undone since the last save, and skips edits that
-    /// were saved already.
+    /// The plan for saving `current` over a file that holds `saved`. Over the length both
+    /// share, a stretch is written where the two versions take their bytes from different
+    /// places (another piece source or offset); stretches both take from the same place
+    /// hold the same bytes. That covers new edits and edits undone since the last save,
+    /// and skips edits that were saved already. Past the shared length the current
+    /// version is written whole, and the file is cut to `length`, so an insert rewrites
+    /// from itself to the end, an append writes only the new bytes, and a delete at the
+    /// end only truncates.
     ///
     /// With `diskMatchesSaved` false (the file changed since it was last opened or saved)
-    /// or a different length, the plan is the whole file.
+    /// the plan is the whole file.
     public init(saved: PieceTree, current: PieceTree, diskMatchesSaved: Bool) {
         length = current.length
-        guard diskMatchesSaved, saved.length == length else {
+        guard diskMatchesSaved else {
             writesWholeFile = true
+            changesNothing = false
             ranges = length > 0 ? [0..<length] : []
             return
         }
         writesWholeFile = false
-        ranges = Self.differences(saved.pieces(in: 0..<length), current.pieces(in: 0..<length))
+        let shared = min(saved.length, length)
+        var ranges = Self.differences(saved.pieces(in: 0..<shared), current.pieces(in: 0..<shared))
+        if length > shared {
+            if let last = ranges.last, last.upperBound == shared {
+                ranges[ranges.count - 1] = last.lowerBound..<length
+            } else {
+                ranges.append(shared..<length)
+            }
+        }
+        self.ranges = ranges
+        changesNothing = ranges.isEmpty && saved.length == length
     }
 
     /// Where two versions of the same length take bytes from different places (what the

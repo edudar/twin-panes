@@ -109,6 +109,16 @@ final class GatedFileSystem: FileSystem {
         #expect(try !session.isDirty && disk(5) == 5)
     }
 
+    /// A version that only drops the last bytes has nothing to write but the new length.
+    @Test func aSaveThatOnlyTruncatesStillSaves() async throws {
+        defer { cleanUp() }
+        let session = try session()
+        session.buffer.restore(session.buffer.tree.removing(60..<64))
+        #expect(session.isDirty)
+        try await session.save()
+        #expect(try !session.isDirty && Data(contentsOf: url) == Data(0..<60))
+    }
+
     /// Done-when for M3b: typing during a save keeps the new edits, and the tab stays
     /// dirty with them; the file holds what was current when the save started.
     @Test func typingDuringASaveKeepsTheNewEdits() async throws {

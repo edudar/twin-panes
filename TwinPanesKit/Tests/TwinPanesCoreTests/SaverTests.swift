@@ -112,6 +112,19 @@ struct SaverTests {
         #expect(try Data(contentsOf: url) == buffer.snapshot().read(0..<1_200_000))
     }
 
+    /// An insert near the start and a delete near the end: the clone is rewritten from
+    /// the insert on and cut to the new length.
+    @Test func savesAVersionOfAnotherLength() throws {
+        defer { cleanUp() }
+        let (buffer, opened) = try edited()
+        let grown = buffer.tree.inserting(Piece(.add, offset: 0, length: 2), at: 5)
+        buffer.restore(grown.removing(1_000_000..<1_000_100))
+        let plan = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: true)
+        #expect(!plan.writesWholeFile && plan.ranges == [5..<1_199_902])
+        _ = try Saver().save(buffer.snapshot(), plan: plan, to: url)
+        #expect(try Data(contentsOf: url) == buffer.snapshot().read(0..<1_199_902))
+    }
+
     @Test func refusesHardLinkedFiles() throws {
         defer { cleanUp() }
         try FileManager.default.linkItem(at: url, to: folder.appendingPathComponent("link"))
@@ -190,6 +203,24 @@ struct SaverTests {
         #expect(throws: Saver.SaveError.hardLinked) {
             try Saver().save(buffer.snapshot(), plan: whole, to: url, inPlaceJournal: journal)
         }
+    }
+
+    /// The save journal can't put an old length back yet (docs/plans/M8.md, step 4), so
+    /// a hard-linked file refuses a save that changes its length and stays as it was.
+    @Test func refusesToChangeTheLengthOfAHardLinkedFile() throws {
+        defer { cleanUp() }
+        try FileManager.default.linkItem(at: url, to: folder.appendingPathComponent("link"))
+        let buffer = try EditBuffer(
+            original: ByteSource(url: url), addDirectory: folder.appendingPathComponent("add"))
+        let opened = buffer.tree
+        buffer.restore(opened.removing(1_199_000..<1_200_000))
+        let plan = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: true)
+        let journal = folder.appendingPathComponent("save-journal.bin")
+        #expect(throws: Saver.SaveError.hardLinked) {
+            try Saver().save(buffer.snapshot(), plan: plan, to: url, inPlaceJournal: journal)
+        }
+        #expect(try Data(contentsOf: url) == original)
+        #expect(!FileManager.default.fileExists(atPath: journal.path))
     }
 
     /// A save that stops after writing into the file: in the app it's rolled back at once

@@ -254,4 +254,36 @@ import Testing
             .splitView.arrangedSubviews
         #expect(narrowPanes[1].frame.width >= 481)
     }
+
+    @Test func titlebarSeparatorAndClippedPreviewDivider() throws {
+        let controller = makeController()
+        let frame = controller.frameController
+        let window = try #require(controller.window)
+        frame.sidebar = focusableVC()
+        frame.previewPane = focusableVC()
+        window.layoutIfNeeded()
+        frame.viewDidAppear()
+        frame.togglePreviewPane(nil)
+        window.layoutIfNeeded()
+
+        let splitVC = try #require(frame.children.first as? NSSplitViewController)
+        let splitView = try #require(splitVC.splitView as? SidebarSplitView)
+        let panes = splitView.arrangedSubviews
+        #expect(panes.count == 3)
+
+        let separator = try #require(
+            MainFrameFocusTests.view(in: panes[1], id: "titlebarSeparator") as? NSBox)
+        #expect(separator.alignmentRect(forFrame: separator.frame).height == 1)
+        #expect(separator.frame.width > 0)
+
+        let top = splitView.safeAreaInsets.top
+        #expect(top > 0)
+        let fullHeight = splitView.bounds.height
+        let leadingRect = NSRect(x: panes[0].frame.maxX, y: 0, width: 1, height: fullHeight)
+        let trailingRect = NSRect(x: panes[1].frame.maxX, y: 0, width: 1, height: fullHeight)
+        #expect(splitView.clippedDividerRect(for: leadingRect) == leadingRect)
+        let clippedTrailing = splitView.clippedDividerRect(for: trailingRect)
+        #expect(clippedTrailing.minY == top)
+        #expect(clippedTrailing.height == fullHeight - top)
+    }
 }
