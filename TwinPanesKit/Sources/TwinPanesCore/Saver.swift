@@ -59,15 +59,12 @@ public struct Saver: Sendable {
         let folder = try fileSystem.replacementDirectory(for: url)
         defer { fileSystem.removeItem(at: folder) }
         let staged = folder.appendingPathComponent(url.lastPathComponent)
-        do {
-            try fileSystem.clone(url, to: staged)
-        } catch {
-            let needed = max(identity.size, plan.length)
-            if let free = fileSystem.availableCapacity(for: url), free < needed {
-                throw SaveError.notEnoughSpace(needed: needed, available: free)
-            }
-            try fileSystem.copy(url, to: staged)
-        }
+        // Any volume that can't clone gets a copy instead. A clone shares blocks until
+        // they're written, so it needs room for the bytes written; a copy needs room for
+        // all of the file (docs/plans/M8.md, D-e).
+        let cloned = (try? fileSystem.clone(url, to: staged)) != nil
+        try requireSpace(cloned ? plan.byteCount : max(identity.size, plan.length), on: url)
+        if !cloned { try fileSystem.copy(url, to: staged) }
         let descriptor = try fileSystem.openForWriting(staged)
         do {
             try write(plan.ranges, of: version, length: plan.length, to: descriptor, staged.path)
@@ -86,6 +83,11 @@ public struct Saver: Sendable {
         _ version: some ByteReading, plan: SavePlan, to url: URL, as identity: FileIdentity,
         journal: URL
     ) throws -> FileIdentity {
+        // The journal is in the session folder, beside the clone, so on the file's volume.
+        let kept = SaveJournal.keptRanges(
+            plan.ranges, oldLength: identity.size, newLength: plan.length)
+        let growth = plan.length > identity.size ? plan.length - identity.size : 0
+        try requireSpace(kept.reduce(growth) { $0 + UInt64($1.count) }, on: url)
         try SaveJournal.begin(
             journal, file: url, identity: identity, ranges: plan.ranges,
             newLength: plan.length, fileSystem: fileSystem)
@@ -137,6 +139,14 @@ public struct Saver: Sendable {
             try fileSystem.move(staged, to: url)
         }
         return try FileIdentity(url: url)
+    }
+
+    /// Throws `notEnoughSpace` when `url`'s volume has less than `needed` bytes free (and
+    /// says how much it has); a volume that won't say is let through.
+    private func requireSpace(_ needed: UInt64, on url: URL) throws {
+        if let free = fileSystem.availableCapacity(for: url), free < needed {
+            throw SaveError.notEnoughSpace(needed: needed, available: free)
+        }
     }
 
     /// Writes `ranges` of `version` in chunks, sets the length and flushes.

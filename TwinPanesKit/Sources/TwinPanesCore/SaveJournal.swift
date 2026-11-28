@@ -27,8 +27,7 @@ public enum SaveJournal {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         let oldLength = identity.size
-        var kept = ranges.map { $0.clamped(to: 0..<oldLength) }.filter { !$0.isEmpty }
-        if newLength < oldLength { kept.append(newLength..<oldLength) }
+        let kept = keptRanges(ranges, oldLength: oldLength, newLength: newLength)
         var body = magic
         let path = Array(url.path.utf8)
         JournalFormat.append(UInt32(path.count), to: &body)
@@ -59,6 +58,16 @@ public enum SaveJournal {
         var sum = JournalFormat.crc32c([], seed: crc).littleEndian
         try emit(Data(bytes: &sum, count: 4), hash: false)
         try fileSystem.fullSync(descriptor, path: journal.path); done = true
+    }
+
+    /// The old bytes a save of `ranges` keeps: each range's part inside the file's
+    /// `oldLength` bytes, and what a shorter file loses at its end.
+    static func keptRanges(
+        _ ranges: [Range<UInt64>], oldLength: UInt64, newLength: UInt64
+    ) -> [Range<UInt64>] {
+        var kept = ranges.map { $0.clamped(to: 0..<oldLength) }.filter { !$0.isEmpty }
+        if newLength < oldLength { kept.append(newLength..<oldLength) }
+        return kept
     }
 
     /// The writes are flushed: marks the journal committed, then deletes it.

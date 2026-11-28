@@ -165,6 +165,61 @@ struct SaverTests {
         #expect(try FileIdentity(url: url).key != before.key)
     }
 
+    /// A clone shares blocks with the file until they're written, so a save needs room
+    /// for the bytes it writes even after cloning (docs/plans/M8.md, D-e); a small patch
+    /// needs little.
+    @Test func aClonedSaveNeedsRoomForWhatItWrites() throws {
+        defer { cleanUp() }
+        let before = try FileIdentity(url: url)
+        let buffer = try EditBuffer(
+            original: ByteSource(url: url), addDirectory: folder.appendingPathComponent("add"))
+        let opened = buffer.tree
+        try buffer.replace(0..<0, with: Data([1, 2]))
+        let rewrite = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: true)
+        let full = FaultyFileSystem(capacity: 100_000)
+        #expect(throws: Saver.SaveError.notEnoughSpace(needed: 1_200_002, available: 100_000)) {
+            try Saver(fileSystem: full).save(buffer.snapshot(), plan: rewrite, to: url)
+        }
+        #expect(try Data(contentsOf: url) == original && FileIdentity(url: url) == before)
+
+        let (patched, start) = try edited()
+        let patch = SavePlan(saved: start, current: patched.tree, diskMatchesSaved: true)
+        _ = try Saver(fileSystem: FaultyFileSystem(capacity: 12)).save(
+            patched.snapshot(), plan: patch, to: url)
+        #expect(try Data(contentsOf: url) == patched.snapshot().read(0..<1_200_000))
+    }
+
+    /// In place, a save needs room for the old bytes it journals (a shrink keeps the
+    /// tail it cuts) and for the file's growth; refused, the file and journal stay as they
+    /// were.
+    @Test(arguments: [true, false])
+    func anInPlaceSaveNeedsRoomForItsJournalAndGrowth(grows: Bool) throws {
+        defer { cleanUp() }
+        try FileManager.default.linkItem(at: url, to: folder.appendingPathComponent("link"))
+        let buffer = try EditBuffer(
+            original: ByteSource(url: copyOfTheFile()),
+            addDirectory: folder.appendingPathComponent("add"))
+        let opened = buffer.tree
+        if grows {
+            try buffer.replace(1_200_000..<1_200_000, with: Data(repeating: 0xAB, count: 300_000))
+        } else {
+            try buffer.replace(200_000..<1_200_000, with: Data())
+        }
+        let needed: UInt64 = grows ? 300_000 : 1_000_000
+        let plan = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: true)
+        let journal = folder.appendingPathComponent("save-journal.bin")
+        let full = FaultyFileSystem(capacity: needed - 1)
+        #expect(throws: Saver.SaveError.notEnoughSpace(needed: needed, available: needed - 1)) {
+            try Saver(fileSystem: full).save(
+                buffer.snapshot(), plan: plan, to: url, inPlaceJournal: journal)
+        }
+        #expect(try Data(contentsOf: url) == original)
+        #expect(!FileManager.default.fileExists(atPath: journal.path))
+        _ = try Saver(fileSystem: FaultyFileSystem(capacity: needed)).save(
+            buffer.snapshot(), plan: plan, to: url, inPlaceJournal: journal)
+        #expect(try Data(contentsOf: url) == buffer.snapshot().read(0..<buffer.length))
+    }
+
     /// Save As: a new file, or over another file, with no staging file left behind.
     @Test func writesAWholeVersionToAnotherFile() throws {
         defer { cleanUp() }
