@@ -5,8 +5,8 @@
 # clicking an alert's button) makes the test process exit with status 0 before its
 # summary line; `swift test` then reports success with the rest of the run skipped.
 # Each test process prints "Test run started." first and "Test run with N tests" last,
-# passed or failed: one process per test target from Xcode 26, one for all of them
-# with Xcode 16. A run that started but never summed up ended early.
+# passed or failed: one process per test target from Xcode 27, one for all of them
+# with Xcode 16 and 26. A run that started but never summed up ended early.
 set -euo pipefail
 
 log=${1:?usage: check-test-runs.sh <swift test log>}

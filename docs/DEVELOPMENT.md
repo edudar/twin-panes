@@ -33,10 +33,10 @@ swift test --parallel --package-path TwinPanesKit
 ```
 
 A test that stops the main run loop ends its test process early with status 0, and
-`swift test` still reports success. Each test process (one per target from Xcode 26,
-one for all targets with Xcode 16) prints `Test run started.` first and `Test run with
-N tests` last; `scripts/check-test-runs.sh <log>` fails unless every run that started
-also finished, given the output of a `swift test` run.
+`swift test` still reports success. Each test process (one per target from Xcode 27,
+one for all targets with Xcode 16 and 26) prints `Test run started.` first and
+`Test run with N tests` last; `scripts/check-test-runs.sh <log>` fails unless every
+run that started also finished, given the output of a `swift test` run.
 
 CI also runs the tests under Thread Sanitizer and builds the package for x86_64,
 which GitHub's CodeQL uses:
