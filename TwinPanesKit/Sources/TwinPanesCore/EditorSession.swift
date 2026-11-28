@@ -37,7 +37,7 @@ public final class EditorSession {
         case edited
         /// A save finished: the saved version, and maybe the file's identity, changed.
         case saved
-        /// `isSaving` changed.
+        /// `isSaving` or `saveProgress` changed.
         case saving
         /// Another app changed or deleted the file while the session has unsaved edits
         /// (`fileState` says which); a clean session just reloads.
@@ -99,6 +99,11 @@ public final class EditorSession {
     /// The last save started or queued, and how many are running or queued (at most 2).
     var saveTail: Task<Void, Error>?
     var savesPending = 0
+    /// How much of the running save is written, from 0 to 1; nil when none runs or it
+    /// hasn't reported yet. A change of it is announced as `.saving`.
+    public internal(set) var saveProgress: Double?
+    /// Counts the saves started, so a report from an earlier one is told apart.
+    var saveNumber = 0
     private var observers: [Observer] = []
 
     private struct Observer {

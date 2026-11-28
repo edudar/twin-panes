@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Saving a session (docs/plans/M3b.md, D-c and D-d).
 extension EditorSession {
@@ -45,8 +46,11 @@ extension EditorSession {
         try await enqueueSave {
             let (version, saver, snapshot) = (self.buffer.tree, self.saver, self.buffer.snapshot())
             let journaled = self.journal?.replaceCount
+            let progress = self.progressReporter(for: self.beginSaveProgress())
             let written = try await Self.offMain {
-                try withExtendedLifetime(scope) { try saver.write(snapshot, to: target) }
+                try withExtendedLifetime(scope) {
+                    try saver.write(snapshot, to: target, progress: progress)
+                }
             }
             if let old = self.scope { self.earlierScopes.append(old) }
             (self.url, self.scope, self.identity) = (target, scope, written)
@@ -80,6 +84,37 @@ extension EditorSession {
         }
     }
 
+    /// Shows `fraction` as the progress of save number `number`, if that save is still
+    /// the one running; a late report from an earlier save changes nothing.
+    func showSaveProgress(_ fraction: Double, of number: Int) {
+        guard number == saveNumber, isSaving, saveProgress != fraction else { return }
+        saveProgress = fraction
+        notify(.saving)
+    }
+
+    /// Starts counting a new save's progress from none and returns its number.
+    private func beginSaveProgress() -> Int {
+        saveNumber += 1
+        if saveProgress != nil {
+            saveProgress = nil
+            notify(.saving)
+        }
+        return saveNumber
+    }
+
+    /// Hands save number `number`'s reports from the saving thread to the main actor, at
+    /// most one every 100 ms and always the last, so a fast save of gigabytes doesn't
+    /// flood the main queue.
+    private func progressReporter(for number: Int) -> Saver.Progress {
+        let throttle = ProgressThrottle()
+        return { fraction in
+            guard throttle.shouldSend(fraction) else { return }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self.showSaveProgress(fraction, of: number) }
+            }
+        }
+    }
+
     /// Returns once no save is running or queued (quitting waits for this); a failed
     /// save counts as finished.
     public func finishSaving() async {
@@ -90,6 +125,7 @@ extension EditorSession {
         savesPending -= 1
         guard savesPending == 0 else { return }
         saveTail = nil
+        saveProgress = nil
         notify(.saving)
         if changeArrivedWhileSaving {
             changeArrivedWhileSaving = false
@@ -113,6 +149,7 @@ extension EditorSession {
             return notify(.saved)
         }
         let (saver, url, scope, snapshot) = (saver, url, scope, buffer.snapshot())
+        let progress = progressReporter(for: beginSaveProgress())
         // In place (hard links) only when the original pieces read the clone, not the file.
         let journal = isNarrowed ? nil : folder?.file(SaveJournal.fileName)
         let deleted = onDisk == nil
@@ -120,13 +157,29 @@ extension EditorSession {
             try withExtendedLifetime(scope) {
                 // A file deleted meanwhile is written back whole.
                 deleted
-                    ? try saver.write(snapshot, to: url)
-                    : try saver.save(snapshot, plan: plan, to: url, inPlaceJournal: journal)
+                    ? try saver.write(snapshot, to: url, progress: progress)
+                    : try saver.save(
+                        snapshot, plan: plan, to: url, inPlaceJournal: journal,
+                        progress: progress)
             }
         }
         savedTree = version
         fileWasSaved()
         journalSaved(after: journaled)
         notify(.saved)
+    }
+}
+
+/// Lets a save's progress through at most every 100 ms, and its last report always.
+private final class ProgressThrottle: Sendable {
+    private let lastSent = Mutex<ContinuousClock.Instant?>(nil)
+
+    func shouldSend(_ fraction: Double) -> Bool {
+        let now = ContinuousClock.now
+        return lastSent.withLock { last in
+            if fraction < 1, let last, now - last < .milliseconds(100) { return false }
+            last = now
+            return true
+        }
     }
 }

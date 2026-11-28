@@ -220,6 +220,50 @@ struct SaverTests {
         #expect(try Data(contentsOf: url) == buffer.snapshot().read(0..<buffer.length))
     }
 
+    /// Collects the fractions a save reports, from the saving thread.
+    final class Reports: Sendable {
+        let fractions = Mutex<[Double]>([])
+        var progress: Saver.Progress {
+            { fraction in self.fractions.withLock { $0.append(fraction) } }
+        }
+        /// Rising, ending at 1, after `steps` reports at least.
+        func rise(toTheEndIn steps: Int) -> Bool {
+            let list = fractions.withLock { $0 }
+            return list.count >= steps && list.last == 1
+                && zip(list, list.dropFirst()).allSatisfy { $0 < $1 }
+        }
+    }
+
+    /// Progress counts the bytes written: in chunks for a clone, with the journal's old
+    /// bytes too in place, and for Save As.
+    @Test func reportsProgressUpToTheWholeSave() throws {
+        defer { cleanUp() }
+        let buffer = try EditBuffer(
+            original: ByteSource(url: copyOfTheFile()),
+            addDirectory: folder.appendingPathComponent("add"))
+        let opened = buffer.tree
+        try buffer.replace(0..<0, with: Data([1, 2]))  // rewrites 1.2 MB: two chunks
+        let plan = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: true)
+        let cloned = Reports()
+        _ = try Saver().save(buffer.snapshot(), plan: plan, to: url, progress: cloned.progress)
+        #expect(cloned.rise(toTheEndIn: 2))
+
+        try original.write(to: url)
+        try FileManager.default.linkItem(at: url, to: folder.appendingPathComponent("link"))
+        let inPlace = Reports()  // 1.2 MB journaled, then 1.2 MB written
+        _ = try Saver().save(
+            buffer.snapshot(), plan: plan, to: url,
+            inPlaceJournal: folder.appendingPathComponent("save-journal.bin"),
+            progress: inPlace.progress)
+        #expect(inPlace.rise(toTheEndIn: 4))
+
+        let savedAs = Reports()
+        _ = try Saver().write(
+            buffer.snapshot(), to: folder.appendingPathComponent("as.bin"),
+            progress: savedAs.progress)
+        #expect(savedAs.rise(toTheEndIn: 2))
+    }
+
     /// Save As: a new file, or over another file, with no staging file left behind.
     @Test func writesAWholeVersionToAnotherFile() throws {
         defer { cleanUp() }

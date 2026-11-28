@@ -29,6 +29,10 @@ public struct Saver: Sendable {
         }
     }
 
+    /// How much of a save is done, from 0 to 1 (docs/plans/M8.md, D-f). Called on the
+    /// saving thread after each chunk, and with 1 once every byte is written.
+    public typealias Progress = @Sendable (Double) -> Void
+
     /// Bytes read from the snapshot and written per step.
     public static let chunkSize = 1 << 20
 
@@ -45,7 +49,8 @@ public struct Saver: Sendable {
     /// read `url` itself (the session reads its clone): a write would change bytes it has
     /// yet to read, which a change of length moves.
     public func save(
-        _ version: some ByteReading, plan: SavePlan, to url: URL, inPlaceJournal: URL? = nil
+        _ version: some ByteReading, plan: SavePlan, to url: URL, inPlaceJournal: URL? = nil,
+        progress: Progress? = nil
     ) throws
         -> FileIdentity
     {
@@ -54,7 +59,9 @@ public struct Saver: Sendable {
             guard let journal = inPlaceJournal, !plan.writesWholeFile else {
                 throw SaveError.hardLinked
             }
-            return try saveInPlace(version, plan: plan, to: url, as: identity, journal: journal)
+            return try saveInPlace(
+                version, plan: plan, to: url, as: identity,
+                journal: journal, progress: progress)
         }
         let folder = try fileSystem.replacementDirectory(for: url)
         defer { fileSystem.removeItem(at: folder) }
@@ -67,7 +74,9 @@ public struct Saver: Sendable {
         if !cloned { try fileSystem.copy(url, to: staged) }
         let descriptor = try fileSystem.openForWriting(staged)
         do {
-            try write(plan.ranges, of: version, length: plan.length, to: descriptor, staged.path)
+            try write(
+                plan.ranges, of: version, length: plan.length, to: descriptor, staged.path,
+                counting: SaveWork(total: plan.byteCount, report: progress))
         } catch {
             fileSystem.close(descriptor)
             throw error
@@ -81,21 +90,25 @@ public struct Saver: Sendable {
     /// A failure rolls the file back at once; a crash leaves the journal for recovery.
     private func saveInPlace(
         _ version: some ByteReading, plan: SavePlan, to url: URL, as identity: FileIdentity,
-        journal: URL
+        journal: URL, progress: Progress?
     ) throws -> FileIdentity {
         // The journal is in the session folder, beside the clone, so on the file's volume.
         let kept = SaveJournal.keptRanges(
             plan.ranges, oldLength: identity.size, newLength: plan.length)
         let growth = plan.length > identity.size ? plan.length - identity.size : 0
-        try requireSpace(kept.reduce(growth) { $0 + UInt64($1.count) }, on: url)
+        let keptBytes = kept.reduce(0) { $0 + UInt64($1.count) }
+        try requireSpace(keptBytes + growth, on: url)
+        let work = SaveWork(total: keptBytes + plan.byteCount, report: progress)
         try SaveJournal.begin(
             journal, file: url, identity: identity, ranges: plan.ranges,
-            newLength: plan.length, fileSystem: fileSystem)
+            newLength: plan.length, fileSystem: fileSystem, counting: work)
         var writesFlushed = false
         do {
             let descriptor = try fileSystem.openForWriting(url)
             do {
-                try write(plan.ranges, of: version, length: plan.length, to: descriptor, url.path)
+                try write(
+                    plan.ranges, of: version, length: plan.length, to: descriptor, url.path,
+                    counting: work)
             } catch {
                 fileSystem.close(descriptor)
                 throw error
@@ -118,7 +131,9 @@ public struct Saver: Sendable {
 
     /// Writes all of `version` to `url` (Save As): staged in a new file next to it, then
     /// moved in, or swapped in for a file already there. Returns the file's identity.
-    public func write(_ version: some ByteReading, to url: URL) throws -> FileIdentity {
+    public func write(
+        _ version: some ByteReading, to url: URL, progress: Progress? = nil
+    ) throws -> FileIdentity {
         let folder = try fileSystem.replacementDirectory(for: url.deletingLastPathComponent())
         defer { fileSystem.removeItem(at: folder) }
         let staged = folder.appendingPathComponent(url.lastPathComponent)
@@ -127,7 +142,7 @@ public struct Saver: Sendable {
         do {
             try write(
                 length > 0 ? [0..<length] : [], of: version, length: length, to: descriptor,
-                staged.path)
+                staged.path, counting: SaveWork(total: length, report: progress))
         } catch {
             fileSystem.close(descriptor)
             throw error
@@ -149,10 +164,11 @@ public struct Saver: Sendable {
         }
     }
 
-    /// Writes `ranges` of `version` in chunks, sets the length and flushes.
+    /// Writes `ranges` of `version` in chunks, sets the length and flushes, counting each
+    /// chunk in `work`.
     private func write(
         _ ranges: [Range<UInt64>], of version: some ByteReading, length: UInt64,
-        to descriptor: Int32, _ path: String
+        to descriptor: Int32, _ path: String, counting work: SaveWork
     ) throws {
         for range in ranges {
             var at = range.lowerBound
@@ -164,10 +180,38 @@ public struct Saver: Sendable {
                         expected: end, available: at + UInt64(data.count))
                 }
                 try fileSystem.write(data, to: descriptor, at: at, path: path)
+                work.didWrite(end - at)
                 at = end
             }
         }
         try fileSystem.truncate(descriptor, to: length, path: path)
+        work.finish()
         try fileSystem.fullSync(descriptor, path: path)
+    }
+}
+
+/// The bytes a save has written out of all it will, reported as `Saver.Progress`. Lives
+/// on the saving thread for one save.
+final class SaveWork {
+    private let total: UInt64
+    private let report: Saver.Progress?
+    private var done: UInt64 = 0
+    private var reportedAll = false
+
+    init(total: UInt64, report: Saver.Progress?) {
+        (self.total, self.report) = (total, report)
+    }
+
+    func didWrite(_ count: UInt64) {
+        done += count
+        reportedAll = done >= total
+        report?(total > 0 ? Double(min(done, total)) / Double(total) : 1)
+    }
+
+    /// Reports 1 if the writes haven't already, as when there was nothing to write.
+    func finish() {
+        guard !reportedAll else { return }
+        reportedAll = true
+        report?(1)
     }
 }

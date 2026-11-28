@@ -101,7 +101,10 @@ final class GatedFileSystem: FileSystem {
         try await session.save()
         #expect(try !session.isDirty && !session.isSaving && disk(5) == 0xAA)
         #expect(try session.identity != opened && session.identity == FileIdentity(url: url))
-        #expect(changes.list == [.edited, .saving, .saved, .saving])
+        // `.saving` comes at the start and end, and with progress between (D-f).
+        #expect(changes.list.first == .edited && changes.list.last == .saving)
+        #expect(changes.list.filter { $0 == .saved }.count == 1)
+        #expect(changes.list.allSatisfy { [.edited, .saving, .saved].contains($0) })
 
         _ = session.undo()
         #expect(session.isDirty)
@@ -117,6 +120,30 @@ final class GatedFileSystem: FileSystem {
         #expect(session.isDirty)
         try await session.save()
         #expect(try !session.isDirty && Data(contentsOf: url) == Data(0..<60))
+    }
+
+    /// A running save shows its progress, announced as `.saving`; it's gone once the save
+    /// ends, and a report arriving after that changes nothing.
+    @Test(.timeLimit(.minutes(1))) func aSaveShowsItsProgressUntilItEnds() async throws {
+        defer { cleanUp() }
+        let fs = GatedFileSystem(holding: true)
+        let session = try session(fs)
+        try session.replace(0..<0, with: Data([1]), selectionBefore: 0..<1, selectionAfter: 1..<2)
+        let written = SearchSignal()
+        let changes = Changes()
+        session.observe(changes) { change in
+            changes.list.append(change)
+            if session.saveProgress == 1 { written.signal() }
+        }
+        #expect(session.saveProgress == nil)
+        let saving = Task { try await session.save() }
+        await written.wait()  // every byte written; the save is held at its flush
+        #expect(session.isSaving && changes.list.filter { $0 == .saving }.count >= 2)
+        fs.release()
+        try await saving.value
+        #expect(session.saveProgress == nil && !session.isSaving)
+        session.showSaveProgress(0.5, of: session.saveNumber)
+        #expect(session.saveProgress == nil)
     }
 
     /// Done-when for M3b: typing during a save keeps the new edits, and the tab stays

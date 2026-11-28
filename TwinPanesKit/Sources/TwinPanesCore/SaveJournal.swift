@@ -19,10 +19,11 @@ public enum SaveJournal {
 
     /// Writes the journal for writing `ranges` of `url` (as `identity`) in place and
     /// leaving it `newLength` long: the old bytes of each range inside the file, those a
-    /// shorter file loses at its end, and the old length (docs/plans/M8.md, D-d).
+    /// shorter file loses at its end, and the old length (docs/plans/M8.md, D-d). Each
+    /// chunk of old bytes counts in `work`.
     static func begin(
         _ journal: URL, file url: URL, identity: FileIdentity, ranges: [Range<UInt64>],
-        newLength: UInt64, fileSystem: any FileSystem
+        newLength: UInt64, fileSystem: any FileSystem, counting work: SaveWork? = nil
     ) throws {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
@@ -53,6 +54,7 @@ public enum SaveJournal {
             JournalFormat.append(count, to: &entry); try emit(Data(entry))
             try streamChunks(from: handle, start: range.lowerBound, length: count) { c, _ in
                 try emit(c)
+                work?.didWrite(UInt64(c.count))
             }
         }
         var sum = JournalFormat.crc32c([], seed: crc).littleEndian
