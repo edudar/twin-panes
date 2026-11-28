@@ -172,7 +172,7 @@ import WorkspaceKit
         #expect(discarded == [operation.id])
     }
 
-    @Test func lingeringAutoHidesOnceAndCancelsOnDeinit() async {
+    @Test func lingeringAutoHidesOnce() async {
         defer { cleanUp() }
         var hideCount = 0
         var hideContinuation: CheckedContinuation<Void, Never>?
@@ -200,26 +200,6 @@ import WorkspaceKit
         }
         #expect(hideCount == 1)
         #expect(!lingering.isAutoHideScheduled)
-
-        var deinitHides = 0
-        weak var weakController: OperationsPopoverViewController?
-        do {
-            let shortLived = OperationsPopoverViewController(
-                queue: queue, linger: .seconds(60), shows: { _ in true })
-            shortLived.onRequestHide = { deinitHides += 1 }
-            weakController = shortLived
-            _ = shortLived.view
-            let op2 = queue.add(.makeFolder(named: "deinit-dir", in: destination), scopes: []) {
-                _, _ in ConflictAnswer(.stop)
-            }
-            _ = await op2.finished()
-            #expect(shortLived.isAutoHideScheduled)
-        }
-        // When other tests run alongside, AppKit holds the controller until the current
-        // main-queue turn ends; a leak would outlive the next turn.
-        await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
-        #expect(weakController == nil)
-        #expect(deinitHides == 0)
     }
 
     @Test func refusedNameDiscardsImmediatelyWithoutEnteringHistory() async {

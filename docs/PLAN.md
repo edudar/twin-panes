@@ -172,7 +172,7 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `AccessRequest` | M4 | sandbox access prompt targeting (volume, home folder, or lost grant) |
 | `StepTiming`, `StepRecorder` | M4 | main-actor step timing for smoke-test stall diagnostics |
 | `BrowserItem+FileCommands` | M6 | F2–⇧F8 and Undo/Redo sent to the app's handler (D52, D54) |
-| `OperationsPopoverViewController`, `OperationTexts` | M6 | toolbar activity popover (4 visible, 20 retained, status icons, pause/cancel) and row text (D53) |
+| `OperationsPopoverViewController`, `OperationTexts`, `AutoHide` | M6 | toolbar activity popover (4 visible, 20 retained, status icons, pause/cancel), row text, and the linger before it hides itself, kept out of AppKit so it's testable without a window (D53) |
 | `TextSheet`, `DeleteConfirmation`, `ConflictSheet` | M6 | the sheets that confirm file operations and settle conflicts (D52) |
 | `PreviewPaneViewController`, `PreviewMetadataView`, `QuickLookHostView` | M7 | collapsible right preview pane: frame-sized Quick Look host with resize refresh above O(1) metadata (D59) |
 | `QuickViewItem` | M7 | F3/`⇧F3` read-only QuickView tab (`QuickViewViewController`) with Quick Look \| Hex toggle, `Keep`, dirty banner and F4 promotion (D57, D60) |

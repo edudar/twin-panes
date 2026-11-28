@@ -1,5 +1,4 @@
 import AppKit
-import Synchronization
 import TwinPanesCore
 import enum WorkspaceKit.OperationsIndicatorState
 
@@ -47,7 +46,9 @@ public final class OperationsPopoverViewController: NSViewController {
     private var hadActiveOperations = false
     private var openedManually = false
     private var lastIndicatorState: OperationsIndicatorState?
-    private let autoHideTask = Mutex<Task<Void, Never>?>(nil)
+    private lazy var autoHide = AutoHide(linger: linger) { [weak self] in
+        self?.finishAutoHide()
+    }
     private var token: ObservationToken?
 
     public init(
@@ -65,13 +66,6 @@ public final class OperationsPopoverViewController: NSViewController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    deinit {
-        autoHideTask.withLock { task in
-            task?.cancel()
-            task = nil
-        }
-    }
 
     public override func loadView() {
         let root = NSView(
@@ -172,13 +166,13 @@ public final class OperationsPopoverViewController: NSViewController {
     /// Marks the current popover session as manually opened, cancelling any pending auto-hide.
     public func noteUserOpened() {
         openedManually = true
-        cancelAutoHide()
+        autoHide.cancel()
     }
 
     /// Resets manual-open state when the popover closes.
     public func noteClosed() {
         openedManually = false
-        cancelAutoHide()
+        autoHide.cancel()
     }
 
     /// Removes all finished operations from this popover's history.
@@ -239,7 +233,7 @@ public final class OperationsPopoverViewController: NSViewController {
         orderedIDs.compactMap { id in queue.operations.first { $0.id == id } }
     }
 
-    var isAutoHideScheduled: Bool { autoHideTask.withLock { $0 != nil } }
+    var isAutoHideScheduled: Bool { autoHide.isScheduled }
 
     func status(of operation: QueuedOperation) -> OperationStatus? {
         rows[operation.id]?.displayedStatus
@@ -357,55 +351,30 @@ public final class OperationsPopoverViewController: NSViewController {
     private func updateAutoVisibility(retained: [QueuedOperation], sawNewOperation: Bool) {
         let hasActive = retained.contains { $0.result == nil }
         if sawNewOperation {
-            cancelAutoHide()
+            autoHide.cancel()
             openedManually = false
             onRequestShow?()
         }
         if hasActive {
             hadActiveOperations = true
-            cancelAutoHide()
+            autoHide.cancel()
             return
         }
         guard hadActiveOperations || sawNewOperation else { return }
         hadActiveOperations = false
         let hasFailures = retained.contains { !($0.result?.failures.isEmpty ?? true) }
         guard !openedManually, !hasFailures else {
-            cancelAutoHide()
+            autoHide.cancel()
             return
         }
-        scheduleAutoHide()
-    }
-
-    private func scheduleAutoHide() {
-        if linger <= .zero {
-            cancelAutoHide()
-            onRequestHide?()
-            return
-        }
-        let alreadyScheduled = autoHideTask.withLock { $0 != nil }
-        guard !alreadyScheduled else { return }
-        let delay = linger
-        let task = Task { [weak self] in
-            try? await Task.sleep(for: delay)
-            guard !Task.isCancelled else { return }
-            self?.finishAutoHide()
-        }
-        autoHideTask.withLock { $0 = task }
+        autoHide.schedule()
     }
 
     private func finishAutoHide() {
-        autoHideTask.withLock { $0 = nil }
         guard !openedManually else { return }
         let hasActive = shownOperations.contains { $0.result == nil }
         guard !hasActive else { return }
         onRequestHide?()
-    }
-
-    private func cancelAutoHide() {
-        autoHideTask.withLock { task in
-            task?.cancel()
-            task = nil
-        }
     }
 
     private func discard(_ id: QueuedOperation.ID) {
