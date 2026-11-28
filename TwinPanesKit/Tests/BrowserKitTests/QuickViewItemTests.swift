@@ -162,10 +162,10 @@ import WorkspaceKit
         let bin = try makeFileEntry(name: "data.bin", content: Data([0x00, 0xFF, 0x01]))
 
         item.show(txt, scope: nil)
-        #expect(item.activeMode == .quickLook && item.title == "notes.txt")
+        #expect(item.activeMode == .text && item.title == "notes.txt")
         #expect(qlCount() == 1 && factory.created.isEmpty && quickLook.shown == [txt.url])
         #expect(host.messages.last?.contains("notes.txt") == true)
-        #expect(host.messages.last?.contains("Quick Look") == true)
+        #expect(host.messages.last?.contains("Text") == true)
         #expect(host.messages.last?.contains("Read-only") == true)
 
         item.retarget(to: bin, scope: nil)
@@ -246,7 +246,7 @@ import WorkspaceKit
         #expect(quickLook.shown == [txt1.url, nil])
 
         item.retarget(to: txt2, scope: nil)
-        #expect(item.activeMode == .quickLook && modeControl.selectedSegment == 0)
+        #expect(item.activeMode == .text && modeControl.selectedSegment == 0)
         #expect(factory.created.first?.shown == [txt1.url, nil])
         #expect(quickLook.shown == [txt1.url, nil, txt2.url])
     }
@@ -274,21 +274,21 @@ import WorkspaceKit
 
         let liveTxt = try makeFileEntry(name: "live.txt", content: Data("hello".utf8))
         item.show(liveTxt, scope: nil)
-        #expect(item.activeMode == .quickLook && badge.isHidden)
+        #expect(item.activeMode == .text && badge.isHidden)
         let (liveSession, _) = try sessions.open(liveTxt.url)
-        #expect(badge.isHidden && item.activeMode == .quickLook)
+        #expect(badge.isHidden && item.activeMode == .text)
         try editFirst(liveSession)
         #expect(!badge.isHidden && item.activeMode == .hex)
         #expect(host.messages.last?.contains("Includes unsaved edits") == true)
 
         liveSession.revert()
-        #expect(badge.isHidden && item.activeMode == .quickLook)
+        #expect(badge.isHidden && item.activeMode == .text)
         #expect(quickLook.shown.last == liveTxt.url)
 
         try editFirst(liveSession)
         #expect(!badge.isHidden)
         liveSession.close()
-        #expect(badge.isHidden && item.activeMode == .quickLook)
+        #expect(badge.isHidden && item.activeMode == .text)
     }
 
     @Test func browserEditValidationAndOnEditInvocation() throws {
@@ -373,7 +373,7 @@ import WorkspaceKit
             view(withID: "quickViewModeControl", in: rootView))
 
         item.show(file, scope: nil)
-        #expect(item.activeMode == .quickLook && item.isDataless)
+        #expect(item.activeMode == .preview && item.isDataless)
         #expect(quickLook.shown.isEmpty)
         let labels = rootView.subviews.flatMap { allTextFields(in: $0) }.map(\.stringValue)
         #expect(labels.contains("In iCloud — not downloaded"))

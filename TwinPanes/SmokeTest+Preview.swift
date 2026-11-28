@@ -163,10 +163,10 @@ extension SmokeTest {
         let qv = controller.layout.selectedItem(in: .rightPanel) as? QuickViewItem
         check(
             qv?.currentURL?.lastPathComponent == "hello.txt"
-                && qv?.activeMode == .quickLook
+                && qv?.activeMode == .text
                 && controller.layout.activePanel == .leftPanel
                 && window.firstResponder === table,
-            "F3 opens Quick View in Quick Look mode in opposite panel without stealing focus")
+            "F3 opens Quick View in Text mode in opposite panel without stealing focus")
 
         select(name: "raw.bin", in: browser, table: table)
         await waitFor { qv?.currentURL?.lastPathComponent == "raw.bin" && qv?.activeMode == .hex }

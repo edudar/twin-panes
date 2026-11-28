@@ -31,7 +31,7 @@ public final class QuickViewItem: WorkspaceItem {
     public private(set) var isPinned: Bool
     public private(set) var isFollowing: Bool
     public private(set) var currentURL: URL?
-    public private(set) var activeMode: PreviewMode = .quickLook
+    public private(set) var activeMode: PreviewMode = .preview
     public private(set) var isDataless = false
 
     private(set) var currentEntry: DirectoryEntry?
@@ -199,7 +199,7 @@ public final class QuickViewItem: WorkspaceItem {
             detachSession()
             currentScope = nil
             isDataless = false
-            activeMode = .quickLook
+            activeMode = .preview
             finishTargetUpdate(oldTitle: oldTitle)
             return
         }
@@ -222,13 +222,15 @@ public final class QuickViewItem: WorkspaceItem {
             activeMode = override
             return
         }
-        activeMode = PreviewClassifier.defaultMode(
-            for: entry.type,
-            isDirectory: false,
-            isPackage: false,
-            isDataless: isDataless,
-            hasDirtySession: observedSession?.isDirty ?? false
-        )
+        activeMode =
+            PreviewClassifier.classify(
+                type: entry.type,
+                fileExtension: url.pathExtension,
+                isDirectory: false,
+                isPackage: false,
+                isDataless: isDataless,
+                hasDirtySession: observedSession?.isDirty ?? false
+            ).defaultMode
     }
 
     private func attachSession(_ session: EditorSession?) {
@@ -291,7 +293,14 @@ public final class QuickViewItem: WorkspaceItem {
         } else if entry.isBrokenSymbolicLink {
             parts.append("Broken symbolic link")
         } else {
-            parts.append(activeMode == .quickLook ? "Quick Look" : "Hex")
+            let modeLabel =
+                switch activeMode {
+                case .pretty: "Pretty"
+                case .text: "Text"
+                case .preview: "Preview"
+                case .hex: "Hex"
+                }
+            parts.append(modeLabel)
             if showsUnsavedEdits { parts.append("Includes unsaved edits") }
         }
         parts.append("Read-only")

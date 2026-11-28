@@ -6,82 +6,131 @@ import UniformTypeIdentifiers
 
 @MainActor
 @Suite struct PreviewClassifierTests {
-    private static func mode(
-        _ type: UTType,
-        isDirectory: Bool = false,
-        isPackage: Bool = false,
-        isDataless: Bool = false,
-        hasDirtySession: Bool = false
-    ) -> PreviewMode {
-        PreviewClassifier.defaultMode(
-            for: type,
-            isDirectory: isDirectory,
-            isPackage: isPackage,
-            isDataless: isDataless,
-            hasDirtySession: hasDirtySession)
+    private static func classify(
+        _ type: UTType, ext: String = "", isDirectory: Bool = false, isPackage: Bool = false,
+        isDataless: Bool = false, hasDirtySession: Bool = false,
+        override: PreviewFormatOverride? = nil
+    ) -> PreviewClassification {
+        PreviewClassifier.classify(
+            type: type, fileExtension: ext, isDirectory: isDirectory, isPackage: isPackage,
+            isDataless: isDataless, hasDirtySession: hasDirtySession, override: override)
     }
 
-    @Test func quickLookRenderableTypes() {
-        let types: [UTType] = [
-            .image, .png, .jpeg,
-            .pdf,
-            .audiovisualContent, .mp3, .mpeg4Movie,
-            .text, .plainText, .rtf, .rtfd,
-            .propertyList, .xmlPropertyList, .binaryPropertyList,
-            .font, .threeDContent, .webArchive, .calendarEvent, .vCard, .emailMessage,
-            .sourceCode, .swiftSource, .xml, .json, .html, .yaml,
+    @Test func structuredFormatsByTypeAndExtension() throws {
+        let byType: [(UTType, StructuredFormat)] = [
+            (.json, .json), (.xml, .xml), (.propertyList, .plist), (.xmlPropertyList, .plist),
+            (.binaryPropertyList, .plist), (.yaml, .yaml), (.commaSeparatedText, .csv),
+            (.tabSeparatedText, .tsv),
         ]
+        for (type, format) in byType {
+            #expect(
+                Self.classify(type)
+                    == PreviewClassification(
+                        availableModes: [.pretty, .text, .hex], defaultMode: .pretty,
+                        structuredFormat: format),
+                "Expected \(format) for \(type.identifier)")
+        }
+
+        let dynamic = try #require(UTType(filenameExtension: "myweirdext99"))
+        let byExt: [(String, StructuredFormat)] = [
+            ("json", .json), ("XML", .xml), (".plist", .plist), ("yaml", .yaml), ("yml", .yaml),
+            ("toml", .toml), ("csv", .csv), ("tsv", .tsv), ("properties", .properties),
+        ]
+        for (ext, format) in byExt {
+            #expect(
+                Self.classify(dynamic, ext: ext)
+                    == PreviewClassification(
+                        availableModes: [.pretty, .text, .hex], defaultMode: .pretty,
+                        structuredFormat: format),
+                "Expected \(format) for .\(ext)")
+        }
+    }
+
+    @Test func quickLookPreviewableTypesBeforePlainText() {
+        let types: [UTType] = [
+            .image, .png, .jpeg, .svg, .pdf, .audiovisualContent, .mp3, .mpeg4Movie,
+            .rtf, .rtfd, .html, .font, .threeDContent, .webArchive, .calendarEvent,
+            .vCard, .emailMessage,
+        ]
+        let expected = PreviewClassification(
+            availableModes: [.preview, .hex], defaultMode: .preview)
         for type in types {
-            #expect(Self.mode(type) == .quickLook, "Expected .quickLook for \(type.identifier)")
+            #expect(Self.classify(type) == expected, "Expected .preview for \(type.identifier)")
         }
     }
 
     @Test func officeIWorkAndOpenDocumentTypes() {
         let identifiers = [
-            "com.apple.iwork.pages.sffpages",
-            "com.apple.iwork.numbers.sffnumbers",
-            "com.apple.iwork.keynote.sffkey",
-            "org.openxmlformats.wordprocessingml.document",
+            "com.apple.iwork.pages.sffpages", "com.apple.iwork.numbers.sffnumbers",
+            "com.apple.iwork.keynote.sffkey", "org.openxmlformats.wordprocessingml.document",
             "org.openxmlformats.spreadsheetml.sheet",
             "org.openxmlformats.presentationml.presentation",
-            "com.microsoft.word.doc",
-            "com.microsoft.excel.xls",
-            "com.microsoft.powerpoint.ppt",
-            "org.oasis-open.opendocument.text",
-            "org.oasis-open.opendocument.spreadsheet",
+            "com.microsoft.word.doc", "com.microsoft.excel.xls", "com.microsoft.powerpoint.ppt",
+            "org.oasis-open.opendocument.text", "org.oasis-open.opendocument.spreadsheet",
             "org.oasis-open.opendocument.presentation",
         ]
+        let expected = PreviewClassification(
+            availableModes: [.preview, .hex], defaultMode: .preview)
         for identifier in identifiers {
             let type = UTType(identifier) ?? UTType(importedAs: identifier)
-            #expect(Self.mode(type) == .quickLook, "Expected .quickLook for \(identifier)")
+            #expect(Self.classify(type) == expected, "Expected .preview for \(identifier)")
         }
     }
 
-    @Test func binaryArchiveExecutableAndDynamicTypesUseHex() throws {
+    @Test func plainTextBinaryAndContainerClassifications() throws {
+        let textExpected = PreviewClassification(availableModes: [.text, .hex], defaultMode: .text)
+        for type in [UTType.text, .plainText, .sourceCode, .swiftSource] {
+            #expect(Self.classify(type) == textExpected)
+        }
+
         let dynamic = try #require(UTType(filenameExtension: "myweirdbin123"))
-        let types: [UTType] = [
-            .data, .executable, .unixExecutable, .archive, .zip, .diskImage, .item, .content,
-            dynamic,
-        ]
-        for type in types {
-            #expect(Self.mode(type) == .hex, "Expected .hex for \(type.identifier)")
+        let hexExpected = PreviewClassification(availableModes: [.hex], defaultMode: .hex)
+        for type in [
+            UTType.data, .executable, .unixExecutable, .archive, .zip, .diskImage,
+            .item, .content, dynamic,
+        ] {
+            #expect(Self.classify(type) == hexExpected)
         }
+
+        let container = PreviewClassification(availableModes: [.preview], defaultMode: .preview)
+        #expect(Self.classify(.data, isDirectory: true) == container)
+        #expect(Self.classify(.data, isDirectory: true, hasDirtySession: true) == container)
+        #expect(Self.classify(.data, isPackage: true, override: .hex) == container)
+        #expect(Self.classify(.image, isDataless: true, hasDirtySession: true) == container)
     }
 
-    @Test func foldersPackagesAndDatalessAlwaysUseQuickLook() {
-        #expect(Self.mode(.data, isDirectory: true) == .quickLook)
-        #expect(Self.mode(.data, isDirectory: true, hasDirtySession: true) == .quickLook)
-        #expect(Self.mode(.data, isPackage: true) == .quickLook)
-        #expect(Self.mode(.data, isPackage: true, hasDirtySession: true) == .quickLook)
-        #expect(Self.mode(.data, isDataless: true) == .quickLook)
-        #expect(Self.mode(.image, isDataless: true, hasDirtySession: true) == .quickLook)
-    }
-
-    @Test func dirtySessionOverridesQuickLookTypesWithHex() {
-        let types: [UTType] = [.image, .pdf, .plainText, .sourceCode, .propertyList]
-        for type in types {
-            #expect(Self.mode(type, hasDirtySession: true) == .hex)
-        }
+    @Test func dirtySessionAndOverrides() {
+        #expect(
+            Self.classify(.json, hasDirtySession: true)
+                == PreviewClassification(
+                    availableModes: [.pretty, .text, .hex], defaultMode: .hex,
+                    structuredFormat: .json))
+        #expect(
+            Self.classify(.image, hasDirtySession: true)
+                == PreviewClassification(availableModes: [.preview, .hex], defaultMode: .hex))
+        #expect(
+            Self.classify(.plainText, hasDirtySession: true)
+                == PreviewClassification(availableModes: [.text, .hex], defaultMode: .hex))
+        #expect(
+            Self.classify(.data, ext: "geojson", override: .structured(.json))
+                == PreviewClassification(
+                    availableModes: [.pretty, .text, .hex], defaultMode: .pretty,
+                    structuredFormat: .json))
+        #expect(
+            Self.classify(.data, ext: "env", override: .plainText)
+                == PreviewClassification(availableModes: [.text, .hex], defaultMode: .text))
+        #expect(
+            Self.classify(.data, ext: "custom", override: .preview)
+                == PreviewClassification(availableModes: [.preview, .hex], defaultMode: .preview))
+        #expect(
+            Self.classify(.json, ext: "json", override: .hex)
+                == PreviewClassification(availableModes: [.hex], defaultMode: .hex))
+        #expect(
+            Self.classify(
+                .data, ext: "geojson", hasDirtySession: true, override: .structured(.json))
+                == PreviewClassification(
+                    availableModes: [.pretty, .text, .hex], defaultMode: .hex,
+                    structuredFormat: .json))
     }
 
     @Test func closedEventFiresOnCloseAndNotOnReloads() async throws {

@@ -37,7 +37,7 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
                 return sub
             }
         }
-        if item?.activeMode == .quickLook,
+        if item?.activeMode != .hex,
             let ql = quickLookHost,
             !ql.isHidden,
             ql.acceptsFirstResponder
@@ -197,7 +197,7 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
         }
 
         switch item.activeMode {
-        case .quickLook:
+        case .pretty, .text, .preview:
             if item.isDataless {
                 clearViewers()
                 showPlaceholder(
@@ -299,7 +299,7 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
     }
 
     @objc private func modeChanged(_ sender: NSSegmentedControl) {
-        item?.selectMode(sender.selectedSegment == 1 ? .hex : .quickLook)
+        item?.selectMode(sender.selectedSegment == 1 ? .hex : .preview)
         if let responder = preferredResponder {
             view.window?.makeFirstResponder(responder)
         }
