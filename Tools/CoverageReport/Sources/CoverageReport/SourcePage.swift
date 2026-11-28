@@ -32,6 +32,10 @@ public struct SourcePage: Sendable {
 
     /// Where the page goes, relative to the site's root: `coverage/<relativePath>.html`.
     public var sitePath: String {
+        Self.sitePath(for: relativePath)
+    }
+
+    static func sitePath(for relativePath: String) -> String {
         "coverage/\(relativePath).html"
     }
 
@@ -71,15 +75,13 @@ public struct SourcePage: Sendable {
 
     private var totalsMarkup: String {
         let summary = LineSummary(lines: coverage)
-        let tier = CoverageTier(covered: summary.covered, total: summary.count)
-        let percent =
-            summary.count == 0 ? 100 : Double(summary.covered) * 100 / Double(summary.count)
         let missed = coverage.count { $0.state == .missed }
         let partly = coverage.count { $0.state == .partlyCovered }
         return """
-            <p class="totals"><span class="percent \(tier.rawValue)">\
-            \(String(format: "%.1f%%", percent))</span> \(summary.covered) of \(summary.count) \
-            lines · \(missed) missed · \(partly) partly covered</p>
+            <p class="totals"><span class="percent \(summary.tier.rawValue)">\
+            \(summary.percentText)</span> \(groupingDigits(summary.covered)) of \
+            \(groupingDigits(summary.count)) lines · \(groupingDigits(missed)) missed · \
+            \(groupingDigits(partly)) partly covered</p>
             """
     }
 
