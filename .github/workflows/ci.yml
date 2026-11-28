@@ -52,12 +52,19 @@ jobs:
         run: swift format lint --strict --recursive TwinPanesKit TwinPanes
 
       - name: Package tests
-        run: swift test --parallel --package-path TwinPanesKit
+        # bash here means -o pipefail, so a failing swift test still fails the step.
+        shell: bash
+        run: |
+          swift test --parallel --package-path TwinPanesKit 2>&1 | tee package-tests.log
+          scripts/check-test-runs.sh package-tests.log
 
       - name: Package tests (Thread Sanitizer)
         # PLAN.md 7: ByteSource and the search run on several threads; one image is enough.
         if: matrix.macos == '27'
-        run: swift test --sanitize=thread --package-path TwinPanesKit
+        shell: bash
+        run: |
+          swift test --sanitize=thread --package-path TwinPanesKit 2>&1 | tee tsan-tests.log
+          scripts/check-test-runs.sh tsan-tests.log
 
       - name: Build app (sandboxed, ad-hoc signed)
         run: |

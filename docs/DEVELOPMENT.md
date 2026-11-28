@@ -32,6 +32,11 @@ Logic tests for every library module run with SwiftPM:
 swift test --parallel --package-path TwinPanesKit
 ```
 
+A test that stops the main run loop ends its target's test process early with status 0,
+and `swift test` still reports success. Each target prints one `Test run with N tests`
+line when it finishes; `scripts/check-test-runs.sh <log>` fails unless every target
+under `TwinPanesKit/Tests/` did, given the output of a `swift test` run.
+
 CI also runs the tests under Thread Sanitizer and builds the package for x86_64,
 which GitHub's CodeQL uses:
 
@@ -90,6 +95,7 @@ Manual checks, such as the sandbox spike, are in
 | `TwinPanes/` | App sources: entry point, menus, command bindings, window restoration, recent files, the smoke test and its child launches, and `AppIcon.icon`, the Icon Composer app icon. |
 | `Config/` | Build settings (`.xcconfig`), `Info.plist` additions and entitlements. |
 | `TwinPanesKit/` | One Swift package with every library module (`Sources/`) and its test target (`Tests/`). |
+| `scripts/` | `check-test-runs.sh`: checks that every test target finished its run in a `swift test` log. |
 | `docs/` | The plan, runbooks and images. `docs/plans/` holds one plan per milestone, written and reviewed before the work starts; `docs/reviews/` holds one fix plan per code review. |
 
 Modules in `TwinPanesKit/Sources/` are sibling folders, and their dependencies
@@ -111,8 +117,10 @@ Architecture, decisions and milestones are in [PLAN.md](PLAN.md).
 
 `.github/workflows/ci.yml` runs on macOS 15, 26 and 27. Each job runs the
 package tests, builds the app, checks the signed entitlements and runs the smoke
-test. Lint and a second package run under Thread Sanitizer run on macOS 27. A
-failed smoke check shows as an annotation on the run page.
+test. Lint and a second package run under Thread Sanitizer run on macOS 27. Both
+package runs fail if a test target ends without its summary line
+(`scripts/check-test-runs.sh`). A failed smoke check shows as an annotation on the
+run page.
 
 ## Commits
 
