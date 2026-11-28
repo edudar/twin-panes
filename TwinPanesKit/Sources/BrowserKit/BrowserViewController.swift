@@ -432,7 +432,7 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             item.host?.showStatus("\(entry.url.path) · Broken symbolic link")
             return true
         }
-        let size = entry.size.map { " · \($0.formatted()) bytes" } ?? ""
+        let size = entry.size.map { " · \(Self.formatStatusBytes($0))" } ?? ""
         item.host?.showStatus("\(entry.url.path)\(size)")
         return true
     }

@@ -742,8 +742,19 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
     }
 
-    /// Shows "3 of 120 selected, 1,234 bytes"; folders' sizes aren't counted (D-a). A
-    /// big selection is added up off the main actor.
+    /// Formats a byte count for the status bar: exact bytes below 1 KB, and a rounded
+    /// decimal size with the exact byte count in parentheses from 1 KB up
+    /// (e.g. "12.6 MB (12,623,229 bytes)").
+    nonisolated static func formatStatusBytes(_ bytes: UInt64) -> String {
+        let exact = "\(bytes.formatted()) bytes"
+        guard bytes >= 1_000 else { return exact }
+        let rounded = ByteCountFormatter.string(
+            fromByteCount: Int64(clamping: bytes), countStyle: .file)
+        return "\(rounded) (\(exact))"
+    }
+
+    /// Shows "3 of 120 selected · 1 KB (1,234 bytes)"; folders' sizes aren't counted
+    /// (D-a). A big selection is added up off the main actor.
     func showSelectionSummary(of item: BrowserItem) {
         selectionSummaryGeneration &+= 1
         let generation = selectionSummaryGeneration
@@ -755,7 +766,7 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
                 $0 + (selection.listing.rows[$1].size ?? 0)
             }
             return "\(path) · \(selection.count.formatted()) of "
-                + "\(total.formatted()) selected, \(bytes.formatted()) bytes"
+                + "\(total.formatted()) selected · \(Self.formatStatusBytes(bytes))"
         }
         guard selection.count > FolderListing.mainActorLimit else {
             return item.host?.showStatus(summary()) ?? ()

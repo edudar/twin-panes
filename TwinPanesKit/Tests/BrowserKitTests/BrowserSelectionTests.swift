@@ -267,8 +267,41 @@ import WorkspaceKit
         await item.listed()
         defer { item.willClose() }
         try select(["a.txt", "b.bin", "sub"], in: item)
-        #expect(status.contains("3 of 4 selected"))
-        #expect(status.contains("310 bytes"))
+        #expect(status.contains("3 of 4 selected · 310 bytes"))
+    }
+
+    @Test func formatStatusBytesUsesRoundedAndExactFromOneKilobyte() {
+        #expect(BrowserViewController.formatStatusBytes(0) == "0 bytes")
+        #expect(BrowserViewController.formatStatusBytes(999) == "999 bytes")
+        let kb = ByteCountFormatter.string(fromByteCount: 1_000, countStyle: .file)
+        #expect(
+            BrowserViewController.formatStatusBytes(1_000)
+                == "\(kb) (\(UInt64(1_000).formatted()) bytes)")
+        let mb = ByteCountFormatter.string(fromByteCount: 12_623_229, countStyle: .file)
+        #expect(
+            BrowserViewController.formatStatusBytes(12_623_229)
+                == "\(mb) (\(UInt64(12_623_229).formatted()) bytes)")
+    }
+
+    @Test func statusLineFormatsLargeSingleAndMultiSelectionSizes() async throws {
+        defer { cleanUp() }
+        let largeSize = 12_500
+        try Data(count: largeSize).write(to: folder.appendingPathComponent("large.bin"))
+        var status = ""
+        let item = BrowserItem(folder: folder, grants: grants) { _, _ in }
+        let host = RecordingHost { status = $0 }
+        item.host = host
+        _ = item.viewController.view
+        await item.listed()
+        defer { item.willClose() }
+
+        let singleExpected = BrowserViewController.formatStatusBytes(UInt64(largeSize))
+        try select(["large.bin"], in: item)
+        #expect(status.hasSuffix("/large.bin · \(singleExpected)"))
+
+        let combinedExpected = BrowserViewController.formatStatusBytes(UInt64(largeSize + 300))
+        try select(["large.bin", "b.bin"], in: item)
+        #expect(status == "\(folder.path) · 2 of 5 selected · \(combinedExpected)")
     }
 
     @Test func liveUpdatePreservesAndUpdatesMultiRowSelectionStatus() async throws {

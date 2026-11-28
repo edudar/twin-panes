@@ -21,7 +21,7 @@ extension SmokeTest {
             browser.selectedEntries.map(\.name) == ["sub", "data.bin"],
             "⇧↓ extends the selection: \(browser.selectedEntries.map(\.name))")
         check(
-            status(of: controller).contains("2 of 2 selected"),
+            status(of: controller).contains("2 of 2 selected · "),
             "the status line counts the selection: \(status(of: controller))")
         table.selectRowIndexes([0], byExtendingSelection: false)
         check(selectAll(in: window), "Edit › Select All (⌘A) reaches the file list")
