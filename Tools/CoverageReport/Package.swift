@@ -9,6 +9,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     targets: [
         .target(name: "CoverageReport"),
+        .executableTarget(name: "coverage-report", dependencies: ["CoverageReport"]),
         .testTarget(
             name: "CoverageReportTests",
             dependencies: ["CoverageReport"],
