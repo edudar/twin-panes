@@ -9,8 +9,9 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
 
     private let titleLabel = NSTextField(labelWithString: "Quick View")
     private let unsavedBadge = NSBox()
-    private let modeControl = NSSegmentedControl(
-        labels: ["Quick Look", "Hex"], trackingMode: .selectOne, target: nil, action: nil)
+    private let modeControl = NSSegmentedControl()
+    private let formatButton = NSPopUpButton(frame: .zero, pullsDown: true)
+    private var shownModes: [PreviewMode] = []
     private let editButton = NSButton(title: "Edit", target: nil, action: nil)
     private let pinButton = NSButton(title: "Keep", target: nil, action: nil)
     private let bodyContainer = NSView()
@@ -20,6 +21,7 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
     private let placeholderSubtitle = NSTextField(labelWithString: "")
 
     private var quickLookHost: QuickLookHostView?
+    private(set) var structuredController: StructuredTextViewController?
     private var hexViewer: (any HexPreviewing)?
 
     var commandScopes: [BindingScope] { [.item(.quickView)] }
@@ -36,6 +38,11 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
             {
                 return sub
             }
+        }
+        if let mode = item?.activeMode, mode == .pretty || mode == .text,
+            let structured = structuredController, !structured.view.isHidden
+        {
+            return structured.textView
         }
         if item?.activeMode != .hex,
             let ql = quickLookHost,
@@ -64,7 +71,7 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
         configurePlaceholder()
 
         let header = NSStackView(views: [
-            titleLabel, unsavedBadge, modeControl, editButton, pinButton,
+            titleLabel, unsavedBadge, formatButton, modeControl, editButton, pinButton,
         ])
         header.orientation = .horizontal
         header.alignment = .centerY
@@ -127,10 +134,17 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
                 equalTo: unsavedBadge.trailingAnchor, constant: -7),
         ])
 
+        modeControl.trackingMode = .selectOne
         modeControl.controlSize = .small
         modeControl.target = self
         modeControl.action = #selector(modeChanged(_:))
         modeControl.setAccessibilityIdentifier("quickViewModeControl")
+
+        formatButton.controlSize = .small
+        formatButton.bezelStyle = .roundRect
+        formatButton.menu?.autoenablesItems = false
+        formatButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        formatButton.setAccessibilityIdentifier("quickViewFormatButton")
 
         editButton.controlSize = .small
         editButton.bezelStyle = .push
@@ -197,7 +211,16 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
         }
 
         switch item.activeMode {
-        case .pretty, .text, .preview:
+        case .pretty, .text:
+            placeholderStack.isHidden = true
+            hideQuickLook()
+            hideHex()
+            let structured = ensureStructuredController()
+            structured.view.isHidden = false
+            structured.show(
+                entry.url, format: item.classification.structuredFormat,
+                pretty: item.activeMode == .pretty, scope: item.currentScope)
+        case .preview:
             if item.isDataless {
                 clearViewers()
                 showPlaceholder(
@@ -206,15 +229,15 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
                 return
             }
             placeholderStack.isHidden = true
-            hexViewer?.viewController.view.isHidden = true
-            hexViewer?.show(nil, scope: nil)
+            hideStructured()
+            hideHex()
             let host = ensureQuickLookHost(for: item)
             host.isHidden = false
             host.show(entry.url, scope: item.currentScope)
         case .hex:
             placeholderStack.isHidden = true
-            quickLookHost?.isHidden = true
-            quickLookHost?.show(nil, scope: nil)
+            hideQuickLook()
+            hideStructured()
             let viewer = ensureHexViewer(for: item)
             viewer.viewController.view.isHidden = false
             viewer.show(entry.url, scope: item.currentScope)
@@ -229,8 +252,87 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
             ?? false
         unsavedBadge.isHidden = !(isRegularFile && item.showsUnsavedEdits)
         modeControl.isEnabled = isRegularFile
-        modeControl.selectedSegment = item.activeMode == .hex ? 1 : 0
+        syncModeControl(item)
+        syncFormatButton(item, isRegularFile: isRegularFile)
         editButton.isEnabled = isRegularFile
+    }
+
+    private static func label(for mode: PreviewMode) -> String {
+        switch mode {
+        case .pretty: "Pretty"
+        case .text: "Text"
+        case .preview: "Preview"
+        case .hex: "Hex"
+        }
+    }
+
+    private func syncModeControl(_ item: QuickViewItem) {
+        let modes = item.classification.availableModes
+        if modes != shownModes {
+            shownModes = modes
+            modeControl.segmentCount = modes.count
+            for (index, mode) in modes.enumerated() {
+                modeControl.setLabel(Self.label(for: mode), forSegment: index)
+                modeControl.setWidth(0, forSegment: index)
+            }
+        }
+        modeControl.selectedSegment = modes.firstIndex(of: item.activeMode) ?? -1
+        modeControl.isHidden = modes.count <= 1
+    }
+
+    private func syncFormatButton(_ item: QuickViewItem, isRegularFile: Bool) {
+        formatButton.isHidden = !isRegularFile
+        guard isRegularFile else { return }
+        let ext = item.currentURL?.pathExtension ?? ""
+        let current = item.effectiveOverride
+        let currentTitle =
+            switch item.activeMode {
+            case .pretty: item.classification.structuredFormat.map(Self.title(for:)) ?? "Format"
+            default: Self.label(for: item.activeMode)
+            }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.addItem(withTitle: currentTitle, action: nil, keyEquivalent: "")
+        addFormatItem("Auto", .transient(nil), isOn: current == nil, to: menu)
+        let choices: [(String, PreviewFormatOverride)] =
+            StructuredFormat.allCases.map { (Self.title(for: $0), .structured($0)) }
+            + [("Plain Text", .plainText), ("Preview", .preview), ("Hex", .hex)]
+        for (title, override) in choices {
+            addFormatItem(title, .transient(override), isOn: current == override, to: menu)
+        }
+        if !ext.isEmpty {
+            menu.addItem(.separator())
+            let remember = addFormatItem("Remember for .\(ext)", .remember(current), to: menu)
+            remember.isEnabled = current != nil
+            addFormatItem("Reset .\(ext) to Auto", .remember(nil), to: menu)
+        }
+        formatButton.menu = menu
+    }
+
+    private static func title(for format: StructuredFormat) -> String {
+        switch format {
+        case .json: "JSON"
+        case .xml: "XML"
+        case .plist: "Plist"
+        case .yaml: "YAML"
+        case .toml: "TOML"
+        case .csv: "CSV"
+        case .tsv: "TSV"
+        case .properties: "Properties"
+        }
+    }
+
+    @discardableResult
+    private func addFormatItem(
+        _ title: String, _ action: FormatMenuAction, isOn: Bool = false, to menu: NSMenu
+    ) -> NSMenuItem {
+        let menuItem = NSMenuItem(
+            title: title, action: #selector(formatChosen(_:)), keyEquivalent: "")
+        menuItem.target = self
+        menuItem.representedObject = action
+        menuItem.state = isOn ? .on : .off
+        menu.addItem(menuItem)
+        return menuItem
     }
 
     func syncPinButton() {
@@ -244,6 +346,11 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
     }
 
     func tearDown() {
+        structuredController?.onLoadFinished = nil
+        structuredController?.show(nil, format: nil, pretty: false, scope: nil)
+        structuredController?.view.removeFromSuperview()
+        structuredController?.removeFromParent()
+        structuredController = nil
         quickLookHost?.close()
         quickLookHost?.removeFromSuperview()
         quickLookHost = nil
@@ -260,6 +367,15 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
         embedBodyView(host)
         quickLookHost = host
         return host
+    }
+
+    private func ensureStructuredController() -> StructuredTextViewController {
+        if let structuredController { return structuredController }
+        let controller = StructuredTextViewController()
+        addChild(controller)
+        embedBodyView(controller.view)
+        structuredController = controller
+        return controller
     }
 
     private func ensureHexViewer(for item: QuickViewItem) -> any HexPreviewing {
@@ -284,8 +400,22 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
     }
 
     private func clearViewers() {
+        hideQuickLook()
+        hideStructured()
+        hideHex()
+    }
+
+    private func hideQuickLook() {
         quickLookHost?.isHidden = true
         quickLookHost?.show(nil, scope: nil)
+    }
+
+    private func hideStructured() {
+        structuredController?.view.isHidden = true
+        structuredController?.show(nil, format: nil, pretty: false, scope: nil)
+    }
+
+    private func hideHex() {
         hexViewer?.viewController.view.isHidden = true
         hexViewer?.show(nil, scope: nil)
     }
@@ -299,9 +429,19 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
     }
 
     @objc private func modeChanged(_ sender: NSSegmentedControl) {
-        item?.selectMode(sender.selectedSegment == 1 ? .hex : .preview)
+        let modes = item?.classification.availableModes ?? []
+        guard modes.indices.contains(sender.selectedSegment) else { return }
+        item?.selectMode(modes[sender.selectedSegment])
         if let responder = preferredResponder {
             view.window?.makeFirstResponder(responder)
+        }
+    }
+
+    @objc private func formatChosen(_ sender: NSMenuItem) {
+        switch sender.representedObject as? FormatMenuAction {
+        case .transient(let override): item?.setTransientOverride(override)
+        case .remember(let override): item?.rememberOverrideForCurrentExtension(override)
+        case nil: break
         }
     }
 
@@ -330,6 +470,11 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
             return true
         }
     }
+}
+
+private enum FormatMenuAction {
+    case transient(PreviewFormatOverride?)
+    case remember(PreviewFormatOverride?)
 }
 
 private final class QuickViewRootView: NSView {

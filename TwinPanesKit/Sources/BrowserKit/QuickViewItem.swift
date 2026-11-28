@@ -32,10 +32,17 @@ public final class QuickViewItem: WorkspaceItem {
     public private(set) var isFollowing: Bool
     public private(set) var currentURL: URL?
     public private(set) var activeMode: PreviewMode = .preview
+    public private(set) var classification = PreviewClassification(
+        availableModes: [.preview], defaultMode: .preview)
     public private(set) var isDataless = false
 
     private(set) var currentEntry: DirectoryEntry?
     private(set) var currentScope: SecurityScope?
+    private(set) var fileFormatOverride: PreviewFormatOverride?
+    var effectiveOverride: PreviewFormatOverride? {
+        fileFormatOverride
+            ?? formatOverrides.override(forExtension: currentURL?.pathExtension ?? "")
+    }
     var showsUnsavedEdits: Bool {
         (observedSession?.isDirty ?? false)
             || (activeMode == .hex && (loadedController?.hexShowsUnsavedEdits ?? false))
@@ -50,6 +57,7 @@ public final class QuickViewItem: WorkspaceItem {
     private var sessionToken: ObservationToken?
     private let debounce: Duration
     private let cloudDownloads: any CloudDownloads
+    private let formatOverrides: PreviewFormatOverrides
     private let pendingTask = Mutex<Task<Void, Never>?>(nil)
     private var retargetGeneration: UInt64 = 0
     private var userOverrideMode: PreviewMode?
@@ -66,11 +74,12 @@ public final class QuickViewItem: WorkspaceItem {
     public convenience init(
         viewerFactory: any HexViewerFactory, sessions: SessionRegistry? = nil,
         isFollowing: Bool = true, debounce: Duration = .milliseconds(40),
+        formatOverrides: PreviewFormatOverrides = PreviewFormatOverrides(),
         onEdit: @escaping (URL, SecurityScope?) -> Void
     ) {
         self.init(
             viewerFactory: viewerFactory, sessions: sessions, isFollowing: isFollowing,
-            debounce: debounce, onEdit: onEdit,
+            debounce: debounce, formatOverrides: formatOverrides, onEdit: onEdit,
             makeQuickLook: { QuickLookHostView(style: .normal) })
     }
 
@@ -78,6 +87,7 @@ public final class QuickViewItem: WorkspaceItem {
         viewerFactory: any HexViewerFactory, sessions: SessionRegistry? = nil,
         isFollowing: Bool = true, debounce: Duration = .milliseconds(40),
         cloudDownloads: any CloudDownloads = RealCloudDownloads(),
+        formatOverrides: PreviewFormatOverrides = PreviewFormatOverrides(),
         onEdit: @escaping (URL, SecurityScope?) -> Void,
         makeQuickLook: @escaping () -> QuickLookHostView
     ) {
@@ -87,6 +97,7 @@ public final class QuickViewItem: WorkspaceItem {
         self.isPinned = !isFollowing
         self.debounce = debounce
         self.cloudDownloads = cloudDownloads
+        self.formatOverrides = formatOverrides
         self.onEdit = onEdit
         self.makeQuickLook = makeQuickLook
         sessions?.observe(self) { [weak self] session in self?.sessionRegistered(session) }
@@ -159,11 +170,41 @@ public final class QuickViewItem: WorkspaceItem {
 
     func selectMode(_ mode: PreviewMode) {
         guard !isClosed, let entry = currentEntry,
-            !entry.isDirectory, !entry.isPackage, !entry.isBrokenSymbolicLink
+            !entry.isDirectory, !entry.isPackage, !entry.isBrokenSymbolicLink,
+            classification.availableModes.contains(mode)
         else { return }
         userOverrideMode = mode
         guard activeMode != mode else { return }
         activeMode = mode
+        loadedController?.syncView()
+        updateStatus()
+    }
+
+    /// Reclassifies the displayed file with `override` until another file is shown.
+    func setTransientOverride(_ override: PreviewFormatOverride?) {
+        fileFormatOverride = override
+        reclassifyCurrentFile()
+    }
+
+    /// Stores (or, for `nil`, removes) the persisted override for the displayed file's
+    /// extension and drops the transient override.
+    func rememberOverrideForCurrentExtension(_ override: PreviewFormatOverride?) {
+        guard let ext = currentURL?.pathExtension, !ext.isEmpty else { return }
+        if let override {
+            formatOverrides.set(override, forExtension: ext)
+        } else {
+            formatOverrides.remove(forExtension: ext)
+        }
+        fileFormatOverride = nil
+        reclassifyCurrentFile()
+    }
+
+    private func reclassifyCurrentFile() {
+        guard !isClosed, let entry = currentEntry, let url = currentURL,
+            !entry.isDirectory, !entry.isPackage, !entry.isBrokenSymbolicLink
+        else { return }
+        userOverrideMode = nil
+        refreshModeFromClassifier(for: entry, url: url)
         loadedController?.syncView()
         updateStatus()
     }
@@ -190,7 +231,10 @@ public final class QuickViewItem: WorkspaceItem {
     private func applyTarget(_ entry: DirectoryEntry?, scope: SecurityScope?) {
         let oldTitle = title
         let url = entry?.url.standardizedFileURL
-        if url != currentURL { userOverrideMode = nil }
+        if url != currentURL {
+            userOverrideMode = nil
+            fileFormatOverride = nil
+        }
         currentEntry = entry
         currentURL = url
 
@@ -200,6 +244,8 @@ public final class QuickViewItem: WorkspaceItem {
             currentScope = nil
             isDataless = false
             activeMode = .preview
+            classification = PreviewClassification(
+                availableModes: [.preview], defaultMode: .preview)
             finishTargetUpdate(oldTitle: oldTitle)
             return
         }
@@ -218,19 +264,19 @@ public final class QuickViewItem: WorkspaceItem {
 
     private func refreshModeFromClassifier(for entry: DirectoryEntry, url: URL) {
         isDataless = cloudDownloads.isDataless(url)
-        if let override = userOverrideMode {
+        classification = PreviewClassifier.classify(
+            type: entry.type,
+            fileExtension: url.pathExtension,
+            isDirectory: false,
+            isPackage: false,
+            isDataless: isDataless,
+            hasDirtySession: observedSession?.isDirty ?? false,
+            override: effectiveOverride)
+        if let override = userOverrideMode, classification.availableModes.contains(override) {
             activeMode = override
-            return
+        } else {
+            activeMode = classification.defaultMode
         }
-        activeMode =
-            PreviewClassifier.classify(
-                type: entry.type,
-                fileExtension: url.pathExtension,
-                isDirectory: false,
-                isPackage: false,
-                isDataless: isDataless,
-                hasDirtySession: observedSession?.isDirty ?? false
-            ).defaultMode
     }
 
     private func attachSession(_ session: EditorSession?) {
