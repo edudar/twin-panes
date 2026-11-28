@@ -17,6 +17,21 @@ import Testing
         #expect(layout.rowCount == 63)
     }
 
+    /// The position after the last byte starts a row of its own when the file fills its
+    /// last row, and its offset can need one more digit.
+    @Test func theEndPositionCanNeedARowOfItsOwn() {
+        func rows(_ length: UInt64, _ end: Bool) -> UInt64 {
+            HexLayout(options: HexViewOptions(), length: length, includesEndPosition: end)
+                .rowCount
+        }
+        #expect(rows(32, false) == 2 && rows(32, true) == 3)
+        #expect(rows(31, false) == 2 && rows(31, true) == 2)
+        #expect(rows(0, false) == 1 && rows(0, true) == 1)
+        let full = HexLayout(options: HexViewOptions(), length: 1 << 32)
+        let end = HexLayout(options: HexViewOptions(), length: 1 << 32, includesEndPosition: true)
+        #expect(full.offsetCells == 8 && end.offsetCells == 9)
+    }
+
     @Test func groupingRemovesInnerSpaces() {
         let g2 = HexLayout(options: HexViewOptions(grouping: 2), length: 64)
         #expect(g2.hexCell(1) - g2.hexCell(0) == 2)

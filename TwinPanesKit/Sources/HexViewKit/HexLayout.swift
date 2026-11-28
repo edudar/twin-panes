@@ -17,12 +17,23 @@ public struct HexLayout: Equatable, Sendable {
     public let hexStart: Int
     public let textStart: Int
 
+    /// The cursor can sit after the last byte (insert mode), which may need a row of its
+    /// own.
+    public let includesEndPosition: Bool
+
     /// - Parameter availableCells: the view's width in cells, used by `.autoFit`.
-    public init(options: HexViewOptions, length: UInt64, availableCells: Int = 80) {
+    /// - Parameter includesEndPosition: rows and offsets also cover the position at
+    ///   `length`, after the last byte.
+    public init(
+        options: HexViewOptions, length: UInt64, availableCells: Int = 80,
+        includesEndPosition: Bool = false
+    ) {
         self.options = options
         self.length = length
-        let hexDigits = Self.digits(of: max(length, 1) - 1, radix: 16, minimum: 8)
-        let decimalDigits = Self.digits(of: max(length, 1) - 1, radix: 10, minimum: 10)
+        self.includesEndPosition = includesEndPosition
+        let lastOffset = max(Self.positions(length, includesEndPosition), 1) - 1
+        let hexDigits = Self.digits(of: lastOffset, radix: 16, minimum: 8)
+        let decimalDigits = Self.digits(of: lastOffset, radix: 10, minimum: 10)
         switch options.offsetBase {
         case .hex: offsetCells = hexDigits
         case .decimal: offsetCells = decimalDigits
@@ -47,9 +58,16 @@ public struct HexLayout: Equatable, Sendable {
 
     public var totalCells: Int { textStart + bytesPerRow }
 
-    /// Rows needed for the whole file; an empty file still shows one (empty) row.
+    /// Rows needed for the whole file and the end position; an empty file still shows
+    /// one (empty) row.
     public var rowCount: UInt64 {
-        max(1, (length + UInt64(bytesPerRow) - 1) / UInt64(bytesPerRow))
+        let count = Self.positions(length, includesEndPosition)
+        return max(1, (count + UInt64(bytesPerRow) - 1) / UInt64(bytesPerRow))
+    }
+
+    /// Places the cursor can be: every byte, and the end position if there is one.
+    private static func positions(_ length: UInt64, _ includesEndPosition: Bool) -> UInt64 {
+        includesEndPosition ? length + 1 : length
     }
 
     public func rowStart(_ row: UInt64) -> UInt64 { row * UInt64(bytesPerRow) }

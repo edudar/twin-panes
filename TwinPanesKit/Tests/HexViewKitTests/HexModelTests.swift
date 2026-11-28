@@ -80,6 +80,36 @@ import Testing
         #expect(selection.range.isEmpty)
     }
 
+    @Test func reachesThePositionAfterTheLastByteInInsertMode() {
+        var selection = HexSelection(length: 100, includesEndPosition: true)
+        selection.move(to: .max)
+        #expect(selection.cursor == 100 && selection.range == 100..<100)
+        selection.move(to: 99)
+        selection.move(by: 1)
+        #expect(selection.cursor == 100)
+        selection.move(to: 95, extending: true)
+        #expect(selection.range == 95..<100)  // the end position holds no byte
+        selection.select(100..<100)
+        #expect(selection.range == 100..<100)
+        selection.selectAll()
+        #expect(selection.range == 0..<100)
+    }
+
+    @Test func turningInsertModeOffMovesTheCursorBackOntoTheLastByte() {
+        var selection = HexSelection(length: 100, includesEndPosition: true)
+        selection.move(to: .max)
+        selection.move(to: 100, extending: true)
+        selection.includesEndPosition = false
+        #expect(selection.cursor == 99 && selection.anchor == 99 && selection.range == 99..<100)
+    }
+
+    /// An empty file has one place to type in insert mode, and no byte to select.
+    @Test func anEmptyFileHasOnePositionInInsertMode() {
+        var selection = HexSelection(length: 0, includesEndPosition: true)
+        selection.move(by: 5)
+        #expect(selection.cursor == 0 && selection.range == 0..<0)
+    }
+
     @Test func copyFormats() {
         let bytes = Data([0x4F, 0x2A, 0x00, 0x41])
         #expect(HexCopy.string(bytes, as: .hex) == "4F 2A 00 41")

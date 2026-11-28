@@ -61,6 +61,19 @@ import Testing
         #expect(try inkedPixels(in: text, appearance: appearance) > 10, "text column")
     }
 
+    /// In insert mode an empty file still shows where typing goes: a bar where the first
+    /// byte's hex digits would be. Out of it, an empty file draws no cursor.
+    @Test func insertModeDrawsABarInAnEmptyFile() throws {
+        source.data = Data()
+        view.reloadData()
+        let bar = NSRect(
+            x: view.inset.left + Double(view.layout.hexCell(0)) * view.charWidth - 3,
+            y: view.inset.top + 2, width: 4, height: view.rowHeight - 4)
+        #expect(try inkedPixels(in: bar, appearance: .aqua) == 0)
+        view.isInsertMode = true
+        #expect(try inkedPixels(in: bar, appearance: .aqua) > 10)
+    }
+
     /// An `NSScroller` takes its orientation from the frame it's created with; one made
     /// with a zero frame stays vertical, and the bar under a too-narrow view showed a
     /// small vertical knob instead of a horizontal one.

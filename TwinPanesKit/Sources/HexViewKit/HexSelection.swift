@@ -1,21 +1,34 @@
 import Foundation
 
-/// Cursor and selection over a file of `length` bytes. The cursor is always a valid
-/// byte offset (0 for an empty file); the selection runs from `anchor` to `cursor`,
-/// both inclusive.
+/// Cursor and selection over a file of `length` bytes. The cursor is a byte offset (0
+/// for an empty file), or `length` itself when `includesEndPosition`; the selection runs
+/// from `anchor` to `cursor`, both inclusive, and holds no byte at the end position.
 public struct HexSelection: Equatable, Sendable {
     public let length: UInt64
     public private(set) var anchor: UInt64 = 0
     public private(set) var cursor: UInt64 = 0
+    /// The cursor may also sit after the last byte, at `length` (insert mode,
+    /// docs/plans/M8.md, D-g). Turning it off moves a cursor or anchor there back onto
+    /// the last byte.
+    public var includesEndPosition: Bool {
+        didSet {
+            anchor = min(anchor, lastOffset)
+            cursor = min(cursor, lastOffset)
+        }
+    }
 
-    public init(length: UInt64) { self.length = length }
+    public init(length: UInt64, includesEndPosition: Bool = false) {
+        self.length = length
+        self.includesEndPosition = includesEndPosition
+    }
 
-    private var lastOffset: UInt64 { length > 0 ? length - 1 : 0 }
+    private var lastByte: UInt64 { length > 0 ? length - 1 : 0 }
+    private var lastOffset: UInt64 { includesEndPosition ? length : lastByte }
 
-    /// Selected bytes; empty only for an empty file.
+    /// Selected bytes; empty only for an empty file or both ends at the end position.
     public var range: Range<UInt64> {
-        guard length > 0 else { return 0..<0 }
-        return min(anchor, cursor)..<(max(anchor, cursor) + 1)
+        let first = min(anchor, cursor)
+        return first..<max(first, min(max(anchor, cursor) + 1, length))
     }
 
     /// Moves the cursor to `offset`; `extending` keeps the anchor (shift-click,
@@ -45,7 +58,7 @@ public struct HexSelection: Equatable, Sendable {
 
     public mutating func selectAll() {
         anchor = 0
-        cursor = lastOffset
+        cursor = lastByte
     }
 }
 

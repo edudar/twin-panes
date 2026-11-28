@@ -100,6 +100,18 @@ public final class HexView: NSView {
     public var highlights: [Range<UInt64>] = [] {
         didSet { needsDisplay = true }
     }
+    /// Typing inserts before the cursor, which may also sit after the last byte and is
+    /// drawn as a bar (docs/plans/M8.md, D-g); off, typing overwrites and the cursor is a
+    /// box on a byte.
+    public var isInsertMode = false {
+        didSet {
+            guard isInsertMode != oldValue else { return }
+            selection.includesEndPosition = isInsertMode
+            pendingNibble = nil
+            relayout(keepingRow: true)
+            delegate?.hexViewSelectionDidChange(self)
+        }
+    }
     /// The column the cursor and copy work in; Tab switches it.
     public internal(set) var activeColumn: HexLayout.Column = .hex
 
@@ -151,7 +163,7 @@ public final class HexView: NSView {
 
     /// Call after the data source's content changed.
     public func reloadData() {
-        selection = HexSelection(length: length)
+        selection = HexSelection(length: length, includesEndPosition: isInsertMode)
         horizontalOffset = 0
         finishReload(keepingRow: false)
     }
@@ -159,8 +171,8 @@ public final class HexView: NSView {
     /// Call after the data source's length changed while keeping the scroll position.
     public func contentLengthDidChange() {
         let previous = selection
-        var clamped = HexSelection(length: length)
-        if length > 0 {
+        var clamped = HexSelection(length: length, includesEndPosition: isInsertMode)
+        if length > 0 || isInsertMode {
             clamped.move(to: previous.anchor)
             clamped.move(to: previous.cursor, extending: previous.anchor != previous.cursor)
         }
@@ -213,7 +225,8 @@ public final class HexView: NSView {
         let topOffset = keepingRow ? layout.rowStart(position.topRow) : 0
         layout = HexLayout(
             options: options, length: length,
-            availableCells: max(0, Int(textWidth / max(charWidth, 1))))
+            availableCells: max(0, Int(textWidth / max(charWidth, 1))),
+            includesEndPosition: isInsertMode)
         position = HexScrollPosition(
             rowCount: layout.rowCount, rowHeight: rowHeight, viewHeight: contentHeight)
         if keepingRow { position.scrollToTop(row: layout.row(of: topOffset)) }

@@ -119,6 +119,29 @@ struct ReadFailed: Error {}
         }
     }
 
+    /// Insert mode lets the cursor reach the end, a row of its own here (100,000 bytes
+    /// fill 6,250 rows); turning it off puts the cursor back on the last byte.
+    @Test func insertModeReachesTheEndAndLeavingItComesBack() {
+        view.isInsertMode = true
+        view.moveToEndOfDocument(nil)
+        #expect(view.selection.cursor == 100_000 && view.selection.range == 100_000..<100_000)
+        #expect(view.layout.rowCount == 6_251)
+        view.isInsertMode = false
+        #expect(view.selection.cursor == 99_999 && view.layout.rowCount == 6_250)
+    }
+
+    /// A click past the last byte lands after it in insert mode, on it otherwise.
+    @Test func aClickPastTheLastByteLandsAfterItInInsertMode() {
+        source.data = Data(count: 20)
+        view.reloadData()
+        let point = NSPoint(
+            x: view.inset.left + (Double(view.layout.hexCell(10)) + 0.5) * view.charWidth,
+            y: view.inset.top + 1.5 * view.rowHeight)
+        #expect(view.offset(at: point)?.0 == 19)
+        view.isInsertMode = true
+        #expect(view.offset(at: point)?.0 == 20)
+    }
+
     @Test func asksForTheVisibleRowsOnceWhenUncached() {
         render(times: 3)
         #expect(source.prefetches.count == 1)

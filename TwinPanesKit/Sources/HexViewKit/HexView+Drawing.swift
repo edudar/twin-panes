@@ -70,7 +70,7 @@ extension HexView {
     private func drawSelection(
         row: UInt64, y: Double, focused: Bool, modified: [Range<UInt64>]
     ) {
-        guard layout.length > 0 else { return }
+        guard layout.length > 0 || isInsertMode else { return }
         let rowRange = layout.rowStart(row)..<(layout.rowStart(row) + UInt64(layout.bytesPerRow))
         // Changed bytes, under the find highlights and the selection.
         NSColor.controlAccentColor.withAlphaComponent(0.2).setFill()
@@ -90,12 +90,16 @@ extension HexView {
             ? NSColor.selectedTextBackgroundColor
             : NSColor.unemphasizedSelectedTextBackgroundColor
         fill.setFill()
-        self.fill(selection.range.clamped(to: rowRange), in: rowRange, y: y)
-        // Cursor: an outline in the active column, a lighter one in the other.
+        // In insert mode one byte under the cursor is where typing goes, not a selection.
+        if !isInsertMode || selection.range.count > 1 {
+            self.fill(selection.range.clamped(to: rowRange), in: rowRange, y: y)
+        }
         guard rowRange.contains(selection.cursor) else { return }
         let index = Int(selection.cursor - rowRange.lowerBound)
         // Half-way through typing a byte, the box shrinks to the low digit still to come.
         let halfTyped = pendingNibble == selection.cursor
+        if isInsertMode, !halfTyped { return drawInsertionBars(at: index, y: y) }
+        // Cursor: an outline in the active column, a lighter one in the other.
         let hexBox = NSRect(
             x: x(cell: layout.hexCell(index) + (halfTyped ? 1 : 0)) - (halfTyped ? 1 : 2), y: y,
             width: (halfTyped ? 1 : 2) * charWidth + (halfTyped ? 2 : 4), height: rowHeight)
@@ -106,6 +110,17 @@ extension HexView {
             let path = NSBezierPath(rect: box.insetBy(dx: 0.5, dy: 0.5))
             path.lineWidth = active ? 1.5 : 1
             path.stroke()
+        }
+    }
+
+    /// The insert-mode cursor: a bar before byte `index` of the row, bold in the active
+    /// column and light in the other.
+    private func drawInsertionBars(at index: Int, y: Double) {
+        let hexX = x(cell: layout.hexCell(index)) - 2
+        let textX = x(cell: layout.textCell(index)) - 1
+        for (barX, active) in [(hexX, activeColumn == .hex), (textX, activeColumn == .text)] {
+            (active ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor).setFill()
+            NSRect(x: barX, y: y, width: active ? 2 : 1, height: rowHeight).fill()
         }
     }
 
