@@ -215,6 +215,9 @@ import WorkspaceKit
             _ = await op2.finished()
             #expect(shortLived.isAutoHideScheduled)
         }
+        // When other tests run alongside, AppKit holds the controller until the current
+        // main-queue turn ends; a leak would outlive the next turn.
+        await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
         #expect(weakController == nil)
         #expect(deinitHides == 0)
     }
