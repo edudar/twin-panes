@@ -59,6 +59,8 @@ extension SmokeTest {
             controller: controller, window: window)
         await quickViewChecks(
             check, browser: leftBrowser, table: leftTable, controller: controller, window: window)
+        await structuredQuickViewChecks(
+            check, browser: leftBrowser, table: leftTable, controller: controller, window: window)
         await activePanelAndDirtySyncChecks(
             check, leftBrowser: leftBrowser, leftTable: leftTable, rightBrowser: rightBrowser,
             rightTable: rightTable, controller: controller, window: window)
@@ -282,6 +284,222 @@ extension SmokeTest {
         }
         controller.layout.select(browser.id)
         window.makeFirstResponder(table)
+    }
+
+    /// M7b checks (docs/plans/M7b.md, D-e): structured Pretty | Text | Hex Quick View on real
+    /// files, bounded truncation, and format overrides with an isolated `UserDefaults` suite.
+    private func structuredQuickViewChecks(
+        _ check: (Bool, String) -> Void, browser: BrowserItem, table: NSTableView,
+        controller: MainWindowController, window: NSWindow
+    ) async {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("smoke-structured-\(UUID().uuidString)", isDirectory: true)
+            .standardizedFileURL
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let minifiedJSON = #"{"name":"twin","list":[1,2,{"ok":true}],"n":12345678901234567890}"#
+        guard makeStructuredFixtures(in: folder, minifiedJSON: minifiedJSON) else {
+            return check(false, "create structured Quick View fixtures")
+        }
+        let savedFolder = browser.folder
+        defer { browser.go(to: savedFolder) }
+        browser.go(to: folder)
+        await browser.listed()
+        controller.layout.select(browser.id)
+        window.makeFirstResponder(table)
+        select(name: "min.json", in: browser, table: table)
+        _ = dispatch(.function(3), in: window)
+        guard let qv = controller.layout.selectedItem(in: .rightPanel) as? QuickViewItem else {
+            return check(false, "F3 opens Quick View for structured checks")
+        }
+        defer {
+            qv.willClose()
+            controller.layout.remove(qv.id)
+            controller.layout.select(browser.id)
+            window.makeFirstResponder(table)
+        }
+
+        func textView(of item: QuickViewItem) -> NSTextView? {
+            Self.view(in: item.viewController.view, id: "structuredPreviewTextView") as? NSTextView
+        }
+        func notice(of item: QuickViewItem) -> String? {
+            let label =
+                Self.view(in: item.viewController.view, id: "structuredPreviewNotice")
+                as? NSTextField
+            return label?.isHidden == false && label?.superview?.isHidden == false
+                ? label?.stringValue : nil
+        }
+        func segments(of item: QuickViewItem) -> [String] {
+            guard
+                let control = Self.view(in: item.viewController.view, id: "quickViewModeControl")
+                    as? NSSegmentedControl
+            else { return [] }
+            return (0..<control.segmentCount).map { control.label(forSegment: $0) ?? "" }
+        }
+        func isModeControlHidden(_ item: QuickViewItem) -> Bool? {
+            Self.view(in: item.viewController.view, id: "quickViewModeControl")?.isHidden
+        }
+        func hasColoredText(_ view: NSTextView?) -> Bool {
+            guard let storage = view?.textStorage, storage.length > 0 else { return false }
+            var colored = false
+            storage.enumerateAttribute(
+                .foregroundColor, in: NSRange(location: 0, length: storage.length)
+            ) { value, _, stop in
+                if let color = value as? NSColor, color != NSColor.labelColor {
+                    colored = true
+                    stop.pointee = true
+                }
+            }
+            return colored
+        }
+        func open(_ name: String, until ready: @escaping (NSTextView) -> Bool) async -> Bool {
+            select(name: name, in: browser, table: table)
+            await waitFor {
+                qv.currentURL?.lastPathComponent == name
+                    && (textView(of: qv).map(ready) ?? false)
+            }
+            return qv.currentURL?.lastPathComponent == name
+                && (textView(of: qv).map(ready) ?? false)
+        }
+        func choose(_ mode: Int, of item: QuickViewItem) {
+            guard
+                let control = Self.view(in: item.viewController.view, id: "quickViewModeControl")
+                    as? NSSegmentedControl
+            else { return }
+            control.selectedSegment = mode
+            _ = control.sendAction(control.action, to: control.target)
+        }
+        let lineCount: (NSTextView) -> Int = { $0.string.split(separator: "\n").count }
+
+        let jsonReady = await open("min.json") { lineCount($0) >= 5 }
+        check(
+            jsonReady && qv.activeMode == .pretty && segments(of: qv) == ["Pretty", "Text", "Hex"]
+                && textView(of: qv)?.string.contains("  \"name\": \"twin\"") == true
+                && textView(of: qv)?.string.contains("12345678901234567890") == true
+                && hasColoredText(textView(of: qv)),
+            "minified .json opens Pretty with Pretty | Text | Hex, indented, colored, exact numbers"
+        )
+        choose(1, of: qv)
+        let rawShown = await open("min.json") { $0.string == minifiedJSON }
+        check(
+            rawShown && qv.activeMode == .text && !hasColoredText(textView(of: qv)),
+            "Text segment shows the raw minified .json uncolored")
+        choose(0, of: qv)
+
+        let badReady = await open("bad.json") { $0.string == "{\"a\":1," }
+        check(
+            badReady && notice(of: qv)?.contains("Invalid JSON") == true,
+            "malformed .json shows raw text with an Invalid JSON notice")
+
+        let xmlReady = await open("min.xml") { lineCount($0) >= 3 }
+        check(
+            xmlReady && qv.activeMode == .pretty
+                && textView(of: qv)?.string.contains("<item id=\"1\">") == true
+                && hasColoredText(textView(of: qv)),
+            "minified .xml pretty-prints with colored tokens")
+        let plistReady = await open("bin.plist") { $0.string.contains("<key>name</key>") }
+        check(
+            plistReady && lineCount(textView(of: qv)!) >= 4 && hasColoredText(textView(of: qv)),
+            "binary .plist shows pretty-printed colored XML")
+        let csvReady = await open("data.csv") { $0.string.contains("│") }
+        check(csvReady, "pretty .csv shows aligned columns")
+        let yamlReady = await open("conf.yaml") { $0.string.contains("name") && hasColoredText($0) }
+        check(yamlReady, "pretty .yaml shows colored tokens")
+
+        select(name: "blob.bin", in: browser, table: table)
+        await waitFor { qv.currentURL?.lastPathComponent == "blob.bin" && qv.activeMode == .hex }
+        check(
+            qv.activeMode == .hex && isModeControlHidden(qv) == true,
+            "unknown .bin opens Hex with the mode control hidden")
+
+        let bigReady = await open("big.json") { _ in notice(of: qv) != nil }
+        let shownBytes = textView(of: qv)?.string.utf8.count ?? .max
+        check(
+            bigReady && notice(of: qv)?.contains("Showing first") == true
+                && shownBytes <= 140 * 1024,
+            "2.1 MiB .json shows a truncation notice with bounded text (\(shownBytes) bytes)")
+
+        await structuredOverrideChecks(check, folder: folder, browser: browser)
+        check(
+            app.sessions.sessions.isEmpty, "structured Quick View checks create zero EditorSessions"
+        )
+    }
+
+    /// Persistent overrides go to a temp-folder `UserDefaults` suite so nothing reaches
+    /// `~/Library/Preferences`.
+    private func structuredOverrideChecks(
+        _ check: (Bool, String) -> Void, folder: URL, browser: BrowserItem
+    ) async {
+        let suitePath = folder.appendingPathComponent("overrides").path
+        guard let defaults = UserDefaults(suiteName: suitePath),
+            let entry = browser.entries.first(where: { $0.name == "x.myconf" })
+        else { return check(false, "override checks have an isolated suite and x.myconf") }
+        defer { defaults.removePersistentDomain(forName: suitePath) }
+        let overrides = PreviewFormatOverrides(defaults: defaults)
+        let item = QuickViewItem(
+            viewerFactory: app.viewerFactory, sessions: app.sessions, isFollowing: false,
+            debounce: .zero, formatOverrides: overrides
+        ) { _, _ in }
+        defer { item.willClose() }
+        let root = item.viewController.view
+        func choose(_ title: String) {
+            guard
+                let menu = (Self.view(in: root, id: "quickViewFormatButton") as? NSPopUpButton)?
+                    .menu
+            else { return }
+            let index = menu.indexOfItem(withTitle: title)
+            if index >= 0 { menu.performActionForItem(at: index) }
+        }
+        func shownText() -> String {
+            (Self.view(in: root, id: "structuredPreviewTextView") as? NSTextView)?.string ?? ""
+        }
+
+        item.show(entry, scope: nil)
+        check(item.activeMode == .hex, "unknown .myconf starts in Hex")
+        choose("Properties")
+        await waitFor { shownText().contains("key") }
+        check(
+            item.activeMode == .pretty && shownText().contains("key")
+                && overrides.override(forExtension: "myconf") == nil,
+            "transient Properties override reclassifies .myconf without persisting")
+        choose("Remember for .myconf")
+        check(
+            overrides.override(forExtension: "myconf") == .structured(.properties),
+            "Remember for .ext persists the override in the isolated suite")
+        item.show(nil, scope: nil)
+        item.show(entry, scope: nil)
+        check(
+            item.activeMode == .pretty, "remembered override applies when the file is shown again")
+        choose("Reset .myconf to Auto")
+        check(
+            item.activeMode == .hex && overrides.override(forExtension: "myconf") == nil,
+            "Reset .ext to Auto removes the override")
+    }
+
+    private func makeStructuredFixtures(in folder: URL, minifiedJSON: String) -> Bool {
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            func write(_ text: String, _ name: String) throws {
+                try Data(text.utf8).write(to: folder.appendingPathComponent(name))
+            }
+            try write(minifiedJSON, "min.json")
+            try write("{\"a\":1,", "bad.json")
+            try write(
+                #"<root><item id="1">x</item><item id="2">y</item></root>"#, "min.xml")
+            try write("name,age\nalice,30\nbob,4\n", "data.csv")
+            try write("name: demo\nitems:\n  - 1\n  - true\n# note\n", "conf.yaml")
+            try write("key=value\n# note\n", "x.myconf")
+            let plist = try PropertyListSerialization.data(
+                fromPropertyList: ["name": "x", "count": 1], format: .binary, options: 0)
+            try plist.write(to: folder.appendingPathComponent("bin.plist"))
+            try Data([0x00, 0xFF, 0x10, 0x80, 0x00]).write(
+                to: folder.appendingPathComponent("blob.bin"))
+            let record = "\"" + String(repeating: "x", count: 62) + "\",\n"
+            let big = "[\n" + String(repeating: record, count: 34_000) + "\"end\"\n]\n"
+            try write(big, "big.json")
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func activePanelAndDirtySyncChecks(

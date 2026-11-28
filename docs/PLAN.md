@@ -1,6 +1,6 @@
 # Twin Panes — Plan
 
-Status: draft v0.28 (2026-11-27). Living document; requirements will keep growing.
+Status: draft v0.29 (2026-11-28). Living document; requirements will keep growing.
 Open and deferred questions are collected in §9.
 
 ## 1. Goal
@@ -74,6 +74,7 @@ viewer/editor that opens, inspects, searches and edits files up to 4 GB. Offsets
 | D58 | **O(1) `FileMetadata` and `PreviewClassifier`** (M7) | `FileMetadata` reads POSIX stat/permissions/owner/group, symlink target, BSD flags and xattr names/sizes (capped at 64) in O(1) without reading file bytes. `PreviewClassifier` chooses Quick Look vs. hex vs. placeholder; a dirty open session always selects `.hex`. See docs/plans/M7.md, D-c. |
 | D59 | **Collapsible trailing preview pane** (M7) | Hosted in `MainFrameViewController` as a regular trailing `NSSplitViewItem` (never `inspectorWithViewController:`, avoiding `toggleInspector:` collisions with the hex Data Inspector). Toggled on `⇧⌘P` or the trailing toolbar button; `WindowState` persists `previewShown` and `previewWidth`; default window size is `1120x700`. Collapsed panes suspend loading and clear Quick Look resources. See docs/plans/M7.md, D-d. |
 | D60 | **QuickView (`F3` / `⇧F3`) and opposite-panel `F4`** (M7) | `F3` (`⌘Y` / `⌃⌘V`) opens or retargets a non-restorable `QuickViewItem` in the opposite panel without stealing focus (surfacing it if buried, toggling closed when frontmost); `⇧F3` (`⇧⌃⌘V`) opens a standalone `Keep`-detached QuickView in the active panel. Browser file opens (`F4` / `⌃⌘E`, `Return`, double-click) open `HexEditorItem` in the opposite panel by default (disabled on folders, packages, `".."` and broken symlinks); `F4` from QuickView opens or focuses the editor in QuickView's panel, and opening an already-open file exits zoom and focuses its tab. See docs/plans/M7.md, D-e, D-f. |
+| D61 | **Structured QuickView** (M7b) | `PreviewClassification` replaces the two-way mode with `PreviewMode` `.pretty` / `.text` / `.preview` / `.hex`: JSON, XML, plist, YAML, TOML, CSV/TSV and `.properties` open `Pretty \| Text \| Hex`, plain text `Text \| Hex`, Quick Look types `Preview \| Hex`, unknown files Hex only (control hidden). `PreviewFormatOverrides` (injected `UserDefaults`) and a header format menu reclassify a file transiently or remember an override per extension. Formatters and tokenizers are pure Swift in `TwinPanesCore` (no new dependencies; XML never loads external entities); `StructuredTextViewController` colors them with semantic `NSColor`s. Files up to 2 MiB are formatted in full off the main actor, larger ones show only the first 128 KiB with a truncation notice; no `EditorSession` is created. See docs/plans/M7b.md. |
 
 ## 3. Constraints that drive the design
 
@@ -160,6 +161,11 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `CloudDownloads` | M6 | whether a file's bytes are only in iCloud, and asking for them (D55) |
 | `FileMetadata` | M7 | O(1) POSIX stat, permissions, BSD flags, symlink target and capped xattrs without reading bytes (D58) |
 | `PreviewClassifier` | M7 | picks Quick Look vs. hex vs. placeholder; dirty sessions always select hex (D58) |
+| `PreviewFormatOverrides` | M7b | per-extension Quick View format overrides in an injected `UserDefaults` (D61) |
+| `StructuredDocument`, `StructuredPreviewLoader` | M7b | colored-text result and the bounded reader (2 MiB full, 128 KiB prefix with truncation notice) (D61) |
+| `JSONFormatter`, `XMLFormatter` | M7b | order- and number-preserving JSON pretty-printer; XXE-safe XML and binary-plist pretty-printer, both with tokenizers and raw fallback (D61) |
+| `YAMLTokenizer`, `TOMLTokenizer`, `PropertiesTokenizer` | M7b | line lexers that color without reformatting (D61) |
+| `DelimitedFormatter` | M7b | RFC 4180 CSV/TSV parser and width-capped column aligner (D61) |
 
 **BrowserKit components** (M1b, M4–M7)
 
@@ -176,6 +182,7 @@ opening an editor from the browser) goes through a protocol or factory defined i
 | `TextSheet`, `DeleteConfirmation`, `ConflictSheet` | M6 | the sheets that confirm file operations and settle conflicts (D52) |
 | `PreviewPaneViewController`, `PreviewMetadataView`, `QuickLookHostView` | M7 | collapsible right preview pane: frame-sized Quick Look host with resize refresh above O(1) metadata (D59) |
 | `QuickViewItem` | M7 | F3/`⇧F3` read-only QuickView tab (`QuickViewViewController`) with Quick Look \| Hex toggle, `Keep`, dirty banner and F4 promotion (D57, D60) |
+| `StructuredTextViewController` | M7b | read-only syntax-colored text view with notice bar and generation-cancelled background loading, behind Quick View's Pretty and Text modes (D61) |
 
 - **Project layout (D20):**
 
@@ -735,6 +742,16 @@ Window layout — one `NSSplitViewController` with three collapsible regions:
   markers, and a 1,000-file cursor sweep with both preview pane and QuickView open
   (busiest gap 18–28 ms CPU on the dev Mac, zero `EditorSession`s created, no `/dev/fd`
   leak).
+- **As built (M7b, docs/plans/M7b.md):** D61. `PreviewClassifier` now returns a
+  `PreviewClassification` (available modes, default mode, structured format) from the
+  `UTType`, extension, flags and any override, with rich Quick Look types checked before
+  generic text. `StructuredTextViewController` loads off the main actor by generation and
+  re-colors on appearance change without re-parsing; `QuickViewViewController` rebuilds
+  its segments per classification and adds the format menu. The smoke test opens real
+  minified and malformed JSON, minified XML, a binary plist, CSV, YAML, an unknown binary
+  and a 2.1 MiB JSON file in a following Quick View, checks Pretty / Text / Hex behaviour,
+  truncation and overrides (with a temp-folder `UserDefaults` suite), and asserts zero
+  `EditorSession`s.
 
 ### 4.8 Single main frame: workspace model (D7)
 
@@ -1396,3 +1413,9 @@ byte histogram.
   - *iCloud-evicted files in QuickView and the preview pane*: dataless-file placeholders
     and manual Download triggers are unit-tested through `CloudDownloads`, while a real
     evicted iCloud file is checked by hand (CI has no iCloud).
+- **From M7b (2026-11-28):**
+  - *Source code syntax highlighting in Quick View* (Swift, Python, Rust, JS, ...):
+    revisit with M9a (`TextEditKit`).
+  - *Collapsible tree / outline view* for JSON and XML in Quick View.
+  - *Structured formatting in the compact right preview pane*
+    (`PreviewPaneViewController`).
