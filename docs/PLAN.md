@@ -1259,8 +1259,16 @@ byte histogram.
   - ~~*`UndoStack`, multi-view observation, and `EditBuffer` actor isolation*~~: done in
     M3b. The undo stack lives on `EditorSession`, which notifies observers and is
     main-actor isolated with its `EditBuffer`.
-  - *Chunked `readSequential` for fragmented piece trees*: coalesce dense `.original`
-    spans into chunked reads instead of one `F_NOCACHE` `pread` per piece in M8.
+  - ~~*Chunked `readSequential` for fragmented piece trees*~~: measured in M8 (step 6)
+    and not needed. Reading a 256 MiB file from the page cache in the save's 1 MiB
+    chunks: 9 GB/s with one piece, about 7 GB/s with an edit every 64 KiB (8k pieces),
+    1.4–2.2 GB/s (Debug–Release) every 4 KiB (131k pieces), and 0.1–0.4 GB/s every
+    512 bytes (1M pieces). Walking the tree is 2–10% of that; the rest is one `pread` and
+    `Data` append per piece, and merging the `.original` reads would at most halve the
+    reads, since the add pieces between them stay. Typing merges into few pieces (D26)
+    and big replaces stream rather than splitting (§4.2), so real trees read at disk
+    speed or faster. Revisit if M9a's replace-all threshold leaves trees past ~100k
+    pieces.
 - **From M3b (2026-11-22):**
   - *Two tabs on one session*: the registry brings an open file's tab forward, so the
     app never shows a session twice yet. When it does (M7 quick view, M11), find,
