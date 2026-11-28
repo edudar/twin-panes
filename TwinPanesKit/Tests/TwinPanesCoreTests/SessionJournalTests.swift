@@ -142,6 +142,43 @@ import Testing
         }
     }
 
+    /// Random inserts, deletes, overwrites, undos, redos, reverts and saves through the
+    /// session; after each step the journal replays to the live and saved versions, and
+    /// after each save the file holds the live bytes.
+    @Test func replayAndSavesMatchARandomSessionOfInsertsAndDeletes() async throws {
+        defer { cleanUp() }
+        let seed: UInt64 = 0x10E7_5EED_0000_0009
+        var rng = SplitMix64(seed: seed)
+        let session = try EditorSession(
+            url: url, sessionsRoot: folder.appendingPathComponent("Sessions"))
+        for step in 0..<150 {
+            let context: Comment = "seed \(seed), step \(step)"
+            let length = session.length
+            switch Int.random(in: 0..<10, using: &rng) {
+            case 0..<5:
+                let offset = UInt64.random(in: 0...length, using: &rng)
+                let removed = UInt64.random(in: 0...min(5, length - offset), using: &rng)
+                let count = Int.random(in: 0...5, using: &rng)
+                let bytes = Data((0..<count).map { _ in UInt8.random(in: 0...255, using: &rng) })
+                let range = offset..<(offset + removed)
+                try session.replace(
+                    range, with: bytes, selectionBefore: range,
+                    selectionAfter: offset..<(offset + 1), coalescing: Bool.random(using: &rng))
+            case 5, 6: _ = session.undo()
+            case 7: _ = session.redo()
+            case 8 where step % 3 == 0: session.revert()
+            default:
+                try await session.save()
+                #expect(
+                    try Data(contentsOf: url) == session.snapshot.read(0..<session.length), context)
+            }
+            guard session.folder != nil else { continue }  // nothing typed yet
+            let (tree, saved) = try replayed(session)
+            #expect(try bytes(session, tree) == session.snapshot.read(0..<session.length), context)
+            #expect(try bytes(session, saved) == bytes(session, session.savedTree), context)
+        }
+    }
+
     /// The journal records that the session closed cleanly.
     @Test func closingIsRecorded() throws {
         defer { cleanUp() }

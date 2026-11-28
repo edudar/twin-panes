@@ -206,6 +206,27 @@ public final class EditBuffer {
         return offset..<(offset + count)
     }
 
+    /// Replaces `range`, which must lie in the file, with `bytes` (docs/plans/M8.md, D-a):
+    /// an insert when `range` is empty, a delete when `bytes` is. Returns the range the
+    /// new bytes take. Throws `ByteSourceError.truncated` without changing anything when
+    /// `range` runs past the end.
+    @discardableResult
+    public func replace(_ range: Range<UInt64>, with bytes: Data) throws -> Range<UInt64> {
+        guard range.upperBound <= length else {
+            throw ByteSourceError.truncated(expected: range.upperBound, available: length)
+        }
+        guard !bytes.isEmpty else {
+            if !range.isEmpty { tree = tree.removing(range) }
+            return range.lowerBound..<range.lowerBound
+        }
+        let add = try self.add ?? AddBuffer()
+        self.add = add
+        let added = try add.append(bytes)
+        let count = UInt64(bytes.count)
+        tree = tree.replacing(range, with: Piece(.add, offset: added.lowerBound, length: count))
+        return range.lowerBound..<(range.lowerBound + count)
+    }
+
     /// Makes `version` current (an undo or redo).
     public func restore(_ version: PieceTree) { tree = version }
 }

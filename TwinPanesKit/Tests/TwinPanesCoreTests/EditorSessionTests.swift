@@ -67,6 +67,43 @@ import Testing
         #expect(counter.changes.count == 4)
     }
 
+    @Test func insertsAndDeletesUndoAndRedoWithTheirSelections() throws {
+        defer { cleanUp() }
+        let session = try session()
+        let counter = Counter()
+        session.observe(counter) { counter.changes.append($0) }
+        try session.replace(
+            4..<4, with: Data([0xAA]), selectionBefore: 4..<5, selectionAfter: 5..<6)
+        try session.replace(
+            5..<5, with: Data([0xBB]), selectionBefore: 5..<6, selectionAfter: 6..<7,
+            coalescing: true)
+        #expect(session.length == 66 && session.undoStack.undoCount == 1)
+        #expect(try bytes(session, 3..<7) == [3, 0xAA, 0xBB, 4])
+        try session.replace(0..<2, with: Data(), selectionBefore: 0..<2, selectionAfter: 0..<1)
+        #expect(session.length == 64 && session.isDirty)
+        #expect(try bytes(session, 0..<2) == [2, 3])
+        #expect(counter.changes == [.edited, .edited, .edited])
+
+        #expect(try #require(session.undo()).selection == 0..<2)
+        #expect(try #require(session.undo()).selection == 4..<5)
+        #expect(!session.isDirty && session.length == 64)
+        #expect(try bytes(session, 3..<6) == [3, 4, 5])
+        #expect(try #require(session.redo()).selection == 6..<7)
+        #expect(session.length == 66)
+    }
+
+    /// An empty range with no bytes is no edit: no step, no notice, no session folder.
+    @Test func anEmptyReplaceChangesNothing() throws {
+        defer { cleanUp() }
+        let session = try EditorSession(
+            url: url, sessionsRoot: folder.appendingPathComponent("Sessions"))
+        let counter = Counter()
+        session.observe(counter) { counter.changes.append($0) }
+        try session.replace(8..<8, with: Data(), selectionBefore: 8..<9, selectionAfter: 8..<9)
+        #expect(!session.isDirty && !session.canUndo && counter.changes.isEmpty)
+        #expect(session.folder == nil)
+    }
+
     @Test func revertDropsTheEditsAndTheirHistory() throws {
         defer { cleanUp() }
         let session = try session()
@@ -91,6 +128,10 @@ import Testing
             try writable.overwrite(
                 Data([1, 2]), at: 63, selectionBefore: 63..<64, selectionAfter: 63..<64)
         }
+        #expect(throws: ByteSourceError.self) {
+            try writable.replace(
+                60..<65, with: Data(), selectionBefore: 60..<61, selectionAfter: 60..<61)
+        }
         #expect(!writable.isDirty && !writable.canUndo && counter.changes.isEmpty)
 
         try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
@@ -98,6 +139,10 @@ import Testing
         #expect(readOnly.access == .readOnly(.noWritePermission))
         #expect(throws: EditorSessionError.readOnly(.noWritePermission)) {
             try readOnly.overwrite(Data([1]), at: 0, selectionBefore: 0..<1, selectionAfter: 1..<2)
+        }
+        #expect(throws: EditorSessionError.readOnly(.noWritePermission)) {
+            try readOnly.replace(
+                0..<0, with: Data([1]), selectionBefore: 0..<1, selectionAfter: 1..<2)
         }
         #expect(!readOnly.isDirty && !readOnly.canUndo)
     }

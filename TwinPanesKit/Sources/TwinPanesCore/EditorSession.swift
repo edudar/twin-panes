@@ -205,10 +205,38 @@ public final class EditorSession {
         _ bytes: Data, at offset: UInt64, selectionBefore: Range<UInt64>,
         selectionAfter: Range<UInt64>, coalescing: Bool = false
     ) throws {
+        try edit(from: selectionBefore, to: selectionAfter, coalescing: coalescing) {
+            try buffer.overwrite(at: offset, with: bytes)
+        }
+    }
+
+    /// Replaces `range` with `bytes` (an insert, a delete, or typing or pasting over a
+    /// selection; docs/plans/M8.md, D-a) and records an undo step from `selectionBefore`
+    /// to `selectionAfter`; with `coalescing`, it extends the last step instead. An empty
+    /// range with no bytes changes nothing and records nothing. Throws
+    /// `EditorSessionError.readOnly`, `.reloadedBeforeEdit` or `ByteSourceError.truncated`
+    /// without changing anything.
+    public func replace(
+        _ range: Range<UInt64>, with bytes: Data, selectionBefore: Range<UInt64>,
+        selectionAfter: Range<UInt64>, coalescing: Bool = false
+    ) throws {
+        guard !range.isEmpty || !bytes.isEmpty else { return }
+        try edit(from: selectionBefore, to: selectionAfter, coalescing: coalescing) {
+            try buffer.replace(range, with: bytes)
+        }
+    }
+
+    /// Makes `change` to the buffer one edit: refused while read-only, after the first
+    /// edit's protection (the clone), then recorded for undo, journaled and announced.
+    /// A `change` that throws leaves the tree, history and observers untouched.
+    private func edit(
+        from selectionBefore: Range<UInt64>, to selectionAfter: Range<UInt64>,
+        coalescing: Bool, _ change: () throws -> Void
+    ) throws {
         if case .readOnly(let reason) = access { throw EditorSessionError.readOnly(reason) }
         if folder == nil { try protectBeforeFirstEdit() }
         let before = UndoStack.State(tree: buffer.tree, selection: selectionBefore)
-        try buffer.overwrite(at: offset, with: bytes)
+        try change()
         let after = UndoStack.State(tree: buffer.tree, selection: selectionAfter)
         undoStack.record(before: before, after: after, coalescing: coalescing)
         journalChange(from: before.tree)
