@@ -170,11 +170,15 @@ every commit of one — build and run all of these without waiting to be asked. 
 match what CI runs. A change that touches only documentation needs none of them.
 
 ```bash
-swift format lint --strict --recursive TwinPanesKit TwinPanes
+swift format lint --strict --recursive TwinPanesKit TwinPanes Tools/CoverageReport
 ```
 
 ```bash
 swift test --parallel --package-path TwinPanesKit
+```
+
+```bash
+swift test --package-path Tools/CoverageReport
 ```
 
 ```bash

@@ -96,7 +96,8 @@ Manual checks, such as the sandbox spike, are in
 | `TwinPanes/` | App sources: entry point, menus, command bindings, window restoration, recent files, the smoke test and its child launches, and `AppIcon.icon`, the Icon Composer app icon. |
 | `Config/` | Build settings (`.xcconfig`), `Info.plist` additions and entitlements. |
 | `TwinPanesKit/` | One Swift package with every library module (`Sources/`) and its test target (`Tests/`). |
-| `scripts/` | `check-test-runs.sh`: checks that every Swift Testing run in a `swift test` log finished. |
+| `scripts/` | `check-test-runs.sh`: checks that every Swift Testing run in a `swift test` log finished. `test-report.sh` and `test-report.xsl`: CI's HTML test and coverage report. |
+| `Tools/CoverageReport/` | A separate Swift package for CI tooling, not linked by the app: the `coverage-report` command that turns `llvm-cov export` JSON into the coverage pages and the job summary (`docs/plans/coverage-report.md`). |
 | `docs/` | The plan, runbooks and images. `docs/plans/` holds one plan per milestone, written and reviewed before the work starts; `docs/reviews/` holds one fix plan per code review. |
 
 Modules in `TwinPanesKit/Sources/` are sibling folders, and their dependencies
@@ -123,21 +124,26 @@ package runs fail if a test process ends without its summary line
 (`scripts/check-test-runs.sh`). A failed smoke check shows as an annotation on the
 run page.
 
-The macOS 27 job also records coverage and JUnit XML, and `scripts/test-report.sh`
-builds an HTML report from them: test counts and per-module line coverage in the job
-summary, the report as run artifacts, and on pushes to `main` the same report on
-GitHub Pages (https://edudar.github.io/twin-panes/). To build it locally:
+The macOS 27 job also runs the `Tools/CoverageReport` tests, records coverage and
+JUnit XML in the package run, and builds an HTML report with
+`scripts/test-report.sh`: the coverage pages come from `coverage-report` (a module
+index with sorting and a filter, and a page per source file), the test results page
+from `test-report.xsl`. The job summary shows test counts and per-module line
+coverage; the report is uploaded as run artifacts and, on pushes to `main`, published
+to GitHub Pages (https://edudar.github.io/twin-panes/). Line totals count each line
+once, so they differ slightly from `llvm-cov report`, which counts per function. To
+build the report locally:
 
 ```bash
 mkdir -p build/report && swift test --parallel --enable-code-coverage --xunit-output build/report/tests.xml --package-path TwinPanesKit
 ```
 
 ```bash
-scripts/test-report.sh build/report build/report/site
+scripts/test-report.sh build/report build/report/site build/report/summary.md
 ```
 
-Coverage pages are filed under absolute source paths, so publish only reports built
-on CI.
+The export and the sources must come from the same checkout: `coverage-report` fails
+if a source file is shorter than its coverage reaches.
 
 ## Commits
 

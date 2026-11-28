@@ -50,7 +50,12 @@ jobs:
       - name: Lint (swift-format)
         # Only on the newest image, so formatting rules come from one swift-format version.
         if: matrix.macos == '27'
-        run: swift format lint --strict --recursive TwinPanesKit TwinPanes
+        run: swift format lint --strict --recursive TwinPanesKit TwinPanes Tools/CoverageReport
+
+      - name: Coverage report tool tests
+        # CI tooling: one image is enough, and it's the one that builds the report.
+        if: matrix.macos == '27'
+        run: swift test --package-path Tools/CoverageReport
 
       - name: Package tests
         # bash here means -o pipefail, so a failing swift test still fails the step.
@@ -69,8 +74,8 @@ jobs:
         # Before the Thread Sanitizer run, which rebuilds the test bundles llvm-cov reads.
         if: matrix.macos == '27' && !cancelled()
         run: |
-          scripts/test-report.sh build/report build/report/site
-          cat build/report/site/summary.md >> "$GITHUB_STEP_SUMMARY"
+          scripts/test-report.sh build/report build/report/site build/report/summary.md
+          cat build/report/summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test report
         if: matrix.macos == '27' && !cancelled()
