@@ -27,17 +27,33 @@ import Testing
             .first { $0.accessibilityIdentifier() == "statusLine" }?.stringValue
     }
 
+    func trailingStatus(of frame: MainFrameViewController) -> String? {
+        frame.view.subviews.compactMap { $0 as? NSTextField }
+            .first { $0.accessibilityIdentifier() == "statusTrailing" }?.stringValue
+    }
+
     @Test func theActivePanelsTabWritesTheStatusLine() {
         let frame = frame()
         left.host?.showStatus("from the left")
         #expect(statusLine(of: frame) == "from the left")
     }
 
+    @Test func theActivePanelsTabWritesLeadingAndTrailingStatus() {
+        let frame = frame()
+        left.host?.showStatus("2 selected · 1 KB", trailing: "15 items (7 folders)")
+        #expect(statusLine(of: frame) == "2 selected · 1 KB")
+        #expect(trailingStatus(of: frame) == "15 items (7 folders)")
+        left.host?.showStatus("only leading")
+        #expect(statusLine(of: frame) == "only leading")
+        #expect(trailingStatus(of: frame) == "")
+    }
+
     @Test func theOtherPanelsTabDoesntWriteTheStatusLine() {
         let frame = frame()
-        left.host?.showStatus("from the left")
-        right.host?.showStatus("from the right")
+        left.host?.showStatus("from the left", trailing: "left stats")
+        right.host?.showStatus("from the right", trailing: "right stats")
         #expect(statusLine(of: frame) == "from the left")
+        #expect(trailingStatus(of: frame) == "left stats")
     }
 
     @Test func aTabBehindTheSelectedOneDoesntWriteTheStatusLine() {

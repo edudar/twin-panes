@@ -506,23 +506,26 @@ public final class BrowserItem: WorkspaceItem {
 
     public func willClose() { stopListing() }
 
+    var folderSummary: String {
+        let folders = listing.folderCount
+        let hidden = listing.hiddenCount
+        return "\(entries.count.formatted()) items (\(folders.formatted()) folders)"
+            + (hidden > 0 ? ", \(hidden.formatted()) hidden" : "")
+    }
+
     func updateStatus() {
         let step = StepTiming.start("status")
         defer { step?.end() }
         if let notice {
             host?.showStatus(notice)
         } else if needsAccess {
-            host?.showStatus("\(folder.path) · no access yet")
+            host?.showStatus("No access yet")
         } else if isListing {
-            host?.showStatus("\(folder.path) · Listing… \(listing.entries.count.formatted()) items")
-        } else if loadedController?.updateSelectionStatus() == true {
-            return
+            host?.showStatus("Listing… \(listing.entries.count.formatted()) items")
+        } else if let controller = loadedController {
+            controller.updateSelectionStatus()
         } else {
-            let folders = listing.folderCount
-            let hidden = listing.hiddenCount
-            host?.showStatus(
-                "\(folder.path) · \(entries.count.formatted()) items (\(folders.formatted()) folders)"
-                    + (hidden > 0 ? ", \(hidden.formatted()) hidden" : ""))
+            host?.showStatus("", trailing: folderSummary)
         }
     }
 }

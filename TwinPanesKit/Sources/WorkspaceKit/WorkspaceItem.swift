@@ -41,6 +41,20 @@ public enum SlotID: String, Hashable, Sendable, CaseIterable, Codable {
 public protocol WorkspaceHost: AnyObject {
     /// Shows a short message in the main frame's status line.
     func showStatus(_ message: String)
+    /// Shows a message on the leading side and a summary pinned to the trailing edge.
+    func showStatus(_ message: String, trailing: String)
+}
+
+extension WorkspaceHost {
+    public func showStatus(_ message: String, trailing: String) {
+        if trailing.isEmpty {
+            showStatus(message)
+        } else if message.isEmpty {
+            showStatus(trailing)
+        } else {
+            showStatus("\(message) · \(trailing)")
+        }
+    }
 }
 
 /// Everything that isn't a dialog: browsers, editors, viewers, terminals (PLAN.md §4.8).

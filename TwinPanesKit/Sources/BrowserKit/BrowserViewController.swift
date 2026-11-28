@@ -134,9 +134,6 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
     /// (docs/plans/M6.md, D-a).
     private(set) var selection = ListingSelection.none
     private var selectedParentRow = false
-    /// True once the user moves the selection, so live updates keep showing it instead of
-    /// reverting to the folder count; reset on navigation or when the folder empties.
-    private var showsSelectionStatus = false
 
     /// Selects `name` once the listing has it, as a navigation selects the folder you
     /// came from.
@@ -156,7 +153,6 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         let step = StepTiming.start("start showing")
         defer { step?.end() }
         selectionSummaryGeneration &+= 1
-        showsSelectionStatus = false
         guard isViewLoaded, let item else {
             self.item?.notifySelectionChange()
             return
@@ -191,7 +187,6 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         showSortIndicator(item.order)
         updateAccessPrompt()
         let lead = selectedName
-        let hadSelection = !selection.isEmpty
         let onParent = selectedParentRow
         var restoredRows = tableRows(selectedRows ?? selectionRows(selection, in: item.listing))
         refreshRows()
@@ -207,9 +202,6 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             if scrolling, tableView.selectedRow >= 0 {
                 tableView.scrollRowToVisible(tableView.selectedRow)
             }
-        }
-        if hadSelection, selection.count == 0 {
-            showsSelectionStatus = false
         }
     }
 
@@ -283,7 +275,6 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         let inserted = IndexSet(changes.inserted.map { $0 + offset })
         let changed = IndexSet(changes.changed.map { $0 + offset })
         let selected = tableView.selectedRow
-        let hadSelection = !selection.isEmpty
         let priorName = selectedName
         let priorTableSelected = tableView.selectedRowIndexes
         let survivingRows =
@@ -346,9 +337,6 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
             restoreSelection(row + offset, parentRow: false)
             tableView.scrollRowToVisible(row + offset)
         }
-        if hadSelection, selection.count == 0 {
-            showsSelectionStatus = false
-        }
         return true
     }
 
@@ -405,36 +393,35 @@ final class BrowserViewController: NSViewController, CommandScopeProviding, NSMe
         selectedParentRow = isParentRowSelected
         if !isRestoringSelection {
             wantedSelection = nil
-            showsSelectionStatus = tableView.numberOfSelectedRows > 0
             viewIfLoaded?.window?.invalidateRestorableState()
         }
         item?.notifySelectionChange()
     }
 
-    /// Refreshes the status line for the active selection if the user moved it (or more
-    /// than one row is selected); returns false to fall back to the folder count.
-    @discardableResult
-    func updateSelectionStatus() -> Bool {
-        guard isViewLoaded, let item, showsSelectionStatus || selection.count > 1 else {
-            return false
-        }
+    /// Shows the active selection on the leading side and the folder's item counts on the
+    /// trailing side.
+    func updateSelectionStatus() {
+        guard isViewLoaded, let item else { return }
         if tableView.numberOfSelectedRows > 1 || selection.count > 1 {
             showSelectionSummary(of: item)
-            return true
+            return
         }
+        selectionSummaryGeneration &+= 1
+        let trailing = item.folderSummary
         if isParentRowSelected {
-            let parent = item.folder.deletingLastPathComponent().path
-            item.host?.showStatus("Parent folder: \(parent)")
-            return true
+            item.host?.showStatus("Parent folder", trailing: trailing)
+            return
         }
-        guard let entry = selectedEntry else { return false }
+        guard let entry = selectedEntry else {
+            item.host?.showStatus("", trailing: trailing)
+            return
+        }
         if entry.isBrokenSymbolicLink {
-            item.host?.showStatus("\(entry.url.path) · Broken symbolic link")
-            return true
+            item.host?.showStatus("\(entry.name) · Broken symbolic link", trailing: trailing)
+            return
         }
-        let size = entry.size.map { " · \(Self.formatStatusBytes($0))" } ?? ""
-        item.host?.showStatus("\(entry.url.path)\(size)")
-        return true
+        let leading = entry.size.map { "\(entry.name) · \(Self.formatStatusBytes($0))" } ?? ""
+        item.host?.showStatus(leading, trailing: trailing)
     }
 
     /// Row 0 is "..", the parent folder, everywhere but the top folder. It's a view row

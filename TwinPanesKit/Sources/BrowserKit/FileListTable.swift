@@ -737,9 +737,7 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard let item else { return }
         selectionChanged()
-        if !updateSelectionStatus() {
-            item.updateStatus()
-        }
+        item.updateStatus()
     }
 
     /// Formats a byte count for the status bar: exact bytes below 1 KB, and a rounded
@@ -753,23 +751,21 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
         return "\(rounded) (\(exact))"
     }
 
-    /// Shows "3 of 120 selected · 1 KB (1,234 bytes)"; folders' sizes aren't counted
-    /// (D-a). A big selection is added up off the main actor.
+    /// Shows "3 selected · 1 KB (1,234 bytes)" alongside the folder summary; folders' sizes
+    /// aren't counted (D-a). A big selection is added up off the main actor.
     func showSelectionSummary(of item: BrowserItem) {
         selectionSummaryGeneration &+= 1
         let generation = selectionSummaryGeneration
         let selection = selection
-        let total = item.entries.count
         let path = item.folder.path
         let summary: @Sendable () -> String = {
             let bytes = selection.rows.reduce(UInt64(0)) {
                 $0 + (selection.listing.rows[$1].size ?? 0)
             }
-            return "\(path) · \(selection.count.formatted()) of "
-                + "\(total.formatted()) selected · \(Self.formatStatusBytes(bytes))"
+            return "\(selection.count.formatted()) selected · \(Self.formatStatusBytes(bytes))"
         }
         guard selection.count > FolderListing.mainActorLimit else {
-            return item.host?.showStatus(summary()) ?? ()
+            return item.host?.showStatus(summary(), trailing: item.folderSummary) ?? ()
         }
         selectionSummaryTask = Task { [weak self, weak item] in
             let text = await Task.detached(priority: .userInitiated) { summary() }.value
@@ -778,7 +774,7 @@ extension BrowserViewController: NSTableViewDataSource, NSTableViewDelegate {
                 item.folder.path == path,
                 self.selection.rows == selection.rows
             else { return }
-            item.host?.showStatus(text)
+            item.host?.showStatus(text, trailing: item.folderSummary)
         }
     }
 }

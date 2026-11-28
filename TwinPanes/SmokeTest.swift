@@ -490,6 +490,11 @@ struct SmokeTest {
             .first { $0.accessibilityIdentifier() == "statusLine" }?.stringValue ?? ""
     }
 
+    func trailingStatus(of controller: MainWindowController) -> String {
+        controller.frameController.view.subviews.compactMap { $0 as? NSTextField }
+            .first { $0.accessibilityIdentifier() == "statusTrailing" }?.stringValue ?? ""
+    }
+
     /// M1: open a real file, draw it, move and copy, and refuse a folder.
     private func hexEditor(_ check: (Bool, String) -> Void, window: NSWindow) async {
         let dir = FileManager.default.temporaryDirectory

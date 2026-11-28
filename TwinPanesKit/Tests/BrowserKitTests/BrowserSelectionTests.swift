@@ -229,16 +229,22 @@ import WorkspaceKit
         defer { cleanUp() }
         let big1 = root.appendingPathComponent("big1")
         let big2 = root.appendingPathComponent("big2")
-        for dir in [big1, big2] {
+        let count1 = FolderListing.mainActorLimit + 10
+        let count2 = FolderListing.mainActorLimit + 20
+        for (dir, count) in [(big1, count1), (big2, count2)] {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            for index in 0..<(FolderListing.mainActorLimit + 10) {
+            for index in 0..<count {
                 FileManager.default.createFile(
                     atPath: dir.appendingPathComponent("f\(index)").path, contents: nil)
             }
         }
-        var status = ""
+        var leading = ""
+        var trailing = ""
         let item = BrowserItem(folder: big1, grants: grants) { _, _ in }
-        let host = RecordingHost { status = $0 }
+        let host = RecordingHost {
+            leading = $0
+            trailing = $1
+        }
         item.host = host
         _ = item.viewController.view
         await item.listed()
@@ -253,21 +259,26 @@ import WorkspaceKit
 
         await staleTask?.value
         await currentTask?.value
-        #expect(status.contains(big2.path))
-        #expect(!status.contains(big1.path))
+        #expect(leading.hasPrefix("\(count2.formatted()) selected · "))
+        #expect(trailing.hasPrefix("\(count2.formatted()) items"))
     }
 
     @Test func theStatusLineCountsTheSelection() async throws {
         defer { cleanUp() }
-        var status = ""
+        var leading = ""
+        var trailing = ""
         let item = BrowserItem(folder: folder, grants: grants) { _, _ in }
-        let host = RecordingHost { status = $0 }
+        let host = RecordingHost {
+            leading = $0
+            trailing = $1
+        }
         item.host = host
         _ = item.viewController.view
         await item.listed()
         defer { item.willClose() }
         try select(["a.txt", "b.bin", "sub"], in: item)
-        #expect(status.contains("3 of 4 selected · 310 bytes"))
+        #expect(leading == "3 selected · 310 bytes")
+        #expect(trailing == "4 items (1 folders), 1 hidden")
     }
 
     @Test func formatStatusBytesUsesRoundedAndExactFromOneKilobyte() {
@@ -287,9 +298,13 @@ import WorkspaceKit
         defer { cleanUp() }
         let largeSize = 12_500
         try Data(count: largeSize).write(to: folder.appendingPathComponent("large.bin"))
-        var status = ""
+        var leading = ""
+        var trailing = ""
         let item = BrowserItem(folder: folder, grants: grants) { _, _ in }
-        let host = RecordingHost { status = $0 }
+        let host = RecordingHost {
+            leading = $0
+            trailing = $1
+        }
         item.host = host
         _ = item.viewController.view
         await item.listed()
@@ -297,79 +312,97 @@ import WorkspaceKit
 
         let singleExpected = BrowserViewController.formatStatusBytes(UInt64(largeSize))
         try select(["large.bin"], in: item)
-        #expect(status.hasSuffix("/large.bin · \(singleExpected)"))
+        #expect(leading == "large.bin · \(singleExpected)")
+        #expect(trailing == "5 items (1 folders), 1 hidden")
+
+        try select(["sub"], in: item)
+        #expect(leading == "")
+        #expect(trailing == "5 items (1 folders), 1 hidden")
 
         let combinedExpected = BrowserViewController.formatStatusBytes(UInt64(largeSize + 300))
         try select(["large.bin", "b.bin"], in: item)
-        #expect(status == "\(folder.path) · 2 of 5 selected · \(combinedExpected)")
+        #expect(leading == "2 selected · \(combinedExpected)")
+        #expect(trailing == "5 items (1 folders), 1 hidden")
     }
 
     @Test func liveUpdatePreservesAndUpdatesMultiRowSelectionStatus() async throws {
         defer { cleanUp() }
-        var status = ""
+        var leading = ""
+        var trailing = ""
         let item = BrowserItem(folder: folder, grants: grants) { _, _ in }
-        let host = RecordingHost { status = $0 }
+        let host = RecordingHost {
+            leading = $0
+            trailing = $1
+        }
         item.host = host
         _ = item.viewController.view
         await item.listed()
         defer { item.willClose() }
-        #expect(status.contains("4 items"))
+        #expect(trailing.contains("4 items"))
 
         try select(["a.txt", "b.bin"], in: item)
-        #expect(status.contains("2 of 4 selected"))
-        #expect(status.contains("310 bytes"))
+        #expect(leading == "2 selected · 310 bytes")
+        #expect(trailing.contains("4 items"))
 
         try Data(count: 50).write(to: folder.appendingPathComponent("d.txt"))
         await until(in: item) { item.entries.contains { $0.name == "d.txt" } }
         await item.listed()
-        #expect(status.contains("2 of 5 selected"))
-        #expect(status.contains("310 bytes"))
+        #expect(leading == "2 selected · 310 bytes")
+        #expect(trailing.contains("5 items"))
 
         try FileManager.default.removeItem(at: folder.appendingPathComponent("c.png"))
         await until(in: item) { !item.entries.contains { $0.name == "c.png" } }
         await item.listed()
-        #expect(status.contains("2 of 4 selected"))
-        #expect(status.contains("310 bytes"))
+        #expect(leading == "2 selected · 310 bytes")
+        #expect(trailing.contains("4 items"))
 
         try Data(count: 40).write(to: folder.appendingPathComponent("a.txt"))
         await until(in: item) { item.entries.first { $0.name == "a.txt" }?.size == 40 }
         await item.listed()
-        #expect(status.contains("2 of 4 selected"))
-        #expect(status.contains("340 bytes"))
+        #expect(leading == "2 selected · 340 bytes")
+        #expect(trailing.contains("4 items"))
     }
 
     @Test func liveUpdatePreservesSingleRowSelectionStatusAndUpdatesSize() async throws {
         defer { cleanUp() }
-        var status = ""
+        var leading = ""
+        var trailing = ""
         let item = BrowserItem(folder: folder, grants: grants) { _, _ in }
-        let host = RecordingHost { status = $0 }
+        let host = RecordingHost {
+            leading = $0
+            trailing = $1
+        }
         item.host = host
         _ = item.viewController.view
         await item.listed()
         defer { item.willClose() }
 
         try select(["a.txt"], in: item)
-        #expect(status.contains(folder.appendingPathComponent("a.txt").path))
-        #expect(status.contains("10 bytes"))
+        #expect(leading == "a.txt · 10 bytes")
+        #expect(trailing.contains("4 items"))
 
         try Data(count: 50).write(to: folder.appendingPathComponent("d.txt"))
         await until(in: item) { item.entries.contains { $0.name == "d.txt" } }
         await item.listed()
-        #expect(status.contains(folder.appendingPathComponent("a.txt").path))
-        #expect(status.contains("10 bytes"))
+        #expect(leading == "a.txt · 10 bytes")
+        #expect(trailing.contains("5 items"))
 
         try Data(count: 42).write(to: folder.appendingPathComponent("a.txt"))
         await until(in: item) { item.entries.first { $0.name == "a.txt" }?.size == 42 }
         await item.listed()
-        #expect(status.contains(folder.appendingPathComponent("a.txt").path))
-        #expect(status.contains("42 bytes"))
+        #expect(leading == "a.txt · 42 bytes")
+        #expect(trailing.contains("5 items"))
     }
 
     @Test func liveUpdatePreservesParentRowSelectionStatus() async throws {
         defer { cleanUp() }
-        var status = ""
+        var leading = ""
+        var trailing = ""
         let item = BrowserItem(folder: folder, grants: grants) { _, _ in }
-        let host = RecordingHost { status = $0 }
+        let host = RecordingHost {
+            leading = $0
+            trailing = $1
+        }
         item.host = host
         _ = item.viewController.view
         await item.listed()
@@ -377,12 +410,14 @@ import WorkspaceKit
 
         try select(["a.txt"], in: item)
         item.controller.tableView.selectRowIndexes([0], byExtendingSelection: false)
-        #expect(status.hasPrefix("Parent folder:"))
+        #expect(leading == "Parent folder")
+        #expect(trailing.contains("4 items"))
 
         try Data(count: 50).write(to: folder.appendingPathComponent("d.txt"))
         await until(in: item) { item.entries.contains { $0.name == "d.txt" } }
         await item.listed()
-        #expect(status.hasPrefix("Parent folder:"))
+        #expect(leading == "Parent folder")
+        #expect(trailing.contains("5 items"))
     }
 
     @Test func emptyingFolderAfterSingleSelectionFallsBackToFolderSummary() async throws {
@@ -391,45 +426,56 @@ import WorkspaceKit
         try FileManager.default.createDirectory(at: single, withIntermediateDirectories: true)
         try Data(count: 7).write(to: single.appendingPathComponent("only.txt"))
 
-        var status = ""
+        var leading = ""
+        var trailing = ""
         let item = BrowserItem(folder: single, grants: grants) { _, _ in }
-        let host = RecordingHost { status = $0 }
+        let host = RecordingHost {
+            leading = $0
+            trailing = $1
+        }
         item.host = host
         _ = item.viewController.view
         await item.listed()
         defer { item.willClose() }
 
         try select(["only.txt"], in: item)
-        #expect(status.contains("only.txt"))
-        #expect(status.contains("7 bytes"))
+        #expect(leading == "only.txt · 7 bytes")
+        #expect(trailing == "1 items (0 folders)")
 
         try FileManager.default.removeItem(at: single.appendingPathComponent("only.txt"))
         await until(in: item) { item.entries.isEmpty }
         await item.listed()
-        #expect(status.contains("0 items (0 folders)"))
+        #expect(trailing == "0 items (0 folders)")
     }
 
     @Test func noticeNeedsAccessAndListingTakePriorityOverSelectionStatus() async throws {
         defer { cleanUp() }
-        var status = ""
+        var leading = ""
+        var trailing = ""
         let item = BrowserItem(folder: folder, grants: grants) { _, _ in }
-        let host = RecordingHost { status = $0 }
+        let host = RecordingHost {
+            leading = $0
+            trailing = $1
+        }
         item.host = host
         _ = item.viewController.view
         await item.listed()
         defer { item.willClose() }
 
         try select(["a.txt", "b.bin"], in: item)
-        #expect(status.contains("2 of 4 selected"))
+        #expect(leading == "2 selected · 310 bytes")
+        #expect(trailing == "4 items (1 folders), 1 hidden")
 
         item.notice = "Important notice"
         item.updateStatus()
-        #expect(status == "Important notice")
+        #expect(leading == "Important notice")
+        #expect(trailing == "")
 
         item.notice = nil
         item.needsAccess = true
         item.updateStatus()
-        #expect(status.contains("no access yet"))
+        #expect(leading.contains("No access yet"))
+        #expect(trailing == "")
 
         item.needsAccess = false
         item.go(to: folder)
@@ -442,9 +488,8 @@ import WorkspaceKit
         }
         item.received(.batch(synthetic))
         try select(["x.txt", "y.txt"], in: item)
-        #expect(status.contains("2 of 2 selected"))
-        item.updateStatus()
-        #expect(status.contains("Listing…"))
+        #expect(leading.contains("Listing…"))
+        #expect(trailing == "")
         await item.listed()
     }
 
@@ -486,7 +531,8 @@ private final class DeinitProbe: @unchecked Sendable {
 
 @MainActor
 private final class RecordingHost: WorkspaceHost {
-    let record: (String) -> Void
-    init(_ record: @escaping (String) -> Void) { self.record = record }
-    func showStatus(_ message: String) { record(message) }
+    let record: (String, String) -> Void
+    init(_ record: @escaping (String, String) -> Void) { self.record = record }
+    func showStatus(_ message: String) { record(message, "") }
+    func showStatus(_ message: String, trailing: String) { record(message, trailing) }
 }

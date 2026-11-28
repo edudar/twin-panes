@@ -65,6 +65,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     private var isPlacingSidePanes = false
     private var lastNotifiedPreviewShown: Bool?
     private let statusLabel = NSTextField(labelWithString: "")
+    private let trailingStatusLabel = NSTextField(labelWithString: "")
     private var token: ObservationToken?
     private var lastFocusedItemID: ItemID?
     /// Set once the divider is placed, when the window first appears.
@@ -131,7 +132,18 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         statusLabel.setAccessibilityIdentifier("statusLine")
+
+        trailingStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        trailingStatusLabel.textColor = .secondaryLabelColor
+        trailingStatusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        trailingStatusLabel.alignment = .right
+        trailingStatusLabel.lineBreakMode = .byTruncatingTail
+        trailingStatusLabel.setContentHuggingPriority(.required, for: .horizontal)
+        trailingStatusLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        trailingStatusLabel.setAccessibilityIdentifier("statusTrailing")
 
         let titlebarSeparator = NSBox(frame: NSRect(x: 0, y: 0, width: 100, height: 1))
         titlebarSeparator.boxType = .separator
@@ -170,6 +182,7 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
         splitViewController.view.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(splitViewController.view)
         root.addSubview(statusLabel)
+        root.addSubview(trailingStatusLabel)
         // The function-key bar sits between the panels and the status line; hidden, it
         // takes no height.
         let bar = functionKeyBar ?? NSView()
@@ -196,8 +209,13 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
             bar.bottomAnchor.constraint(equalTo: statusLabel.topAnchor, constant: -2),
             barHeight,
             statusLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
-            statusLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
             statusLabel.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -4),
+            trailingStatusLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 12),
+            trailingStatusLabel.trailingAnchor.constraint(
+                equalTo: root.trailingAnchor, constant: -8),
+            trailingStatusLabel.firstBaselineAnchor.constraint(
+                equalTo: statusLabel.firstBaselineAnchor),
             root.widthAnchor.constraint(greaterThanOrEqualToConstant: 481),
             root.heightAnchor.constraint(greaterThanOrEqualToConstant: 320),
         ])
@@ -256,7 +274,12 @@ public final class MainFrameViewController: NSViewController, WorkspaceHost,
     }
 
     public func showStatus(_ message: String) {
+        showStatus(message, trailing: "")
+    }
+
+    public func showStatus(_ message: String, trailing: String) {
         statusLabel.stringValue = message
+        trailingStatusLabel.stringValue = trailing
     }
 
     /// Whether `id` is the item in front: the zoomed item, or the active panel's tab.
@@ -879,8 +902,12 @@ private final class FrontItemHost: WorkspaceHost {
     }
 
     func showStatus(_ message: String) {
+        showStatus(message, trailing: "")
+    }
+
+    func showStatus(_ message: String, trailing: String) {
         guard let frame, frame.isInFront(itemID) else { return }
-        frame.showStatus(message)
+        frame.showStatus(message, trailing: trailing)
     }
 }
 
