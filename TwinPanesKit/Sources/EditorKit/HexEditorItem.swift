@@ -122,8 +122,11 @@ public final class HexEditorItem: WorkspaceItem {
     }
 
     static func byteCount(_ value: UInt64) -> String {
-        let short = ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file)
-        return "\(short) (\(value.formatted()) bytes)"
+        let exact = "\(value.formatted()) bytes"
+        guard value >= 1_000 else { return exact }
+        let short = ByteCountFormatter.string(
+            fromByteCount: Int64(clamping: value), countStyle: .file)
+        return "\(short) (\(exact))"
     }
 }
 

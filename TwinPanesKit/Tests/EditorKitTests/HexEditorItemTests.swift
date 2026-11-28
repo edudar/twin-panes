@@ -45,6 +45,18 @@ import Testing
         #expect(item.statusText.contains("Selected 4 bytes (0x10…0x13)"))
     }
 
+    @Test func byteCountOmitsRoundedPrefixBelowOneKilobyte() throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(HexEditorItem.byteCount(256) == "256 bytes")
+        #expect(HexEditorItem.byteCount(999) == "999 bytes")
+        let kb = ByteCountFormatter.string(fromByteCount: 1_000, countStyle: .file)
+        #expect(HexEditorItem.byteCount(1_000) == "\(kb) (\(UInt64(1_000).formatted()) bytes)")
+
+        let item = try item(bytes: 256)
+        _ = item.viewController.view
+        #expect(item.statusText == "Offset 0x0 (0) · Size 256 bytes")
+    }
+
     @Test func copyDoesNotFillPageCacheAndFailedSaveCleansPartialFile() async throws {
         defer { try? FileManager.default.removeItem(at: url) }
         let item = try item(bytes: 4096)
