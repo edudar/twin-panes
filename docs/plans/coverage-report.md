@@ -1,8 +1,8 @@
 # Coverage report plan: our own pages from llvm-cov's export
 
 _Status: approved 2026-11-27 (Swift package under `Tools/`; hit counts on every line;
-step 5 decided later; totals count distinct lines). Steps 1 and 2 done; step 3
-next._
+step 5 decided later; totals count distinct lines). Steps 1, 2 and 3a done; step
+3b next._
 
 ## Context
 
@@ -68,7 +68,9 @@ pages from `llvm-cov export` (path B) rather than restyle llvm-cov's fixed marku
 ### D-d: the design, from the survey
 
 - **Index:** a summary line (tests passed, line coverage, commit). A table of the six
-  modules: a thin bar, line percentage, missed lines, function percentage. Each module
+  modules: a thin bar, line percentage, missed lines, total lines. (Function
+  percentage dropped in step 3: it would need the export's per-function data, which
+  the tool doesn't read.) Each module
   folds out its files with the same columns. Sortable columns and a file-name filter.
   Only the bar and the number take the threshold colour, never the row.
 - **Source view:** a 3 px gutter stripe per code line (green covered, amber partly
@@ -97,8 +99,10 @@ pages from `llvm-cov export` (path B) rather than restyle llvm-cov's fixed marku
   the source root and the output folder.
 - The job summary keeps its counts and per-module table; the tool writes `summary.md`
   so the awk over `llvm-cov report` goes away.
-- The tool exits non-zero, naming the file, if its line counts disagree with
-  llvm-cov's summary or a source file is missing.
+- The tool exits non-zero, naming the file, if a source file is missing or shorter
+  than its segments reach: the export and the checkout must be the same build, or
+  the marks land on the wrong lines. (Seen in step 3a with a stale local export: two
+  files edited since had lost or gained lines.)
 
 ## Commit sequence
 
@@ -117,8 +121,12 @@ Each step builds, passes all checks, and stays under 250 changed lines.
      snapshots.
    - **2b, the look:** the shared stylesheet with both themes, the minimap of
      misses, and the `n` / `p` script.
-3. **Tools: render the index and summary.** Module grouping, sorting and filter
-   script, `summary.md`. Tests for grouping, thresholds and totals.
+3. **Tools: render the index and summary**, in two commits like step 2:
+   - **3a, the markup:** module grouping and totals, the index page (headline with
+     tests and commit, a fold-out row per module, a row per file) and `summary.md`.
+     Tests for grouping, thresholds, totals and the Markdown.
+   - **3b, the look:** index styles in the shared stylesheet, the sort and filter
+     script.
 4. **CI: use the tool for the coverage report.** `test-report.sh` switches from
    `llvm-cov show` to the tool; lint and test commands gain the package; AGENTS.md,
    DEVELOPMENT.md and PLAN.md §7 updated.
