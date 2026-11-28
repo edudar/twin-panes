@@ -46,17 +46,21 @@ public final class HexEditorItem: WorkspaceItem {
         let time: ContinuousClock.Instant
     }
 
-    lazy var controller = HexEditorViewController(item: self)
+    let preferences: HexViewPreferences?
+    lazy var controller = HexEditorViewController(item: self, preferences: preferences)
 
     /// Opens `url` in a new session. Throws `ByteSourceError` for anything but a readable
     /// regular file.
-    public convenience init(url: URL, scope: SecurityScope? = nil) throws {
-        self.init(session: try EditorSession(url: url, scope: scope))
+    public convenience init(
+        url: URL, scope: SecurityScope? = nil, preferences: HexViewPreferences? = nil
+    ) throws {
+        self.init(session: try EditorSession(url: url, scope: scope), preferences: preferences)
     }
 
-    /// A tab showing `session`.
-    public init(session: EditorSession) {
+    /// A tab showing `session`, optionally syncing display options with `preferences`.
+    public init(session: EditorSession, preferences: HexViewPreferences? = nil) {
         self.session = session
+        self.preferences = preferences
         session.observe(self) { [weak self] change in self?.sessionChanged(change) }
     }
 

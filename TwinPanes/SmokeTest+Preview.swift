@@ -2,6 +2,7 @@ import AppKit
 import BrowserKit
 import Darwin
 import EditorKit
+import HexViewKit
 import TwinPanesCore
 import WorkspaceKit
 
@@ -222,11 +223,41 @@ extension SmokeTest {
                 && controller.layout.activePanel == .leftPanel,
             "⇧F3 opens non-following Quick View in the active panel")
 
+        let quickHex = standalone.flatMap {
+            Self.view(in: $0.viewController.view, id: "readOnlyHexView") as? HexView
+        }
+        check(
+            quickHex != nil && window.firstResponder === quickHex
+                && quickHex?.options == HexViewOptions(),
+            "Hex Quick View focuses readOnlyHexView and starts with Edit's default options (16 bytes/row)"
+        )
+        let targetOptions = HexViewOptions(
+            bytesPerRow: .fixed(8), grouping: 4, offsetBase: .decimal, textEncoding: .latin1)
+        defer { app.hexViewPreferences.options = HexViewOptions() }
+        for (action, value) in [
+            (#selector(HexEditorActions.setBytesPerRow(_:)), 8 as Any),
+            (#selector(HexEditorActions.setGrouping(_:)), 4 as Any),
+            (#selector(HexEditorActions.setOffsetBase(_:)), "decimal" as Any),
+            (#selector(HexEditorActions.setTextEncoding(_:)), "latin1" as Any),
+        ] {
+            let item = NSMenuItem(title: "", action: action, keyEquivalent: "")
+            item.representedObject = value
+            _ = window.firstResponder?.tryToPerform(action, with: item)
+        }
+        check(
+            quickHex?.options == targetOptions && app.hexViewPreferences.options == targetOptions,
+            "View menu hex options update focused Hex Quick View via responder chain")
+
         check(dispatch(.function(4), in: window), "F4 inside Quick View promotes to editor")
         let promoted = controller.layout.selectedItem(in: .leftPanel) as? HexEditorItem
         check(
-            promoted?.url.lastPathComponent == "raw.bin",
-            "F4 from Quick View opens HexEditorItem in the same panel")
+            promoted?.url.lastPathComponent == "raw.bin"
+                && promoted?.hexView.options == targetOptions,
+            "F4 from Quick View opens HexEditorItem in the same panel with shared hex options")
+        app.hexViewPreferences.options = HexViewOptions()
+        check(
+            quickHex?.options == HexViewOptions() && promoted?.hexView.options == HexViewOptions(),
+            "Shared hex option changes sync across open Quick View and editor")
         for item in [promoted as (any WorkspaceItem)?, standalone].compactMap({ $0 }) {
             item.willClose()
             controller.layout.remove(item.id)

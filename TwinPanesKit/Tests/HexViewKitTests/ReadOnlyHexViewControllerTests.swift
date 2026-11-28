@@ -126,7 +126,7 @@ private struct LocalFileSystem: FileSystem {
         return matches
     }
 
-    @Test func factoryConfiguresReadOnlyFontsAndAutoFit() {
+    @Test func factoryConfiguresReadOnlyFontsAndDefaultOptions() {
         let sessions = SessionRegistry()
         let factory = SessionHexViewerFactory(sessions: sessions)
 
@@ -135,8 +135,8 @@ private struct LocalFileSystem: FileSystem {
 
         #expect(regular != nil)
         #expect(compact != nil)
-        #expect(regular?.hexView.options.bytesPerRow == .autoFit)
-        #expect(compact?.hexView.options.bytesPerRow == .autoFit)
+        #expect(regular?.hexView.options == HexViewOptions())
+        #expect(compact?.hexView.options == HexViewOptions())
         #expect(regular?.hexView.font.pointSize == 13)
         #expect(compact?.hexView.font.pointSize == 11)
         #expect(regular?.hexView.accessibilityIdentifier() == "readOnlyHexView")
@@ -144,6 +144,46 @@ private struct LocalFileSystem: FileSystem {
             regular?.hexView.delegate?.hexView(
                 regular!.hexView, overwrite: Data([0xAA]), at: 0, column: .hex, cursorAfter: 0)
                 == false)
+    }
+
+    @Test func viewOptionActionsValidateAndSyncAcrossViewers() {
+        let sessions = SessionRegistry()
+        let preferences = HexViewPreferences()
+        let factory = SessionHexViewerFactory(sessions: sessions, preferences: preferences)
+        let first = factory.makeHexViewer(style: .regular) as! ReadOnlyHexViewController
+        let second = factory.makeHexViewer(style: .regular) as! ReadOnlyHexViewController
+        _ = (first.view, second.view)
+
+        func menuItem(_ action: Selector, _ value: Any) -> NSMenuItem {
+            let item = NSMenuItem(title: "", action: action, keyEquivalent: "")
+            item.representedObject = value
+            return item
+        }
+
+        let bpr32 = menuItem(#selector(ReadOnlyHexViewController.setBytesPerRow(_:)), 32)
+        let fit = menuItem(#selector(ReadOnlyHexViewController.setBytesPerRow(_:)), 0)
+        let grp4 = menuItem(#selector(ReadOnlyHexViewController.setGrouping(_:)), 4)
+        let dec = menuItem(#selector(ReadOnlyHexViewController.setOffsetBase(_:)), "decimal")
+        let latin1 = menuItem(#selector(ReadOnlyHexViewController.setTextEncoding(_:)), "latin1")
+
+        first.setBytesPerRow(bpr32)
+        #expect(first.hexView.options.bytesPerRow == .fixed(32))
+        #expect(first.validateMenuItem(bpr32) && bpr32.state == .on && fit.state == .off)
+
+        first.setBytesPerRow(fit)
+        first.setGrouping(grp4)
+        first.setOffsetBase(dec)
+        first.setTextEncoding(latin1)
+        let expected = HexViewOptions(
+            bytesPerRow: .autoFit, grouping: 4, offsetBase: .decimal, textEncoding: .latin1)
+        #expect(first.hexView.options == expected && second.hexView.options == expected)
+        #expect(preferences.options == expected)
+        for item in [fit, grp4, dec, latin1] {
+            #expect(first.validateMenuItem(item) && item.state == .on)
+        }
+
+        first.hexView.isHidden = true
+        for item in [bpr32, grp4, dec, latin1] { #expect(!first.validateMenuItem(item)) }
     }
 
     @Test func retargetingAcrossThousandFilesCreatesZeroSessionsAndLeaksNoFDs() async throws {

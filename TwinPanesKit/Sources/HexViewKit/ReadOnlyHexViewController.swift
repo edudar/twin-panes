@@ -25,6 +25,7 @@ public final class ReadOnlyHexViewController: NSViewController, HexPreviewing, H
 
     private let sessions: SessionRegistry
     private let cloudDownloads: any CloudDownloads
+    let preferences: HexViewPreferences?
     nonisolated private let generation = Mutex<UInt64>(0)
     private let ioQueue = DispatchQueue(
         label: "TwinPanes.ReadOnlyHexViewController.io", qos: .userInitiated)
@@ -43,14 +44,16 @@ public final class ReadOnlyHexViewController: NSViewController, HexPreviewing, H
     public init(
         style: HexViewerStyle,
         sessions: SessionRegistry,
-        cloudDownloads: any CloudDownloads = RealCloudDownloads()
+        cloudDownloads: any CloudDownloads = RealCloudDownloads(),
+        preferences: HexViewPreferences? = nil
     ) {
         self.sessions = sessions
         self.cloudDownloads = cloudDownloads
+        self.preferences = preferences
         self.downloadButton = NSButton(title: "Download", target: nil, action: nil)
         self.placeholderStack = NSStackView(views: [placeholderLabel, downloadButton])
         super.init(nibName: nil, bundle: nil)
-        hexView.options.bytesPerRow = .autoFit
+        hexView.options = preferences?.options ?? HexViewOptions()
         hexView.font = .monospacedSystemFont(ofSize: style == .regular ? 13 : 11, weight: .regular)
         hexView.delegate = self
         hexView.dataSource = self
@@ -67,6 +70,7 @@ public final class ReadOnlyHexViewController: NSViewController, HexPreviewing, H
         placeholderStack.spacing = 12
         placeholderStack.isHidden = true
         sessions.observe(self) { [weak self] session in self?.sessionDidRegister(session) }
+        preferences?.observe(self) { [weak self] options in self?.hexView.options = options }
     }
 
     @available(*, unavailable)

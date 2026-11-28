@@ -268,4 +268,34 @@ final class GatedBytes: ByteReading, Sendable {
         let closeFind = menuItem(#selector(HexEditorViewController.editorCloseFind(_:)))
         #expect(!controller.validateMenuItem(closeFind))
     }
+
+    @Test func sharedPreferencesSyncBetweenEditorAndReadOnlyViewer() throws {
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data([1, 2, 3, 4]).write(to: url)
+        let preferences = HexViewPreferences()
+        let editor = try HexEditorItem(url: url, preferences: preferences)
+        _ = editor.controller.view
+        let viewer = ReadOnlyHexViewController(
+            style: .regular, sessions: SessionRegistry(), preferences: preferences)
+        _ = viewer.view
+
+        let bpr8 = NSMenuItem(
+            title: "", action: #selector(HexEditorViewController.setBytesPerRow(_:)),
+            keyEquivalent: "")
+        bpr8.representedObject = 8
+        editor.controller.setBytesPerRow(bpr8)
+        #expect(viewer.hexView.options.bytesPerRow == .fixed(8))
+
+        let grp4 = NSMenuItem(
+            title: "", action: #selector(ReadOnlyHexViewController.setGrouping(_:)),
+            keyEquivalent: "")
+        grp4.representedObject = 4
+        viewer.setGrouping(grp4)
+        #expect(editor.hexView.options.grouping == 4)
+
+        let secondEditor = try HexEditorItem(url: url, preferences: preferences)
+        _ = secondEditor.controller.view
+        #expect(secondEditor.hexView.options.bytesPerRow == .fixed(8))
+        #expect(secondEditor.hexView.options.grouping == 4)
+    }
 }

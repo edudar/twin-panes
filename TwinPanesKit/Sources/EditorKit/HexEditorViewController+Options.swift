@@ -7,12 +7,14 @@ extension HexEditorViewController: NSMenuItemValidation {
     @objc func setBytesPerRow(_ sender: Any?) {
         guard let value = (sender as? NSMenuItem)?.representedObject as? Int else { return }
         hexView.options.bytesPerRow = value == 0 ? .autoFit : .fixed(value)
+        preferences?.options = hexView.options
         view.window?.invalidateRestorableState()
     }
 
     @objc func setGrouping(_ sender: Any?) {
         guard let value = (sender as? NSMenuItem)?.representedObject as? Int else { return }
         hexView.options.grouping = value
+        preferences?.options = hexView.options
         view.window?.invalidateRestorableState()
     }
 
@@ -21,6 +23,7 @@ extension HexEditorViewController: NSMenuItemValidation {
             let base = HexViewOptions.OffsetBase(rawValue: raw)
         else { return }
         hexView.options.offsetBase = base
+        preferences?.options = hexView.options
         view.window?.invalidateRestorableState()
     }
 
@@ -29,6 +32,7 @@ extension HexEditorViewController: NSMenuItemValidation {
             let encoding = HexViewOptions.TextEncoding(rawValue: raw)
         else { return }
         hexView.options.textEncoding = encoding
+        preferences?.options = hexView.options
         view.window?.invalidateRestorableState()
     }
 

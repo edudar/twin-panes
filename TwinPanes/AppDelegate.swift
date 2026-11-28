@@ -40,8 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     lazy var fileOperations = FileOperationCommands(grants: folderGrants) { [unowned self] in
         self.windowControllers
     }
+    /// Shared hex display options across editors and Quick Views; isolated in smoke/bench runs.
+    lazy var hexViewPreferences = HexViewPreferences(defaults: preferences)
     /// Factory for read-only hex previews sharing live sessions (`docs/plans/M7.md`, D-a).
-    lazy var viewerFactory = SessionHexViewerFactory(sessions: sessions)
+    lazy var viewerFactory = SessionHexViewerFactory(
+        sessions: sessions, preferences: hexViewPreferences)
     /// Maps each following `QuickViewItem.id` to the `BrowserItem.id` it follows.
     var quickViewSources: [ItemID: ItemID] = [:]
 
@@ -144,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             let (session, _) = try? sessions.open(url, scope: SecurityScope(url: url)),
             editorItem(showing: session) == nil
         else { return nil }
-        let item = HexEditorItem(session: session)
+        let item = HexEditorItem(session: session, preferences: hexViewPreferences)
         item.didSaveAs = { [weak self] url in self?.recentFiles.note(url) }
         item.restoreView(saved)
         return item
@@ -214,7 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @discardableResult
     func showRecovered(_ recovered: [EditorSession]) -> [HexEditorItem] {
         recovered.map { session in
-            let item = HexEditorItem(session: session)
+            let item = HexEditorItem(session: session, preferences: hexViewPreferences)
             item.didSaveAs = { [weak self] url in self?.recentFiles.note(url) }
             show(item)
             return item
@@ -546,7 +549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 controller.window?.makeKeyAndOrderFront(nil)
                 return item
             }
-            let item = HexEditorItem(session: session)
+            let item = HexEditorItem(session: session, preferences: hexViewPreferences)
             item.didSaveAs = { [weak self] url in self?.recentFiles.note(url) }
             show(item, in: target, slot: slot)
             return item

@@ -31,6 +31,7 @@ import WorkspaceKit
 @MainActor
 final class HexEditorViewController: NSViewController, CommandScopeProviding, HexViewDelegate {
     weak var item: HexEditorItem?
+    let preferences: HexViewPreferences?
     let hexView = HexView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
     let findBar = FindBarView(frame: NSRect(x: 0, y: 0, width: 600, height: 32))
     let inspector = InspectorView(frame: NSRect(x: 0, y: 0, width: 280, height: 400))
@@ -77,9 +78,18 @@ final class HexEditorViewController: NSViewController, CommandScopeProviding, He
 
     enum OutsideChangeChoice { case keepMine, reload, saveAs }
 
-    init(item: HexEditorItem) {
+    init(item: HexEditorItem, preferences: HexViewPreferences? = nil) {
         self.item = item
+        self.preferences = preferences
         super.init(nibName: nil, bundle: nil)
+        if let preferences {
+            hexView.options = preferences.options
+            preferences.observe(self) { [weak self] options in
+                guard let self else { return }
+                self.hexView.options = options
+                self.viewIfLoaded?.window?.invalidateRestorableState()
+            }
+        }
     }
 
     @available(*, unavailable)

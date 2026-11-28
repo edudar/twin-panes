@@ -300,6 +300,9 @@ final class QuickViewViewController: NSViewController, CommandScopeProviding, NS
 
     @objc private func modeChanged(_ sender: NSSegmentedControl) {
         item?.selectMode(sender.selectedSegment == 1 ? .hex : .quickLook)
+        if let responder = preferredResponder {
+            view.window?.makeFirstResponder(responder)
+        }
     }
 
     @objc private func pinClicked(_ sender: NSButton) {
