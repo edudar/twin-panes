@@ -912,7 +912,6 @@ private final class FrontItemHost: WorkspaceHost {
 }
 
 @MainActor
-@MainActor
 final class SidebarSplitView: NSSplitView {
     /// Clips the trailing preview-pane divider so it starts below the unified toolbar
     /// rather than cutting through the titlebar; the leading sidebar divider stays full height.
