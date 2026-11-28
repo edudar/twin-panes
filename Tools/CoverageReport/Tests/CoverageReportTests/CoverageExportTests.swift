@@ -3,9 +3,26 @@ import Foundation
 import Testing
 
 /// Five files from a real `llvm-cov export` of TwinPanesKit, paths rewritten under
-/// `/checkout`.
+/// `/checkout`: fully covered, partly covered, and never-run code.
 private func fixtureExport() throws -> CoverageExport {
     try CoverageExport(json: Data(contentsOf: fixtureURL("export.json")))
+}
+
+/// `llvm-cov show -format=text` for the same five files, cut to `line|count` rows under
+/// a `path:` header. An empty count means the line is not code.
+private func fixtureShowCounts() throws -> [String: [UInt64?]] {
+    let text = try String(contentsOf: fixtureURL("show-counts.txt"), encoding: .utf8)
+    var counts: [String: [UInt64?]] = [:]
+    var path = ""
+    for row in text.split(separator: "\n") {
+        if row.hasSuffix(":") {
+            path = String(row.dropLast())
+            continue
+        }
+        let count = row.split(separator: "|", omittingEmptySubsequences: false)[1]
+        counts[path, default: []].append(UInt64(count))
+    }
+    return counts
 }
 
 private func fixtureURL(_ name: String) throws -> URL {
@@ -32,6 +49,17 @@ private func exportJSON(
         pathField.segments.first
             == CoverageSegment(line: 7, column: 39, count: 0, hasCount: true, isRegionEntry: true))
     #expect(pathField.segments.count == 2)
+}
+
+@Test func computedLinesMatchLlvmCovsOwnLineCounts() throws {
+    let showCounts = try fixtureShowCounts()
+    for file in try fixtureExport().files {
+        let expected = try #require(showCounts[file.path])
+
+        let lines = LineCoverage.lines(from: file.segments, lineCount: expected.count)
+
+        #expect(lines.map(\.count) == expected, "\(file.path)")
+    }
 }
 
 @Test func rejectsAnExportOfAnotherFormatVersion() {
