@@ -75,6 +75,13 @@ public enum StructuredPreviewLoader {
             notice = nil
         }
 
+        if pretty && format == .json {
+            let formatted = JSONFormatter.format(text, pretty: true, isTruncated: isTruncated)
+            return StructuredDocument(
+                text: formatted.text, tokens: formatted.tokens,
+                isPrettified: formatted.isPrettified, isTruncated: isTruncated,
+                notice: isTruncated ? notice : formatted.notice)
+        }
         let tokens = (pretty && format == .properties) ? PropertiesTokenizer.tokenize(text) : []
         return StructuredDocument(
             text: text, tokens: tokens, isPrettified: false, isTruncated: isTruncated,
