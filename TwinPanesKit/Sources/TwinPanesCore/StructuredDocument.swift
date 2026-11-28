@@ -91,7 +91,13 @@ public enum StructuredPreviewLoader {
                 isPrettified: formatted.isPrettified, isTruncated: isTruncated,
                 notice: formatted.notice ?? notice)
         }
-        let tokens = (pretty && format == .properties) ? PropertiesTokenizer.tokenize(text) : []
+        let tokens: [SyntaxToken] =
+            switch (pretty, format) {
+            case (true, .properties): PropertiesTokenizer.tokenize(text)
+            case (true, .yaml): YAMLTokenizer.tokenize(text)
+            case (true, .toml): TOMLTokenizer.tokenize(text)
+            default: []
+            }
         return StructuredDocument(
             text: text, tokens: tokens, isPrettified: false, isTruncated: isTruncated,
             notice: notice)
