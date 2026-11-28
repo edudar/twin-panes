@@ -138,7 +138,7 @@ private struct NoCloneFileSystem: FileSystem {
         let made = try #require(session.folder)
         try SaveJournal.begin(
             made.file(SaveJournal.fileName), file: url, identity: FileIdentity(url: url),
-            ranges: [6..<7], fileSystem: RealFileSystem())
+            ranges: [6..<7], newLength: 64, fileSystem: RealFileSystem())
         let handle = try FileHandle(forWritingTo: url)  // the write, then the "crash"
         try handle.seek(toOffset: 6)
         try handle.write(contentsOf: Data([0xBB]))
@@ -148,6 +148,29 @@ private struct NoCloneFileSystem: FileSystem {
         let recovered = try EditorSession(recovering: SessionFolder(url: copy))
         #expect(try Data(contentsOf: url)[6] == 6)  // rolled back
         #expect(try recovered.snapshot.read(5..<7) == Data([0xAA, 0xBB]) && recovered.isDirty)
+    }
+
+    /// Inserts and deletes in a hard-linked file save in place, reading the clone: the
+    /// file and its other link hold the new bytes, the inode stays, and undo brings the
+    /// opened bytes back with the next save.
+    @Test func hardLinkedFilesSaveChangesOfLengthInPlace() async throws {
+        defer { cleanUp() }
+        let link = folder.appendingPathComponent("link.bin")
+        try FileManager.default.linkItem(at: url, to: link)
+        let opened = try FileIdentity(url: url)
+        let session = try session()
+        try session.replace(
+            0..<0, with: Data([0xAA, 0xBB]), selectionBefore: 0..<1, selectionAfter: 2..<3)
+        try session.replace(
+            30..<40, with: Data(), selectionBefore: 30..<40, selectionAfter: 30..<31)
+        try await session.save()
+        let wanted = try session.snapshot.read(0..<56)
+        #expect(try Data(contentsOf: url) == wanted && Data(contentsOf: link) == wanted)
+        #expect(session.identity.key == opened.key && session.identity.size == 56)
+        _ = session.undo()
+        _ = session.undo()
+        try await session.save()
+        #expect(try Data(contentsOf: link) == Data((0..<64).map { UInt8($0) }))
     }
 
     /// Narrowed (no clone): edits and saves work, but nothing is journaled and the folder

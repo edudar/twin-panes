@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import TwinPanesCore
 
 @Suite struct SaveJournalTests {
@@ -15,7 +16,8 @@ import Testing
     func seed(_ n: Int = 64, _ r: Range<UInt64> = 4..<12) throws -> Data {
         let d = Data((0..<n).map { UInt8(truncatingIfNeeded: $0 &* 31) }); try d.write(to: url)
         try SaveJournal.begin(
-            j, file: url, identity: FileIdentity(url: url), ranges: [r], fileSystem: fs)
+            j, file: url, identity: FileIdentity(url: url), ranges: [r], newLength: UInt64(n),
+            fileSystem: fs)
         return d
     }
     func roll(_ c: (any FileSystem)? = nil, to: URL? = nil) throws -> Bool {
@@ -50,12 +52,61 @@ import Testing
         let made = try #require(s.folder)
         try SaveJournal.begin(
             made.file(SaveJournal.fileName), file: url, identity: FileIdentity(url: url),
-            ranges: [5..<6], fileSystem: fs)
+            ranges: [5..<6], newLength: 64, fileSystem: fs)
         var p = try disk(); p[5] = 0xAA; try p.write(to: url)
         try fm.copyItem(at: made.url, to: f("c")); s.close()
         let r = try EditorSession(recovering: SessionFolder(url: f("c")))
         #expect(r.identity == (try FileIdentity(url: url)) && r.identity.linkCount == 2)
         try await r.save()
         #expect(try disk()[5..<6] == Data([0xAA]) && disk(l)[5..<6] == Data([0xAA]))
+    }
+
+    /// A crash after an in-place save grew the file: rollback cuts it back.
+    @Test func rollbackUndoesAGrowth() throws {
+        defer { try? fm.removeItem(at: folder) }
+        let old = Data((0..<64).map { UInt8($0) })
+        try old.write(to: url)
+        try SaveJournal.begin(
+            j, file: url, identity: FileIdentity(url: url), ranges: [10..<100], newLength: 100,
+            fileSystem: fs)
+        try (old.prefix(10) + Data(repeating: 0xEE, count: 90)).write(to: url)  // the writes
+        #expect(try roll() && disk() == old && !hasJ)
+    }
+
+    /// A crash after an in-place save shrank the file: the bytes past the new end come back
+    /// from the journal although the plan wrote none of them.
+    @Test func rollbackUndoesAShrink() throws {
+        defer { try? fm.removeItem(at: folder) }
+        let old = Data((0..<64).map { UInt8($0) })
+        try old.write(to: url)
+        try SaveJournal.begin(
+            j, file: url, identity: FileIdentity(url: url), ranges: [], newLength: 40,
+            fileSystem: fs)
+        try old.prefix(40).write(to: url)
+        #expect(try roll() && disk() == old && !hasJ)
+    }
+
+    /// A journal an earlier build wrote (`TPSJ`, no length) still rolls back its bytes.
+    @Test func anEarlierJournalStillRollsBack() throws {
+        defer { try? fm.removeItem(at: folder) }
+        let old = Data((0..<64).map { UInt8($0) })
+        try old.write(to: url)
+        let identity = try FileIdentity(url: url)
+        var body = Array("TPSJ".utf8)
+        let path = Array(url.path.utf8)
+        JournalFormat.append(UInt32(path.count), to: &body)
+        body += path
+        JournalFormat.append(identity.key.device, to: &body)
+        JournalFormat.append(identity.key.inode, to: &body)
+        JournalFormat.append(UInt32(1), to: &body)
+        JournalFormat.append(UInt64(8), to: &body)
+        JournalFormat.append(UInt64(4), to: &body)
+        body += old[8..<12]
+        JournalFormat.append(JournalFormat.crc32c(body), to: &body)
+        try Data(body).write(to: j)
+        var changed = old
+        changed.replaceSubrange(8..<12, with: [0xEE, 0xEE, 0xEE, 0xEE])
+        try changed.write(to: url)
+        #expect(try roll() && disk() == old && !hasJ)
     }
 }

@@ -6,28 +6,37 @@ import Foundation
 /// journal deleted. A journal found without its mark means a save stopped half way, and
 /// the file is rolled back from it.
 ///
-/// Layout: `"TPSJ" · path · device · inode · count · (offset, length, old bytes)…` and a
-/// CRC32C of all that, then `"DONE"` once committed.
+/// Layout: `"TPS2" · path · device · inode · old length · count · (offset, length, old
+/// bytes)…` and a CRC32C of all that, then `"DONE"` once committed. Journals written before
+/// M8 start `"TPSJ"` and have no old length: the save they guard kept the length.
 public enum SaveJournal {
     /// Its name in a session folder.
     public static let fileName = "save-journal.bin"
-    static let magic = Array("TPSJ".utf8)
+    static let magic = Array("TPS2".utf8)
+    /// The format before saves in place could change a file's length (M3c to M7).
+    static let lengthlessMagic = Array("TPSJ".utf8)
     static let commitMark = Data("DONE".utf8)
 
-    /// Writes the journal for writing `ranges` of `url` (as `identity`) in place.
+    /// Writes the journal for writing `ranges` of `url` (as `identity`) in place and
+    /// leaving it `newLength` long: the old bytes of each range inside the file, those a
+    /// shorter file loses at its end, and the old length (docs/plans/M8.md, D-d).
     static func begin(
         _ journal: URL, file url: URL, identity: FileIdentity, ranges: [Range<UInt64>],
-        fileSystem: any FileSystem
+        newLength: UInt64, fileSystem: any FileSystem
     ) throws {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
+        let oldLength = identity.size
+        var kept = ranges.map { $0.clamped(to: 0..<oldLength) }.filter { !$0.isEmpty }
+        if newLength < oldLength { kept.append(newLength..<oldLength) }
         var body = magic
         let path = Array(url.path.utf8)
         JournalFormat.append(UInt32(path.count), to: &body)
         body += path
         JournalFormat.append(identity.key.device, to: &body)
         JournalFormat.append(identity.key.inode, to: &body)
-        JournalFormat.append(UInt32(ranges.count), to: &body)
+        JournalFormat.append(oldLength, to: &body)
+        JournalFormat.append(UInt32(kept.count), to: &body)
         fileSystem.removeItem(at: journal)
         let descriptor = try fileSystem.create(journal)
         var done = false
@@ -39,7 +48,7 @@ public enum SaveJournal {
             offset += UInt64(part.count)
         }
         try emit(Data(body), hash: false)
-        for range in ranges {
+        for range in kept {
             let count = range.upperBound - range.lowerBound
             var entry: [UInt8] = []; JournalFormat.append(range.lowerBound, to: &entry)
             JournalFormat.append(count, to: &entry); try emit(Data(entry))
@@ -63,7 +72,8 @@ public enum SaveJournal {
     }
 
     /// If `journal` holds a save that didn't commit, writes the old bytes back into its
-    /// file (`targetURL` or stored path, when still the same file) and returns true.
+    /// file (`targetURL` or stored path, when still the same file), cuts it back to its
+    /// old length, and returns true.
     @discardableResult
     public static func rollBackIfNeeded(
         _ journal: URL, targetURL: URL? = nil, fileSystem: any FileSystem
@@ -84,13 +94,19 @@ public enum SaveJournal {
             if hash { crc = JournalFormat.crc32c(c, seed: crc, finish: false) }
             at += UInt64(n); return c
         }
-        guard let head = try next(8), Array(head[0..<4]) == magic else { return drop() }
+        guard let head = try next(8) else { return drop() }
+        let keepsLength = Array(head[0..<4]) == magic
+        guard keepsLength || Array(head[0..<4]) == lengthlessMagic else { return drop() }
         let pathLen = Int(JournalFormat.read(UInt32.self, head, 4))
-        guard pathLen <= 1 << 20, let meta = try next(pathLen + 16) else { return drop() }
+        let lengthSize = keepsLength ? 8 : 0
+        guard pathLen <= 1 << 20, let meta = try next(pathLen + 16 + lengthSize) else {
+            return drop()
+        }
         let key = FileIdentity.Key(
             device: JournalFormat.read(Int32.self, meta, pathLen),
             inode: JournalFormat.read(UInt64.self, meta, pathLen + 4))
-        let count = UInt64(JournalFormat.read(UInt32.self, meta, pathLen + 12))
+        let oldLength = keepsLength ? JournalFormat.read(UInt64.self, meta, pathLen + 12) : nil
+        let count = UInt64(JournalFormat.read(UInt32.self, meta, pathLen + 12 + lengthSize))
         guard count <= (total - at) / 16 else { return drop() }
         var ranges: [(UInt64, UInt64, UInt64)] = []
         for _ in 0..<count {
@@ -117,6 +133,7 @@ public enum SaveJournal {
                 try fileSystem.write(chunk, to: descriptor, at: offset + done, path: url.path)
             }
         }
+        if let oldLength { try fileSystem.truncate(descriptor, to: oldLength, path: url.path) }
         try fileSystem.fullSync(descriptor, path: url.path)
         fileSystem.removeItem(at: journal); return true
     }

@@ -41,7 +41,9 @@ public struct Saver: Sendable {
     /// Writes `plan`'s ranges of `version` over the file at `url` and returns the file's
     /// new identity (a replace gives it a new inode). A hard-linked file is written in
     /// place (strategy B) when `inPlaceJournal` says where its save journal goes and the
-    /// plan has ranges and keeps the length; otherwise it's refused.
+    /// plan isn't the whole file; otherwise it's refused. In place, `version` must not
+    /// read `url` itself (the session reads its clone): a write would change bytes it has
+    /// yet to read, which a change of length moves.
     public func save(
         _ version: some ByteReading, plan: SavePlan, to url: URL, inPlaceJournal: URL? = nil
     ) throws
@@ -49,11 +51,7 @@ public struct Saver: Sendable {
     {
         let identity = try FileIdentity(url: url)
         guard identity.linkCount <= 1 else {
-            // The save journal can put old bytes back but not an old length
-            // (docs/plans/M8.md, D-d, lands in step 4).
-            guard let journal = inPlaceJournal, !plan.writesWholeFile,
-                plan.length == identity.size
-            else {
+            guard let journal = inPlaceJournal, !plan.writesWholeFile else {
                 throw SaveError.hardLinked
             }
             return try saveInPlace(version, plan: plan, to: url, as: identity, journal: journal)
@@ -89,7 +87,8 @@ public struct Saver: Sendable {
         journal: URL
     ) throws -> FileIdentity {
         try SaveJournal.begin(
-            journal, file: url, identity: identity, ranges: plan.ranges, fileSystem: fileSystem)
+            journal, file: url, identity: identity, ranges: plan.ranges,
+            newLength: plan.length, fileSystem: fileSystem)
         var writesFlushed = false
         do {
             let descriptor = try fileSystem.openForWriting(url)

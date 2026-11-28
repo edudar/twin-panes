@@ -205,19 +205,65 @@ struct SaverTests {
         }
     }
 
-    /// The save journal can't put an old length back yet (docs/plans/M8.md, step 4), so
-    /// a hard-linked file refuses a save that changes its length and stays as it was.
-    @Test func refusesToChangeTheLengthOfAHardLinkedFile() throws {
+    /// A copy of the file for an edit buffer to read, as the session reads its clone: an
+    /// in-place save must not read the bytes it overwrites.
+    func copyOfTheFile() throws -> URL {
+        let copy = folder.appendingPathComponent("clone-\(UUID())")
+        try FileManager.default.copyItem(at: url, to: copy)
+        return copy
+    }
+
+    /// A hard-linked file saves changes of length in place too: it grows, shrinks and
+    /// takes an insert at its start, keeping its inode and its other link.
+    @Test func savesLengthChangesOfAHardLinkedFileInPlace() throws {
+        defer { cleanUp() }
+        let link = folder.appendingPathComponent("link")
+        try FileManager.default.linkItem(at: url, to: link)
+        let key = try FileIdentity(url: url).key
+        let journal = folder.appendingPathComponent("save-journal.bin")
+        let edits: [(Range<UInt64>, Data)] = [
+            (1_200_000..<1_200_000, Data(repeating: 0xAB, count: 300)),  // grows
+            (1_000..<1_100_300, Data()),  // shrinks
+            (0..<0, Data([1, 2, 3])),  // an insert at the start
+        ]
+        for (range, bytes) in edits {
+            let buffer = try EditBuffer(
+                original: ByteSource(url: copyOfTheFile()),
+                addDirectory: folder.appendingPathComponent("add-\(UUID())"))
+            let opened = buffer.tree
+            try buffer.replace(range, with: bytes)
+            let plan = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: true)
+            let identity = try Saver().save(
+                buffer.snapshot(), plan: plan, to: url, inPlaceJournal: journal)
+            let wanted = try buffer.snapshot().read(0..<buffer.length)
+            #expect(try Data(contentsOf: url) == wanted && Data(contentsOf: link) == wanted)
+            #expect(
+                identity.key == key && identity.linkCount == 2 && identity.size == buffer.length)
+            #expect(!FileManager.default.fileExists(atPath: journal.path))
+        }
+    }
+
+    /// A failed in-place save that changed the length is rolled back to the old bytes and
+    /// the old length, whether it grew or shrank the file.
+    @Test(arguments: [true, false])
+    func aFailedInPlaceSaveRestoresTheLength(grows: Bool) throws {
         defer { cleanUp() }
         try FileManager.default.linkItem(at: url, to: folder.appendingPathComponent("link"))
         let buffer = try EditBuffer(
-            original: ByteSource(url: url), addDirectory: folder.appendingPathComponent("add"))
+            original: ByteSource(url: copyOfTheFile()),
+            addDirectory: folder.appendingPathComponent("add"))
         let opened = buffer.tree
-        buffer.restore(opened.removing(1_199_000..<1_200_000))
+        if grows {
+            try buffer.replace(10..<10, with: Data(repeating: 0xAB, count: 5_000))
+        } else {
+            try buffer.replace(10..<900_000, with: Data())
+        }
         let plan = SavePlan(saved: opened, current: buffer.tree, diskMatchesSaved: true)
         let journal = folder.appendingPathComponent("save-journal.bin")
-        #expect(throws: Saver.SaveError.hardLinked) {
-            try Saver().save(buffer.snapshot(), plan: plan, to: url, inPlaceJournal: journal)
+        // Flush 1 is the journal's, flush 2 the file's.
+        #expect(throws: FileSystemError.self) {
+            try Saver(fileSystem: FaultyFileSystem(failSyncAt: 2)).save(
+                buffer.snapshot(), plan: plan, to: url, inPlaceJournal: journal)
         }
         #expect(try Data(contentsOf: url) == original)
         #expect(!FileManager.default.fileExists(atPath: journal.path))
@@ -243,7 +289,7 @@ struct SaverTests {
         let fs = RealFileSystem()
         try SaveJournal.begin(
             journal, file: url, identity: try FileIdentity(url: url), ranges: plan.ranges,
-            fileSystem: fs)
+            newLength: plan.length, fileSystem: fs)
         let handle = try FileHandle(forWritingTo: url)
         try handle.write(contentsOf: Data(repeating: 0xEE, count: 1_200_000))
         try handle.close()
@@ -255,7 +301,7 @@ struct SaverTests {
         // A journal cut short never got to the writes: nothing to undo.
         try SaveJournal.begin(
             journal, file: url, identity: try FileIdentity(url: url), ranges: plan.ranges,
-            fileSystem: fs)
+            newLength: plan.length, fileSystem: fs)
         try FileHandle(forWritingTo: journal).truncate(atOffset: 20)
         let untouched = try Data(contentsOf: url)
         #expect(try !SaveJournal.rollBackIfNeeded(journal, fileSystem: fs))
